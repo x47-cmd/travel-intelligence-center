@@ -1,15 +1,17 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V2.0.0
+   Trips Page Module V3.0.0
 
    File Path:
    js/pages/trips.js
 
    Purpose:
-   - Premium iPhone-first trip management center.
-   - Clean executive overview, filters, cards and details.
-   - Full create, edit, duplicate, delete and status flow.
-   - Uses TIC Store, TIC Router, TIC UI and Trip Form.
+   - Complete redesign of "رحلاتي" as a personal travel hub.
+   - Separates upcoming, ongoing, memories and visited countries.
+   - Supports adding old trips without forcing full booking details.
+   - Automatically includes completed future trips in travel memories.
+   - Preserves current Store / Router / UI / Trip Form integrations.
+   - Injects scoped styles so the page is complete from one file.
 
    Dependencies:
    - js/config.js
@@ -27,20 +29,24 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "2.0.0";
+  const PAGE_VERSION = "3.0.0";
+  const STYLE_ID = "tic-trips-v3-styles";
 
   const state = {
     initialized: false,
     mounted: false,
     container: null,
-    activeView: "list",
+    activeView: "hub",
+    activeTab: "upcoming",
     activeTripId: null,
+    filtersOpen: false,
     filters: {
       search: "",
       status: "all",
       type: "all",
       sort: "start-asc"
     },
+    memoryDraft: null,
     unsubscribeStore: null,
     actionUnsubscribers: [],
     subscribers: new Set(),
@@ -51,18 +57,9 @@
     planning: "قيد التخطيط",
     booked: "تم الحجز",
     ready: "جاهزة للسفر",
-    ongoing: "جارية",
+    ongoing: "جارية الآن",
     completed: "مكتملة",
     cancelled: "ملغاة"
-  };
-
-  const STATUS_TONES = {
-    planning: "neutral",
-    booked: "info",
-    ready: "success",
-    ongoing: "warning",
-    completed: "success",
-    cancelled: "danger"
   };
 
   const TYPE_LABELS = {
@@ -76,11 +73,19 @@
 
   const SORT_OPTIONS = [
     { value: "start-asc", label: "الأقرب أولاً" },
-    { value: "start-desc", label: "الأبعد أولاً" },
+    { value: "start-desc", label: "الأحدث تاريخاً" },
     { value: "created-desc", label: "الأحدث إضافة" },
     { value: "budget-desc", label: "الأعلى ميزانية" },
     { value: "title-asc", label: "الاسم أبجدياً" }
   ];
+
+  const TAB_LABELS = {
+    upcoming: "القادمة",
+    ongoing: "الجارية",
+    memories: "الذكريات",
+    countries: "الدول",
+    all: "الكل"
+  };
 
   const isObject = (value) =>
     value !== null &&
@@ -94,7 +99,7 @@
       try {
         return structuredClone(value);
       } catch (error) {
-        // Continue to fallback.
+        // Continue to JSON fallback.
       }
     }
 
@@ -105,6 +110,14 @@
     }
   };
 
+  const text = (value) =>
+    String(value ?? "").trim();
+
+  const number = (value, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
   const escapeHTML = (value) =>
     String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -113,37 +126,29 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
 
-  const text = (value) =>
-    String(value ?? "").trim();
-
-  const number = (value, fallback = 0) => {
-    const result = Number(value);
-    return Number.isFinite(result) ? result : fallback;
-  };
-
   const toDate = (value) => {
     if (!value) return null;
 
-    const result =
+    const parsed =
       value instanceof Date
         ? value
         : new Date(value);
 
-    return Number.isNaN(result.getTime())
+    return Number.isNaN(parsed.getTime())
       ? null
-      : result;
+      : parsed;
   };
 
   const startOfDay = (value) => {
-    const result = new Date(value);
-    result.setHours(0, 0, 0, 0);
-    return result;
+    const parsed = new Date(value);
+    parsed.setHours(0, 0, 0, 0);
+    return parsed;
   };
 
-  const createId = () =>
-    `trip_${Date.now()}_${Math.random()
+  const createId = (prefix = "trip") =>
+    `${prefix}_${Date.now()}_${Math.random()
       .toString(36)
-      .slice(2, 8)}`;
+      .slice(2, 9)}`;
 
   const getStore = () =>
     window.TIC?.Store ||
@@ -207,6 +212,818 @@
     return payload;
   };
 
+  const ensureStyles = () => {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      [data-page="trips"][data-page-version="3.0.0"] {
+        --trips-navy: #061b38;
+        --trips-teal: #0f8f83;
+        --trips-teal-dark: #08756d;
+        --trips-mint: #e8f7f4;
+        --trips-soft: #f6f9fc;
+        --trips-line: #dce5ef;
+        --trips-muted: #75839b;
+        --trips-gold: #bf7d13;
+        --trips-shadow: 0 18px 45px rgba(16, 40, 70, .09);
+        color: var(--trips-navy);
+        padding-bottom: 28px;
+      }
+
+      [data-page="trips"] * {
+        box-sizing: border-box;
+      }
+
+      .trips-shell {
+        display: grid;
+        gap: 22px;
+      }
+
+      .trips-hero {
+        position: relative;
+        overflow: hidden;
+        min-height: 315px;
+        padding: 28px;
+        border-radius: 34px;
+        background:
+          radial-gradient(circle at 15% 5%, rgba(255,255,255,.13) 0 120px, transparent 122px),
+          linear-gradient(140deg, #16a797 0%, #0c8079 52%, #082b50 100%);
+        color: #fff;
+        box-shadow: 0 24px 56px rgba(7, 54, 79, .20);
+      }
+
+      .trips-hero::after {
+        content: "";
+        position: absolute;
+        inset-inline-end: -65px;
+        bottom: -70px;
+        width: 245px;
+        height: 170px;
+        border-radius: 50%;
+        background: rgba(2, 19, 48, .28);
+        transform: rotate(-12deg);
+      }
+
+      .trips-hero__top,
+      .trips-hero__content,
+      .trips-hero__actions {
+        position: relative;
+        z-index: 1;
+      }
+
+      .trips-hero__eyebrow {
+        display: inline-flex;
+        align-items: center;
+        min-height: 38px;
+        padding: 0 18px;
+        border: 1px solid rgba(255,255,255,.20);
+        border-radius: 999px;
+        background: rgba(255,255,255,.10);
+        font-weight: 800;
+      }
+
+      .trips-hero h1 {
+        margin: 30px 0 8px;
+        color: #fff;
+        font-size: clamp(38px, 10vw, 58px);
+        line-height: 1.05;
+      }
+
+      .trips-hero p {
+        max-width: 520px;
+        margin: 0;
+        color: rgba(255,255,255,.82);
+        font-size: 18px;
+        line-height: 1.9;
+      }
+
+      .trips-hero__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 25px;
+      }
+
+      .trips-action {
+        min-height: 52px;
+        padding: 0 20px;
+        border: 0;
+        border-radius: 18px;
+        font: inherit;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .trips-action--primary {
+        background: #fff;
+        color: var(--trips-navy);
+      }
+
+      .trips-action--glass {
+        border: 1px solid rgba(255,255,255,.24);
+        background: rgba(255,255,255,.12);
+        color: #fff;
+      }
+
+      .trips-section {
+        display: grid;
+        gap: 14px;
+      }
+
+      .trips-section__header {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 14px;
+      }
+
+      .trips-section__eyebrow {
+        margin: 0 0 4px;
+        color: var(--trips-teal-dark);
+        font-size: 13px;
+        font-weight: 950;
+        letter-spacing: .07em;
+      }
+
+      .trips-section h2 {
+        margin: 0;
+        color: var(--trips-navy);
+        font-size: clamp(27px, 7vw, 38px);
+        line-height: 1.2;
+      }
+
+      .trips-section__subtitle {
+        margin: 6px 0 0;
+        color: var(--trips-muted);
+        line-height: 1.7;
+      }
+
+      .trips-overview {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .trips-stat {
+        min-height: 156px;
+        padding: 18px;
+        border: 1px solid var(--trips-line);
+        border-radius: 27px;
+        background: #fff;
+        box-shadow: 0 11px 28px rgba(16, 40, 70, .045);
+      }
+
+      .trips-stat__icon {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 17px;
+        background: var(--trips-mint);
+        color: var(--trips-navy);
+        font-size: 22px;
+      }
+
+      .trips-stat strong {
+        display: block;
+        margin-top: 18px;
+        font-size: 31px;
+        line-height: 1;
+      }
+
+      .trips-stat span {
+        display: block;
+        margin-top: 9px;
+        color: var(--trips-muted);
+        font-weight: 800;
+      }
+
+      .trips-tabs {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding: 5px;
+        border: 1px solid var(--trips-line);
+        border-radius: 22px;
+        background: #fff;
+        scrollbar-width: none;
+      }
+
+      .trips-tabs::-webkit-scrollbar {
+        display: none;
+      }
+
+      .trips-tab {
+        flex: 0 0 auto;
+        min-height: 46px;
+        padding: 0 18px;
+        border: 0;
+        border-radius: 17px;
+        background: transparent;
+        color: var(--trips-muted);
+        font: inherit;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .trips-tab.is-active {
+        background: var(--trips-navy);
+        color: #fff;
+        box-shadow: 0 10px 20px rgba(6, 27, 56, .18);
+      }
+
+      .trips-tools {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .trips-search {
+        flex: 1;
+        min-height: 55px;
+        padding: 0 18px;
+        border: 1px solid var(--trips-line);
+        border-radius: 18px;
+        background: #fff;
+        color: var(--trips-navy);
+        font: inherit;
+        outline: none;
+      }
+
+      .trips-search:focus {
+        border-color: rgba(15, 143, 131, .55);
+        box-shadow: 0 0 0 4px rgba(15, 143, 131, .09);
+      }
+
+      .trips-filter-toggle {
+        min-width: 55px;
+        min-height: 55px;
+        border: 1px solid var(--trips-line);
+        border-radius: 18px;
+        background: #fff;
+        color: var(--trips-navy);
+        font: inherit;
+        font-weight: 900;
+      }
+
+      .trips-filters {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        padding: 16px;
+        border: 1px solid var(--trips-line);
+        border-radius: 24px;
+        background: #fff;
+      }
+
+      .trips-field {
+        display: grid;
+        gap: 7px;
+      }
+
+      .trips-field label {
+        color: var(--trips-navy);
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      .trips-field input,
+      .trips-field select,
+      .trips-field textarea {
+        width: 100%;
+        min-height: 52px;
+        padding: 0 14px;
+        border: 1px solid var(--trips-line);
+        border-radius: 16px;
+        background: var(--trips-soft);
+        color: var(--trips-navy);
+        font: inherit;
+        outline: none;
+      }
+
+      .trips-field textarea {
+        min-height: 105px;
+        padding-top: 14px;
+        resize: vertical;
+      }
+
+      .trips-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .trip-card-v3 {
+        overflow: hidden;
+        border: 1px solid var(--trips-line);
+        border-radius: 30px;
+        background: #fff;
+        box-shadow: var(--trips-shadow);
+      }
+
+      .trip-card-v3__cover {
+        position: relative;
+        display: flex;
+        align-items: flex-end;
+        min-height: 155px;
+        padding: 20px;
+        background:
+          linear-gradient(135deg, rgba(196,246,234,.96), rgba(41,129,142,.69) 56%, rgba(7,39,68,.96));
+      }
+
+      .trip-card-v3__emoji {
+        position: absolute;
+        inset-inline-start: 22px;
+        top: 22px;
+        font-size: 48px;
+      }
+
+      .trip-card-v3__badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 0 12px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.88);
+        color: var(--trips-navy);
+        font-size: 12px;
+        font-weight: 950;
+      }
+
+      .trip-card-v3__body {
+        padding: 20px;
+      }
+
+      .trip-card-v3__title-row {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .trip-card-v3 h3 {
+        margin: 0;
+        color: var(--trips-navy);
+        font-size: 24px;
+      }
+
+      .trip-card-v3__destination {
+        margin: 6px 0 0;
+        color: var(--trips-muted);
+      }
+
+      .trip-status-v3 {
+        display: inline-flex;
+        align-items: center;
+        min-height: 31px;
+        padding: 0 11px;
+        border-radius: 999px;
+        background: #eef2f7;
+        color: #40506a;
+        font-size: 12px;
+        font-weight: 950;
+        white-space: nowrap;
+      }
+
+      .trip-status-v3[data-status="ongoing"] {
+        background: #fff0d1;
+        color: #9d6300;
+      }
+
+      .trip-status-v3[data-status="ready"],
+      .trip-status-v3[data-status="completed"] {
+        background: #e5f6ef;
+        color: #0d7563;
+      }
+
+      .trip-status-v3[data-status="cancelled"] {
+        background: #fdebed;
+        color: #a42f3b;
+      }
+
+      .trip-card-v3__meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .trip-card-v3__meta-item {
+        min-height: 75px;
+        padding: 12px;
+        border-radius: 17px;
+        background: var(--trips-soft);
+      }
+
+      .trip-card-v3__meta-item small {
+        display: block;
+        color: var(--trips-muted);
+      }
+
+      .trip-card-v3__meta-item strong {
+        display: block;
+        margin-top: 7px;
+        font-size: 14px;
+      }
+
+      .trip-card-v3__progress {
+        margin-top: 16px;
+      }
+
+      .trip-card-v3__progress-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 7px;
+        color: var(--trips-muted);
+        font-size: 13px;
+      }
+
+      .trip-card-v3__bar {
+        height: 8px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e5ebf2;
+      }
+
+      .trip-card-v3__bar > span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #16a797, #08766d);
+      }
+
+      .trip-card-v3__actions {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .trip-card-v3__open {
+        min-height: 50px;
+        border: 0;
+        border-radius: 17px;
+        background: linear-gradient(135deg, #17a797, #0a7d74);
+        color: #fff;
+        font: inherit;
+        font-weight: 950;
+      }
+
+      .trip-card-v3__menu {
+        min-width: 50px;
+        min-height: 50px;
+        border: 1px solid var(--trips-line);
+        border-radius: 17px;
+        background: #fff;
+        color: var(--trips-navy);
+        font: inherit;
+        font-weight: 950;
+      }
+
+      .memory-card {
+        overflow: hidden;
+        border: 1px solid var(--trips-line);
+        border-radius: 28px;
+        background: #fff;
+        box-shadow: var(--trips-shadow);
+      }
+
+      .memory-card__cover {
+        min-height: 125px;
+        padding: 18px;
+        background:
+          radial-gradient(circle at 75% 15%, rgba(255,255,255,.35), transparent 33%),
+          linear-gradient(135deg, #d8f8ef, #81cabb 55%, #0a4962);
+      }
+
+      .memory-card__stamp {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 13px;
+        border: 2px solid rgba(6, 27, 56, .34);
+        border-radius: 13px;
+        color: var(--trips-navy);
+        font-weight: 950;
+        transform: rotate(-2deg);
+      }
+
+      .memory-card__body {
+        padding: 19px;
+      }
+
+      .memory-card h3 {
+        margin: 0;
+        font-size: 23px;
+      }
+
+      .memory-card p {
+        margin: 7px 0 0;
+        color: var(--trips-muted);
+        line-height: 1.7;
+      }
+
+      .memory-card__facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 14px;
+      }
+
+      .memory-card__fact {
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: var(--trips-soft);
+        color: #56657d;
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      .country-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .country-magnet {
+        position: relative;
+        overflow: hidden;
+        min-height: 185px;
+        padding: 20px;
+        border: 1px solid var(--trips-line);
+        border-radius: 31px;
+        background:
+          radial-gradient(circle at 85% 10%, rgba(255,255,255,.65), transparent 28%),
+          linear-gradient(145deg, #effcf9, #c5eee6);
+        box-shadow: 0 13px 30px rgba(16, 40, 70, .07);
+      }
+
+      .country-magnet::after {
+        content: "";
+        position: absolute;
+        inset-inline-end: -25px;
+        bottom: -35px;
+        width: 110px;
+        height: 110px;
+        border: 14px solid rgba(15,143,131,.11);
+        border-radius: 50%;
+      }
+
+      .country-magnet__flag {
+        font-size: 38px;
+      }
+
+      .country-magnet h3 {
+        margin: 22px 0 4px;
+        font-size: 22px;
+      }
+
+      .country-magnet p {
+        margin: 0;
+        color: var(--trips-muted);
+      }
+
+      .country-magnet__count {
+        position: absolute;
+        inset-inline-end: 16px;
+        top: 16px;
+        display: grid;
+        place-items: center;
+        min-width: 38px;
+        height: 38px;
+        padding: 0 9px;
+        border-radius: 999px;
+        background: var(--trips-navy);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 950;
+      }
+
+      .trips-empty {
+        padding: 35px 20px;
+        border: 1px dashed #cbd8e6;
+        border-radius: 28px;
+        background: rgba(255,255,255,.75);
+        text-align: center;
+      }
+
+      .trips-empty__icon {
+        font-size: 42px;
+      }
+
+      .trips-empty h3 {
+        margin: 12px 0 5px;
+        font-size: 23px;
+      }
+
+      .trips-empty p {
+        margin: 0;
+        color: var(--trips-muted);
+        line-height: 1.7;
+      }
+
+      .trips-empty button {
+        margin-top: 16px;
+      }
+
+      .trips-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        align-items: end;
+        padding: 18px;
+        background: rgba(4, 14, 32, .52);
+        backdrop-filter: blur(9px);
+      }
+
+      .trips-modal {
+        width: min(720px, 100%);
+        max-height: calc(100vh - 36px);
+        margin-inline: auto;
+        overflow: auto;
+        border-radius: 32px 32px 22px 22px;
+        background: #fff;
+        box-shadow: 0 35px 90px rgba(0,0,0,.25);
+      }
+
+      .trips-modal__header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 20px;
+        border-bottom: 1px solid var(--trips-line);
+        background: rgba(255,255,255,.96);
+        backdrop-filter: blur(12px);
+      }
+
+      .trips-modal__header h3 {
+        margin: 0;
+        font-size: 23px;
+      }
+
+      .trips-modal__close {
+        width: 42px;
+        height: 42px;
+        border: 1px solid var(--trips-line);
+        border-radius: 14px;
+        background: #fff;
+        font: inherit;
+        font-size: 24px;
+      }
+
+      .trips-modal__body {
+        display: grid;
+        gap: 15px;
+        padding: 20px;
+      }
+
+      .trips-modal__grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .trips-modal__footer {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 0 20px 22px;
+      }
+
+      .trips-btn {
+        min-height: 52px;
+        border-radius: 17px;
+        font: inherit;
+        font-weight: 950;
+        cursor: pointer;
+      }
+
+      .trips-btn--primary {
+        border: 0;
+        background: linear-gradient(135deg, #17a797, #0b7a72);
+        color: #fff;
+      }
+
+      .trips-btn--secondary {
+        border: 1px solid var(--trips-line);
+        background: #fff;
+        color: var(--trips-navy);
+      }
+
+      .trips-detail-hero {
+        padding: 24px;
+        border-radius: 31px;
+        background:
+          radial-gradient(circle at 10% 10%, rgba(255,255,255,.17), transparent 30%),
+          linear-gradient(140deg, #139f90, #0a706e 55%, #072746);
+        color: #fff;
+      }
+
+      .trips-detail-hero__back {
+        min-height: 42px;
+        padding: 0 14px;
+        border: 1px solid rgba(255,255,255,.22);
+        border-radius: 14px;
+        background: rgba(255,255,255,.10);
+        color: #fff;
+        font: inherit;
+        font-weight: 900;
+      }
+
+      .trips-detail-hero h1 {
+        margin: 28px 0 8px;
+        color: #fff;
+        font-size: 38px;
+      }
+
+      .trips-detail-hero p {
+        margin: 0;
+        color: rgba(255,255,255,.80);
+      }
+
+      .trips-detail-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: 20px;
+      }
+
+      .trips-details-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .trips-detail-box {
+        min-height: 105px;
+        padding: 17px;
+        border: 1px solid var(--trips-line);
+        border-radius: 22px;
+        background: #fff;
+      }
+
+      .trips-detail-box small {
+        display: block;
+        color: var(--trips-muted);
+      }
+
+      .trips-detail-box strong {
+        display: block;
+        margin-top: 10px;
+        font-size: 18px;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 760px) {
+        .trips-overview {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .trips-grid,
+        .country-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .trips-filters,
+        .trips-modal__grid,
+        .trips-details-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .trips-hero {
+          min-height: 330px;
+          padding: 24px 22px;
+          border-radius: 31px;
+        }
+
+        .trips-section__header {
+          align-items: start;
+          flex-direction: column;
+        }
+      }
+
+      @media (min-width: 761px) {
+        .trips-modal-backdrop {
+          align-items: center;
+        }
+
+        .trips-modal {
+          border-radius: 30px;
+        }
+      }
+    `;
+
+    document.head.appendChild(style);
+  };
+
   const getStoreState = () => {
     const store = getStore();
 
@@ -249,32 +1066,51 @@
     const store = getStore();
 
     if (!store) {
-      throw new Error(
-        "TIC Trips Error: store is unavailable."
-      );
+      throw new Error("TIC Trips Error: store is unavailable.");
     }
 
     if (typeof store.set === "function") {
-      store.set("trips", trips);
+      store.set("trips", clone(trips));
       return true;
     }
 
     if (typeof store.patch === "function") {
-      store.patch({ trips });
+      store.patch({ trips: clone(trips) });
       return true;
     }
 
     if (typeof store.update === "function") {
       store.update((currentState) => ({
         ...currentState,
-        trips
+        trips: clone(trips)
       }));
       return true;
     }
 
-    throw new Error(
-      "TIC Trips Error: persistence is unavailable."
-    );
+    throw new Error("TIC Trips Error: persistence is unavailable.");
+  };
+
+  const addTripToStore = async (trip) => {
+    const store = getStore();
+
+    if (typeof store?.addTrip === "function") {
+      return (await store.addTrip(trip)) || trip;
+    }
+
+    if (typeof store?.createTrip === "function") {
+      return (await store.createTrip(trip)) || trip;
+    }
+
+    if (typeof store?.upsertTrip === "function") {
+      await store.upsertTrip(trip);
+      return trip;
+    }
+
+    const trips = getTrips();
+    trips.unshift(clone(trip));
+    saveTrips(trips);
+
+    return trip;
   };
 
   const updateTrip = async (tripId, patch) => {
@@ -353,38 +1189,15 @@
         "رحلة"
       } - نسخة`,
       status: "planning",
+      isMemory: false,
+      memorySource: "",
       spent: 0,
       featured: false,
       createdAt: now,
       updatedAt: now
     };
 
-    const store = getStore();
-
-    if (typeof store?.addTrip === "function") {
-      return (
-        (await store.addTrip(duplicate)) ||
-        duplicate
-      );
-    }
-
-    if (typeof store?.createTrip === "function") {
-      return (
-        (await store.createTrip(duplicate)) ||
-        duplicate
-      );
-    }
-
-    if (typeof store?.upsertTrip === "function") {
-      await store.upsertTrip(duplicate);
-      return duplicate;
-    }
-
-    const trips = getTrips();
-    trips.unshift(duplicate);
-    saveTrips(trips);
-
-    return duplicate;
+    return addTripToStore(duplicate);
   };
 
   const durationDays = (trip) => {
@@ -425,7 +1238,7 @@
   const tripStatus = (trip) => {
     const raw = text(trip.status).toLowerCase();
 
-    if (raw) return raw;
+    if (raw === "cancelled") return raw;
 
     const today = startOfDay(new Date());
     const start = toDate(trip.startDate);
@@ -447,32 +1260,253 @@
       return "completed";
     }
 
+    if (raw) return raw;
+
     return "planning";
   };
+
+  const isMemoryTrip = (trip) =>
+    trip.isMemory === true ||
+    trip.memorySource === "manual-history" ||
+    tripStatus(trip) === "completed";
+
+  const isUpcomingTrip = (trip) =>
+    ["planning", "booked", "ready"].includes(
+      tripStatus(trip)
+    );
+
+  const formatDate = (value, options = {}) => {
+    const parsed = toDate(value);
+
+    if (!parsed) return "غير محدد";
+
+    try {
+      return new Intl.DateTimeFormat("ar-AE", {
+        day: options.yearOnly ? undefined : "numeric",
+        month: options.yearOnly ? undefined : "long",
+        year: "numeric"
+      }).format(parsed);
+    } catch (error) {
+      return parsed.toLocaleDateString("ar-AE");
+    }
+  };
+
+  const currency = (value) => {
+    const ui = getUI();
+
+    if (typeof ui?.currency === "function") {
+      return ui.currency(number(value));
+    }
+
+    return `${number(value).toLocaleString("ar-AE")} د.إ`;
+  };
+
+  const countryFlag = (country) => {
+    const normalized = text(country).toLowerCase();
+
+    const flags = {
+      "الإمارات": "🇦🇪",
+      "الامارات": "🇦🇪",
+      "united arab emirates": "🇦🇪",
+      "السعودية": "🇸🇦",
+      "saudi arabia": "🇸🇦",
+      "البحرين": "🇧🇭",
+      "bahrain": "🇧🇭",
+      "عمان": "🇴🇲",
+      "oman": "🇴🇲",
+      "قطر": "🇶🇦",
+      "qatar": "🇶🇦",
+      "الكويت": "🇰🇼",
+      "kuwait": "🇰🇼",
+      "المالديف": "🇲🇻",
+      "maldives": "🇲🇻",
+      "تايلند": "🇹🇭",
+      "تايلاند": "🇹🇭",
+      "thailand": "🇹🇭",
+      "كازاخستان": "🇰🇿",
+      "kazakhstan": "🇰🇿",
+      "إسبانيا": "🇪🇸",
+      "اسبانيا": "🇪🇸",
+      "spain": "🇪🇸",
+      "تركيا": "🇹🇷",
+      "turkey": "🇹🇷",
+      "جورجيا": "🇬🇪",
+      "georgia": "🇬🇪",
+      "أذربيجان": "🇦🇿",
+      "اذربيجان": "🇦🇿",
+      "azerbaijan": "🇦🇿",
+      "المملكة المتحدة": "🇬🇧",
+      "بريطانيا": "🇬🇧",
+      "united kingdom": "🇬🇧",
+      "فرنسا": "🇫🇷",
+      "france": "🇫🇷",
+      "إيطاليا": "🇮🇹",
+      "ايطاليا": "🇮🇹",
+      "italy": "🇮🇹",
+      "سويسرا": "🇨🇭",
+      "switzerland": "🇨🇭",
+      "اليابان": "🇯🇵",
+      "japan": "🇯🇵",
+      "ماليزيا": "🇲🇾",
+      "malaysia": "🇲🇾",
+      "إندونيسيا": "🇮🇩",
+      "اندونيسيا": "🇮🇩",
+      "indonesia": "🇮🇩"
+    };
+
+    return flags[normalized] || "🌍";
+  };
+
+  const normalizeCities = (trip) => {
+    const cities = [];
+
+    if (Array.isArray(trip.cities)) {
+      cities.push(...trip.cities);
+    }
+
+    if (trip.city) {
+      cities.push(trip.city);
+    }
+
+    if (trip.destination && !trip.country) {
+      cities.push(trip.destination);
+    }
+
+    return [...new Set(
+      cities
+        .map(text)
+        .filter(Boolean)
+    )];
+  };
+
+  const buildCountries = (trips) => {
+    const map = new Map();
+
+    trips
+      .filter(isMemoryTrip)
+      .forEach((trip) => {
+        const country =
+          text(trip.country) ||
+          text(trip.destinationCountry) ||
+          text(trip.destination) ||
+          "وجهة غير محددة";
+
+        const key = country.toLowerCase();
+
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            country,
+            flag:
+              text(trip.countryFlag) ||
+              countryFlag(country),
+            visits: 0,
+            cities: new Set(),
+            firstVisit: null,
+            lastVisit: null,
+            tripIds: []
+          });
+        }
+
+        const item = map.get(key);
+        const date =
+          toDate(trip.startDate) ||
+          toDate(trip.endDate) ||
+          toDate(trip.createdAt);
+
+        item.visits += 1;
+        item.tripIds.push(trip.id);
+
+        normalizeCities(trip).forEach((city) =>
+          item.cities.add(city)
+        );
+
+        if (date) {
+          if (!item.firstVisit || date < item.firstVisit) {
+            item.firstVisit = date;
+          }
+
+          if (!item.lastVisit || date > item.lastVisit) {
+            item.lastVisit = date;
+          }
+        }
+      });
+
+    return [...map.values()]
+      .map((item) => ({
+        ...item,
+        cities: [...item.cities]
+      }))
+      .sort((a, b) =>
+        a.country.localeCompare(b.country, "ar")
+      );
+  };
+
+  const statisticsFrom = (trips, countries) => ({
+    total: trips.length,
+    upcoming: trips.filter(isUpcomingTrip).length,
+    ongoing: trips.filter(
+      (trip) =>
+        tripStatus(trip) === "ongoing"
+    ).length,
+    memories: trips.filter(isMemoryTrip).length,
+    countries: countries.length,
+    cities: new Set(
+      trips
+        .filter(isMemoryTrip)
+        .flatMap(normalizeCities)
+        .map((city) => city.toLowerCase())
+    ).size
+  });
 
   const filteredTripsFrom = (trips) => {
     const search =
       text(state.filters.search).toLowerCase();
 
-    const result = trips.filter((trip) => {
+    const byTab = trips.filter((trip) => {
+      const status = tripStatus(trip);
+
+      switch (state.activeTab) {
+        case "upcoming":
+          return isUpcomingTrip(trip);
+
+        case "ongoing":
+          return status === "ongoing";
+
+        case "memories":
+          return isMemoryTrip(trip);
+
+        case "all":
+          return true;
+
+        default:
+          return true;
+      }
+    });
+
+    const result = byTab.filter((trip) => {
       const status = tripStatus(trip);
       const type =
         text(trip.tripType).toLowerCase();
 
+      const searchable = [
+        trip.title,
+        trip.destination,
+        trip.country,
+        trip.city,
+        ...(Array.isArray(trip.cities) ? trip.cities : []),
+        trip.accommodation,
+        trip.airline,
+        trip.bestMemory,
+        trip.notes
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
       const matchesSearch =
         !search ||
-        [
-          trip.title,
-          trip.destination,
-          trip.country,
-          trip.city,
-          trip.accommodation,
-          trip.airline
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(search);
+        searchable.includes(search);
 
       const matchesStatus =
         state.filters.status === "all" ||
@@ -507,8 +1541,14 @@
           return number(b.budget) - number(a.budget);
 
         case "title-asc":
-          return text(a.title).localeCompare(
-            text(b.title),
+          return text(
+            a.title ||
+            a.destination
+          ).localeCompare(
+            text(
+              b.title ||
+              b.destination
+            ),
             "ar"
           );
 
@@ -530,80 +1570,13 @@
     return result;
   };
 
-  const statisticsFrom = (trips) => ({
-    total: trips.length,
-    upcoming: trips.filter((trip) =>
-      ["planning", "booked", "ready"].includes(
-        tripStatus(trip)
-      )
-    ).length,
-    ongoing: trips.filter(
-      (trip) =>
-        tripStatus(trip) === "ongoing"
-    ).length,
-    completed: trips.filter(
-      (trip) =>
-        tripStatus(trip) === "completed"
-    ).length,
-    totalBudget: trips.reduce(
-      (total, trip) =>
-        total + number(trip.budget),
-      0
-    ),
-    totalSpent: trips.reduce(
-      (total, trip) =>
-        total + number(trip.spent),
-      0
-    )
-  });
-
-  const relatedDocuments = (tripId) => {
-    const snapshot = getStoreState();
-
-    return (
-      Array.isArray(snapshot.documents)
-        ? snapshot.documents
-        : []
-    ).filter(
-      (item) =>
-        String(item.tripId || "") ===
-        String(tripId)
-    );
-  };
-
-  const relatedPacking = (tripId) => {
-    const source = getStoreState().packing;
-
-    if (Array.isArray(source)) {
-      return source.filter(
-        (item) =>
-          String(item.tripId || "") ===
-          String(tripId)
-      );
-    }
-
-    if (isObject(source)) {
-      if (Array.isArray(source.items)) {
-        return source.items.filter(
-          (item) =>
-            String(item.tripId || "") ===
-            String(tripId)
-        );
-      }
-
-      if (Array.isArray(source[tripId])) {
-        return source[tripId];
-      }
-    }
-
-    return [];
-  };
-
   const buildSnapshot = () => {
     const trips = getTrips();
+    const countries = buildCountries(trips);
 
     const snapshot = {
       trips,
+      countries,
       filteredTrips: filteredTripsFrom(trips),
       activeTrip: state.activeTripId
         ? trips.find(
@@ -612,9 +1585,10 @@
               String(state.activeTripId)
           ) || null
         : null,
-      statistics: statisticsFrom(trips),
+      statistics: statisticsFrom(trips, countries),
       filters: clone(state.filters),
-      activeView: state.activeView
+      activeView: state.activeView,
+      activeTab: state.activeTab
     };
 
     state.lastSnapshot = snapshot;
@@ -622,173 +1596,186 @@
     return snapshot;
   };
 
-  const renderStatistics = (snapshot) => {
-    const ui = getUI();
-
-    return ui.grid(
-      [
-        {
-          icon: "✈",
-          value: snapshot.statistics.total,
-          label: "إجمالي الرحلات",
-          subtitle: "كل الرحلات"
-        },
-        {
-          icon: "◷",
-          value: snapshot.statistics.upcoming,
-          label: "رحلات قادمة",
-          subtitle: "مخططة أو محجوزة"
-        },
-        {
-          icon: "◎",
-          value: snapshot.statistics.ongoing,
-          label: "رحلات جارية",
-          subtitle: "تحدث الآن"
-        },
-        {
-          icon: "✓",
-          value: snapshot.statistics.completed,
-          label: "رحلات مكتملة",
-          subtitle: "ضمن السجل"
-        }
-      ]
-        .map((item) => ui.stat(item))
-        .join(""),
+  const renderOverview = (statistics) => {
+    const items = [
       {
-        columns: 4
+        icon: "✈",
+        value: statistics.upcoming,
+        label: "رحلات قادمة"
+      },
+      {
+        icon: "◎",
+        value: statistics.ongoing,
+        label: "رحلات جارية"
+      },
+      {
+        icon: "◈",
+        value: statistics.countries,
+        label: "دول زرتها"
+      },
+      {
+        icon: "♡",
+        value: statistics.memories,
+        label: "ذكريات سفر"
       }
-    );
+    ];
+
+    return `
+      <div class="trips-overview">
+        ${items.map((item) => `
+          <article class="trips-stat">
+            <span class="trips-stat__icon">
+              ${escapeHTML(item.icon)}
+            </span>
+
+            <strong>
+              ${escapeHTML(item.value)}
+            </strong>
+
+            <span>
+              ${escapeHTML(item.label)}
+            </span>
+          </article>
+        `).join("")}
+      </div>
+    `;
   };
+
+  const renderTabs = () => `
+    <div class="trips-tabs" role="tablist">
+      ${Object.entries(TAB_LABELS)
+        .map(([value, label]) => `
+          <button
+            type="button"
+            class="trips-tab ${
+              state.activeTab === value
+                ? "is-active"
+                : ""
+            }"
+            data-trips-tab="${escapeHTML(value)}"
+            role="tab"
+            aria-selected="${
+              state.activeTab === value
+                ? "true"
+                : "false"
+            }"
+          >
+            ${escapeHTML(label)}
+          </button>
+        `)
+        .join("")}
+    </div>
+  `;
 
   const renderFilters = () => {
     const selected = (value, current) =>
       value === current ? "selected" : "";
 
     return `
-      <div class="tic-toolbar">
+      <div class="trips-tools">
         <input
           type="search"
-          class="tic-input"
+          class="trips-search"
           data-trips-search
           value="${escapeHTML(
             state.filters.search
           )}"
-          placeholder="ابحث باسم الرحلة أو الوجهة..."
+          placeholder="ابحث باسم الرحلة أو الدولة أو المدينة..."
           aria-label="البحث في الرحلات"
         >
 
-        <div class="tic-form-grid">
-          <div class="tic-field">
-            <label>الحالة</label>
-
-            <select
-              class="tic-select"
-              data-trips-filter-status
-            >
-              <option
-                value="all"
-                ${selected(
-                  "all",
-                  state.filters.status
-                )}
-              >
-                كل الحالات
-              </option>
-
-              ${Object.entries(STATUS_LABELS)
-                .map(
-                  ([value, label]) => `
-                    <option
-                      value="${escapeHTML(value)}"
-                      ${selected(
-                        value,
-                        state.filters.status
-                      )}
-                    >
-                      ${escapeHTML(label)}
-                    </option>
-                  `
-                )
-                .join("")}
-            </select>
-          </div>
-
-          <div class="tic-field">
-            <label>النوع</label>
-
-            <select
-              class="tic-select"
-              data-trips-filter-type
-            >
-              <option
-                value="all"
-                ${selected(
-                  "all",
-                  state.filters.type
-                )}
-              >
-                كل الأنواع
-              </option>
-
-              ${Object.entries(TYPE_LABELS)
-                .map(
-                  ([value, label]) => `
-                    <option
-                      value="${escapeHTML(value)}"
-                      ${selected(
-                        value,
-                        state.filters.type
-                      )}
-                    >
-                      ${escapeHTML(label)}
-                    </option>
-                  `
-                )
-                .join("")}
-            </select>
-          </div>
-
-          <div class="tic-field">
-            <label>الترتيب</label>
-
-            <select
-              class="tic-select"
-              data-trips-sort
-            >
-              ${SORT_OPTIONS.map(
-                (option) => `
-                  <option
-                    value="${escapeHTML(
-                      option.value
-                    )}"
-                    ${selected(
-                      option.value,
-                      state.filters.sort
-                    )}
-                  >
-                    ${escapeHTML(option.label)}
-                  </option>
-                `
-              ).join("")}
-            </select>
-          </div>
-
-          <div class="tic-field">
-            <label>&nbsp;</label>
-
-            ${getUI().button({
-              label: "مسح الفلاتر",
-              action: "trips-clear-filters",
-              block: true
-            })}
-          </div>
-        </div>
+        <button
+          type="button"
+          class="trips-filter-toggle"
+          data-action="trips-toggle-filters"
+          aria-label="إظهار أو إخفاء الفلاتر"
+        >
+          ⚙
+        </button>
       </div>
+
+      ${
+        state.filtersOpen
+          ? `
+            <div class="trips-filters">
+              <div class="trips-field">
+                <label>الحالة</label>
+
+                <select data-trips-filter-status>
+                  <option
+                    value="all"
+                    ${selected("all", state.filters.status)}
+                  >
+                    كل الحالات
+                  </option>
+
+                  ${Object.entries(STATUS_LABELS)
+                    .map(([value, label]) => `
+                      <option
+                        value="${escapeHTML(value)}"
+                        ${selected(value, state.filters.status)}
+                      >
+                        ${escapeHTML(label)}
+                      </option>
+                    `)
+                    .join("")}
+                </select>
+              </div>
+
+              <div class="trips-field">
+                <label>نوع الرحلة</label>
+
+                <select data-trips-filter-type>
+                  <option
+                    value="all"
+                    ${selected("all", state.filters.type)}
+                  >
+                    كل الأنواع
+                  </option>
+
+                  ${Object.entries(TYPE_LABELS)
+                    .map(([value, label]) => `
+                      <option
+                        value="${escapeHTML(value)}"
+                        ${selected(value, state.filters.type)}
+                      >
+                        ${escapeHTML(label)}
+                      </option>
+                    `)
+                    .join("")}
+                </select>
+              </div>
+
+              <div class="trips-field">
+                <label>الترتيب</label>
+
+                <select data-trips-sort>
+                  ${SORT_OPTIONS.map((option) => `
+                    <option
+                      value="${escapeHTML(option.value)}"
+                      ${selected(option.value, state.filters.sort)}
+                    >
+                      ${escapeHTML(option.label)}
+                    </option>
+                  `).join("")}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                class="trips-btn trips-btn--secondary"
+                data-action="trips-clear-filters"
+              >
+                مسح الفلاتر
+              </button>
+            </div>
+          `
+          : ""
+      }
     `;
   };
 
   const renderTripCard = (trip) => {
-    const ui = getUI();
     const status = tripStatus(trip);
     const remaining = daysUntil(trip);
     const budget = number(trip.budget);
@@ -797,52 +1784,57 @@
       budget > 0
         ? Math.min(
             100,
-            Math.round((spent / budget) * 100)
+            Math.max(
+              0,
+              Math.round((spent / budget) * 100)
+            )
           )
         : 0;
 
     const countdown =
-      remaining === null
-        ? "الموعد غير محدد"
-        : remaining === 0
-          ? "السفر اليوم"
-          : remaining === 1
-            ? "متبقي يوم"
-            : remaining > 1
-              ? `متبقي ${remaining} يوم`
-              : status === "completed"
-                ? "رحلة مكتملة"
+      status === "completed"
+        ? "ضمن ذكريات السفر"
+        : remaining === null
+          ? "الموعد غير محدد"
+          : remaining === 0
+            ? "السفر اليوم"
+            : remaining === 1
+              ? "متبقي يوم"
+              : remaining > 1
+                ? `متبقي ${remaining} يوم`
                 : "بدأت الرحلة";
+
+    const location =
+      trip.destination ||
+      [trip.city, trip.country]
+        .filter(Boolean)
+        .join("، ") ||
+      "وجهة غير محددة";
 
     return `
       <article
-        class="tic-card tic-trip-card"
+        class="trip-card-v3"
         data-trip-card="${escapeHTML(trip.id)}"
       >
-        <div class="tic-trip-cover">
-          <span class="tic-trip-cover-emoji">
+        <div class="trip-card-v3__cover">
+          <span class="trip-card-v3__emoji">
             ${escapeHTML(
               trip.emoji ||
               trip.icon ||
+              countryFlag(trip.country) ||
               "✈"
             )}
           </span>
+
+          <span class="trip-card-v3__badge">
+            ${escapeHTML(countdown)}
+          </span>
         </div>
 
-        <div class="tic-trip-card-body">
-          <div class="tic-feature-row">
+        <div class="trip-card-v3__body">
+          <div class="trip-card-v3__title-row">
             <div>
-              <span class="tic-chip">
-                ${escapeHTML(
-                  TYPE_LABELS[trip.tripType] ||
-                  "رحلة"
-                )}
-              </span>
-
-              <h3
-                class="tic-card-title"
-                style="margin-top:12px"
-              >
+              <h3>
                 ${escapeHTML(
                   trip.title ||
                   trip.destination ||
@@ -850,573 +1842,1078 @@
                 )}
               </h3>
 
-              <p class="tic-card-text">
-                ${escapeHTML(
-                  trip.destination ||
-                  [trip.city, trip.country]
-                    .filter(Boolean)
-                    .join("، ")
-                )}
+              <p class="trip-card-v3__destination">
+                ${escapeHTML(location)}
               </p>
             </div>
 
-            ${ui.status(
-              STATUS_LABELS[status] || status,
-              {
-                value: status,
-                tone:
-                  STATUS_TONES[status]
-              }
-            )}
+            <span
+              class="trip-status-v3"
+              data-status="${escapeHTML(status)}"
+            >
+              ${escapeHTML(
+                STATUS_LABELS[status] ||
+                status
+              )}
+            </span>
           </div>
 
-          <div style="margin-top:14px">
-            ${ui.badge(
-              countdown,
-              remaining !== null &&
-              remaining <= 7 &&
-              remaining >= 0
-                ? "warning"
-                : "info"
-            )}
+          <div class="trip-card-v3__meta">
+            <div class="trip-card-v3__meta-item">
+              <small>التاريخ</small>
+              <strong>
+                ${escapeHTML(formatDate(trip.startDate))}
+              </strong>
+            </div>
+
+            <div class="trip-card-v3__meta-item">
+              <small>المدة</small>
+              <strong>
+                ${
+                  durationDays(trip)
+                    ? `${durationDays(trip)} يوم`
+                    : "—"
+                }
+              </strong>
+            </div>
+
+            <div class="trip-card-v3__meta-item">
+              <small>النوع</small>
+              <strong>
+                ${escapeHTML(
+                  TYPE_LABELS[trip.tripType] ||
+                  "رحلة"
+                )}
+              </strong>
+            </div>
           </div>
 
-          <div class="tic-trip-meta">
-            ${ui.info(
-              "التاريخ",
-              trip.startDate
-                ? ui.date(trip.startDate)
-                : "—"
-            )}
+          ${
+            budget > 0
+              ? `
+                <div class="trip-card-v3__progress">
+                  <div class="trip-card-v3__progress-row">
+                    <span>استخدام الميزانية</span>
+                    <strong>${usage}%</strong>
+                  </div>
 
-            ${ui.info(
-              "المدة",
-              `${durationDays(trip)} يوم`
-            )}
+                  <div class="trip-card-v3__bar">
+                    <span style="width:${usage}%"></span>
+                  </div>
+                </div>
+              `
+              : ""
+          }
 
-            ${ui.info(
-              "الميزانية",
-              ui.currency(budget)
-            )}
-          </div>
+          <div class="trip-card-v3__actions">
+            <button
+              type="button"
+              class="trip-card-v3__open"
+              data-action="trips-view-details"
+              data-trip-id="${escapeHTML(trip.id)}"
+            >
+              فتح الرحلة
+            </button>
 
-          <div style="margin-top:15px">
-            ${ui.progress(usage, {
-              label: "استخدام الميزانية",
-              hint:
-                `${ui.currency(spent)} مصروف`
-            })}
-          </div>
-
-          <div
-            class="tic-grid tic-grid-4"
-            style="margin-top:16px"
-          >
-            ${ui.button({
-              label: "التفاصيل",
-              action: "trips-view-details",
-              params: {
-                tripId: trip.id
-              },
-              primary: true,
-              block: true
-            })}
-
-            ${ui.iconButton({
-              icon: "✎",
-              action: "trips-edit",
-              params: {
-                tripId: trip.id
-              },
-              ariaLabel: "تعديل الرحلة"
-            })}
-
-            ${ui.iconButton({
-              icon: "⧉",
-              action: "trips-duplicate",
-              params: {
-                tripId: trip.id
-              },
-              ariaLabel: "تكرار الرحلة"
-            })}
-
-            ${ui.iconButton({
-              icon: "×",
-              action: "trips-delete",
-              params: {
-                tripId: trip.id
-              },
-              ariaLabel: "حذف الرحلة"
-            })}
+            <button
+              type="button"
+              class="trip-card-v3__menu"
+              data-action="trips-card-menu"
+              data-trip-id="${escapeHTML(trip.id)}"
+              aria-label="إجراءات الرحلة"
+            >
+              •••
+            </button>
           </div>
         </div>
       </article>
     `;
   };
 
-  const renderTripsList = (snapshot) => {
-    const ui = getUI();
+  const renderMemoryCard = (trip) => {
+    const location =
+      [trip.city, trip.country]
+        .filter(Boolean)
+        .join("، ") ||
+      trip.destination ||
+      "وجهة غير محددة";
 
-    if (!snapshot.filteredTrips.length) {
-      return ui.empty({
-        icon: "✈",
-        title:
-          snapshot.trips.length === 0
-            ? "لا توجد رحلات بعد"
-            : "لا توجد نتائج مطابقة",
-        message:
-          snapshot.trips.length === 0
-            ? "أنشئ رحلتك الأولى وسيتم عرضها هنا."
-            : "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
-        action:
-          snapshot.trips.length === 0
-            ? {
-                label: "إنشاء رحلة جديدة",
-                action: "trips-new",
-                primary: true
-              }
-            : {
-                label: "مسح الفلاتر",
-                action: "trips-clear-filters"
-              }
-      });
-    }
+    const year =
+      toDate(trip.startDate)?.getFullYear() ||
+      trip.travelYear ||
+      "—";
+
+    const cities = normalizeCities(trip);
 
     return `
-      <p class="tic-subtitle" style="margin-bottom:12px">
-        عرض ${snapshot.filteredTrips.length}
-        من ${snapshot.trips.length} رحلة
+      <article class="memory-card">
+        <div class="memory-card__cover">
+          <span class="memory-card__stamp">
+            ${escapeHTML(
+              trip.countryFlag ||
+              countryFlag(trip.country)
+            )}
+            ${escapeHTML(year)}
+          </span>
+        </div>
+
+        <div class="memory-card__body">
+          <h3>
+            ${escapeHTML(
+              trip.title ||
+              trip.destination ||
+              "ذكرى سفر"
+            )}
+          </h3>
+
+          <p>
+            ${escapeHTML(location)}
+          </p>
+
+          <div class="memory-card__facts">
+            <span class="memory-card__fact">
+              ${escapeHTML(
+                TYPE_LABELS[trip.tripType] ||
+                "رحلة"
+              )}
+            </span>
+
+            ${
+              cities.length
+                ? `
+                  <span class="memory-card__fact">
+                    ${escapeHTML(cities.length)} مدينة
+                  </span>
+                `
+                : ""
+            }
+
+            ${
+              number(trip.rating) > 0
+                ? `
+                  <span class="memory-card__fact">
+                    ★ ${escapeHTML(trip.rating)}/5
+                  </span>
+                `
+                : ""
+            }
+
+            ${
+              trip.wouldVisitAgain === true
+                ? `
+                  <span class="memory-card__fact">
+                    أزورها مرة أخرى
+                  </span>
+                `
+                : ""
+            }
+          </div>
+
+          ${
+            trip.bestMemory
+              ? `
+                <p style="margin-top:14px">
+                  “${escapeHTML(trip.bestMemory)}”
+                </p>
+              `
+              : ""
+          }
+
+          <div class="trip-card-v3__actions">
+            <button
+              type="button"
+              class="trip-card-v3__open"
+              data-action="trips-view-details"
+              data-trip-id="${escapeHTML(trip.id)}"
+            >
+              فتح الذكرى
+            </button>
+
+            <button
+              type="button"
+              class="trip-card-v3__menu"
+              data-action="trips-card-menu"
+              data-trip-id="${escapeHTML(trip.id)}"
+              aria-label="إجراءات الرحلة"
+            >
+              •••
+            </button>
+          </div>
+        </div>
+      </article>
+    `;
+  };
+
+  const renderCountryCard = (country) => `
+    <article class="country-magnet">
+      <span class="country-magnet__count">
+        ${escapeHTML(country.visits)}
+      </span>
+
+      <div class="country-magnet__flag">
+        ${escapeHTML(country.flag)}
+      </div>
+
+      <h3>
+        ${escapeHTML(country.country)}
+      </h3>
+
+      <p>
+        ${
+          country.cities.length
+            ? escapeHTML(country.cities.join("، "))
+            : "المدن غير مسجلة"
+        }
       </p>
 
-      <div class="tic-trips-list">
+      <p style="margin-top:9px;font-size:13px">
+        ${
+          country.firstVisit
+            ? `أول زيارة: ${escapeHTML(
+                country.firstVisit.getFullYear()
+              )}`
+            : "تاريخ الزيارة غير محدد"
+        }
+      </p>
+    </article>
+  `;
+
+  const renderEmpty = ({
+    icon = "✈",
+    title,
+    message,
+    actionLabel,
+    action
+  }) => `
+    <div class="trips-empty">
+      <div class="trips-empty__icon">
+        ${escapeHTML(icon)}
+      </div>
+
+      <h3>${escapeHTML(title)}</h3>
+      <p>${escapeHTML(message)}</p>
+
+      ${
+        actionLabel && action
+          ? `
+            <button
+              type="button"
+              class="trips-btn trips-btn--primary"
+              data-action="${escapeHTML(action)}"
+            >
+              ${escapeHTML(actionLabel)}
+            </button>
+          `
+          : ""
+      }
+    </div>
+  `;
+
+  const renderTabContent = (snapshot) => {
+    if (state.activeTab === "countries") {
+      if (!snapshot.countries.length) {
+        return renderEmpty({
+          icon: "🌍",
+          title: "جواز سفرك ما زال فارغاً",
+          message:
+            "أضف رحلة سابقة، وستظهر الدول التي زرتها هنا على شكل مغناطيسات سفر.",
+          actionLabel: "إضافة رحلة سابقة",
+          action: "trips-add-memory"
+        });
+      }
+
+      return `
+        <div class="country-grid">
+          ${snapshot.countries
+            .map(renderCountryCard)
+            .join("")}
+        </div>
+      `;
+    }
+
+    if (!snapshot.filteredTrips.length) {
+      const emptyByTab = {
+        upcoming: {
+          icon: "✈",
+          title: "لا توجد رحلات قادمة",
+          message:
+            "أنشئ رحلتك القادمة، وأضف تفاصيل الحجز والميزانية والتجهيز.",
+          actionLabel: "إنشاء رحلة جديدة",
+          action: "trips-new"
+        },
+        ongoing: {
+          icon: "◎",
+          title: "لا توجد رحلة جارية الآن",
+          message:
+            "عندما يبدأ موعد إحدى رحلاتك ستنتقل إلى هذا القسم تلقائياً."
+        },
+        memories: {
+          icon: "♡",
+          title: "ابدأ مكتبة ذكرياتك",
+          message:
+            "سجّل الرحلات التي سافرتها قبل استخدام البرنامج، وستنضم الرحلات المكتملة تلقائياً.",
+          actionLabel: "إضافة رحلة سابقة",
+          action: "trips-add-memory"
+        },
+        all: {
+          icon: "✈",
+          title: "لا توجد رحلات",
+          message:
+            "أضف رحلة قادمة أو سجّل رحلة سابقة لبناء سجل سفرك.",
+          actionLabel: "إنشاء رحلة جديدة",
+          action: "trips-new"
+        }
+      };
+
+      return renderEmpty(
+        emptyByTab[state.activeTab] ||
+        emptyByTab.all
+      );
+    }
+
+    const renderer =
+      state.activeTab === "memories"
+        ? renderMemoryCard
+        : renderTripCard;
+
+    return `
+      <div class="trips-grid">
         ${snapshot.filteredTrips
-          .map(renderTripCard)
+          .map(renderer)
           .join("")}
       </div>
     `;
   };
 
-  const renderTripDetails = (trip) => {
-    const ui = getUI();
+  const renderHub = (snapshot) => `
+    <div class="trips-shell">
+      <section class="trips-hero">
+        <div class="trips-hero__top">
+          <span class="trips-hero__eyebrow">
+            TRIPS & MEMORIES
+          </span>
+        </div>
 
+        <div class="trips-hero__content">
+          <h1>رحلاتي</h1>
+
+          <p>
+            نظّم رحلاتك القادمة، واحفظ ذكريات سفرك،
+            وابنِ سجلاً شخصياً للدول والمدن التي زرتها.
+          </p>
+        </div>
+
+        <div class="trips-hero__actions">
+          <button
+            type="button"
+            class="trips-action trips-action--primary"
+            data-action="trips-new"
+          >
+            ＋ رحلة جديدة
+          </button>
+
+          <button
+            type="button"
+            class="trips-action trips-action--glass"
+            data-action="trips-add-memory"
+          >
+            ♡ إضافة رحلة سابقة
+          </button>
+        </div>
+      </section>
+
+      <section class="trips-section">
+        <div class="trips-section__header">
+          <div>
+            <p class="trips-section__eyebrow">
+              TRAVEL OVERVIEW
+            </p>
+
+            <h2>ملخص سفراتك</h2>
+
+            <p class="trips-section__subtitle">
+              أرقام مختصرة تعكس رحلاتك الحالية وسجل ذكرياتك.
+            </p>
+          </div>
+        </div>
+
+        ${renderOverview(snapshot.statistics)}
+      </section>
+
+      <section class="trips-section">
+        <div class="trips-section__header">
+          <div>
+            <p class="trips-section__eyebrow">
+              YOUR JOURNEYS
+            </p>
+
+            <h2>
+              ${escapeHTML(
+                TAB_LABELS[state.activeTab] ||
+                "رحلاتك"
+              )}
+            </h2>
+
+            <p class="trips-section__subtitle">
+              تنقل بين الرحلات القادمة والجارية والذكريات والدول التي زرتها.
+            </p>
+          </div>
+        </div>
+
+        ${renderTabs()}
+
+        ${
+          state.activeTab !== "countries"
+            ? renderFilters()
+            : ""
+        }
+
+        ${renderTabContent(snapshot)}
+      </section>
+    </div>
+  `;
+
+  const renderDetails = (trip) => {
     if (!trip) {
-      return ui.empty({
+      return renderEmpty({
         icon: "!",
         title: "تعذر العثور على الرحلة",
         message:
           "قد تكون الرحلة حُذفت أو لم تعد متوفرة.",
-        action: {
-          label: "العودة إلى الرحلات",
-          action: "trips-back-to-list"
-        }
+        actionLabel: "العودة إلى رحلاتي",
+        action: "trips-back-to-hub"
       });
     }
 
     const status = tripStatus(trip);
-    const documents = relatedDocuments(trip.id);
-    const packing = relatedPacking(trip.id);
-    const packed = packing.filter(
-      (item) =>
-        item.completed === true ||
-        item.packed === true ||
-        item.status === "completed"
-    ).length;
-
-    const activities =
-      Array.isArray(trip.activities)
-        ? trip.activities
-        : [];
-
-    const budget = number(trip.budget);
-    const spent = number(trip.spent);
-    const usage =
-      budget > 0
-        ? Math.min(
-            100,
-            Math.round((spent / budget) * 100)
-          )
-        : 0;
-
-    const summary = ui.grid(
+    const fields = [
+      ["الدولة", trip.country || "—"],
+      ["المدينة", trip.city || "—"],
+      ["التاريخ", formatDate(trip.startDate)],
       [
-        {
-          icon: "◷",
-          value: durationDays(trip),
-          label: "عدد الأيام"
-        },
-        {
-          icon: "◎",
-          value: number(trip.travelers, 1),
-          label: "المسافرون"
-        },
-        {
-          icon: "◈",
-          value: ui.currency(budget),
-          label: "الميزانية"
-        },
-        {
-          icon: "✓",
-          value: `${packed}/${packing.length}`,
-          label: "التجهيز"
-        }
-      ]
-        .map((item) => ui.stat(item))
-        .join(""),
-      {
-        columns: 4
-      }
-    );
-
-    const information = ui.grid(
+        "المدة",
+        durationDays(trip)
+          ? `${durationDays(trip)} يوم`
+          : "—"
+      ],
       [
-        ["الدولة", trip.country || "—"],
-        ["المدينة", trip.city || "—"],
-        ["مطار المغادرة", trip.departureAirport || "—"],
-        ["مطار الوصول", trip.arrivalAirport || "—"],
-        ["شركة الطيران", trip.airline || "—"],
-        ["رقم الرحلة", trip.flightNumber || "—"],
-        ["الإقامة", trip.accommodation || "—"],
-        ["رقم الحجز", trip.bookingReference || "—"],
-        ["التنقل", trip.transport || "—"],
-        ["جهة الطوارئ", trip.emergencyContact || "—"]
+        "الميزانية",
+        number(trip.budget) > 0
+          ? currency(trip.budget)
+          : "غير مسجلة"
+      ],
+      [
+        "المصروف",
+        number(trip.spent) > 0
+          ? currency(trip.spent)
+          : "غير مسجل"
+      ],
+      ["شركة الطيران", trip.airline || "—"],
+      ["رقم الرحلة", trip.flightNumber || "—"],
+      ["الفندق", trip.accommodation || "—"],
+      ["رقم الحجز", trip.bookingReference || "—"],
+      [
+        "التقييم",
+        number(trip.rating) > 0
+          ? `${trip.rating}/5`
+          : "غير مقيّمة"
+      ],
+      [
+        "أزورها مرة أخرى",
+        trip.wouldVisitAgain === true
+          ? "نعم"
+          : "غير محدد"
       ]
-        .map(([label, value]) =>
-          ui.info(label, value)
-        )
-        .join(""),
-      {
-        columns: 2
-      }
-    );
+    ];
 
     return `
-      <div data-trip-details="${escapeHTML(trip.id)}">
-        ${ui.hero({
-          badge:
-            TYPE_LABELS[trip.tripType] ||
-            "Trip Details",
-          title:
-            trip.title ||
-            trip.destination ||
-            "تفاصيل الرحلة",
-          subtitle:
-            trip.destination ||
-            [trip.city, trip.country]
-              .filter(Boolean)
-              .join("، "),
-          meta: [
-            `${durationDays(trip)} يوم`,
-            trip.startDate
-              ? ui.date(trip.startDate)
-              : "—",
-            STATUS_LABELS[status] || status
-          ],
-          actions: [
-            {
-              label: "العودة",
-              action: "trips-back-to-list"
-            },
-            {
-              label: "تعديل الرحلة",
-              action: "trips-edit",
-              params: {
-                tripId: trip.id
-              },
-              primary: true
-            }
-          ]
-        })}
+      <div class="trips-shell">
+        <section class="trips-detail-hero">
+          <button
+            type="button"
+            class="trips-detail-hero__back"
+            data-action="trips-back-to-hub"
+          >
+            ← العودة
+          </button>
 
-        ${ui.section({
-          eyebrow: "TRIP OVERVIEW",
-          title: "ملخص الرحلة",
-          content: summary
-        })}
+          <h1>
+            ${escapeHTML(
+              trip.title ||
+              trip.destination ||
+              "تفاصيل الرحلة"
+            )}
+          </h1>
 
-        ${ui.section({
-          eyebrow: "JOURNEY DETAILS",
-          title: "تفاصيل السفر",
-          content: information
-        })}
+          <p>
+            ${escapeHTML(
+              trip.destination ||
+              [trip.city, trip.country]
+                .filter(Boolean)
+                .join("، ")
+            )}
+          </p>
 
-        ${ui.section({
-          eyebrow: "BUDGET",
-          title: "ميزانية الرحلة",
-          content: `
-            <article class="tic-budget-overview">
-              <small>إجمالي الميزانية</small>
+          <div class="trips-detail-actions">
+            <span
+              class="trip-status-v3"
+              data-status="${escapeHTML(status)}"
+            >
+              ${escapeHTML(
+                STATUS_LABELS[status] ||
+                status
+              )}
+            </span>
 
-              <strong>
-                ${escapeHTML(ui.currency(budget))}
-              </strong>
+            <span class="trip-status-v3">
+              ${escapeHTML(
+                TYPE_LABELS[trip.tripType] ||
+                "رحلة"
+              )}
+            </span>
+          </div>
 
-              <div class="tic-budget-breakdown">
-                <div class="tic-budget-breakdown-item">
-                  <small>المصروف</small>
-                  <strong>
-                    ${escapeHTML(ui.currency(spent))}
-                  </strong>
-                </div>
+          <div class="trips-detail-actions">
+            <button
+              type="button"
+              class="trips-action trips-action--primary"
+              data-action="trips-edit"
+              data-trip-id="${escapeHTML(trip.id)}"
+            >
+              تعديل الرحلة
+            </button>
 
-                <div class="tic-budget-breakdown-item">
-                  <small>المتبقي</small>
-                  <strong>
-                    ${escapeHTML(
-                      ui.currency(
-                        Math.max(0, budget - spent)
-                      )
-                    )}
-                  </strong>
-                </div>
+            <button
+              type="button"
+              class="trips-action trips-action--glass"
+              data-action="trips-card-menu"
+              data-trip-id="${escapeHTML(trip.id)}"
+            >
+              إجراءات إضافية
+            </button>
+          </div>
+        </section>
 
-                <div class="tic-budget-breakdown-item">
-                  <small>الاستخدام</small>
-                  <strong>${usage}%</strong>
-                </div>
-              </div>
+        <section class="trips-section">
+          <div class="trips-section__header">
+            <div>
+              <p class="trips-section__eyebrow">
+                JOURNEY DETAILS
+              </p>
 
-              <div style="margin-top:16px">
-                ${ui.progress(usage, {
-                  label: "استخدام الميزانية"
-                })}
-              </div>
-            </article>
-          `
-        })}
+              <h2>تفاصيل الرحلة</h2>
+            </div>
+          </div>
 
-        ${ui.section({
-          eyebrow: "ACTIVITIES",
-          title: "الأنشطة",
-          content:
-            activities.length
-              ? ui.list(
-                  activities.map(
-                    (activity, index) => ({
-                      icon: index + 1,
-                      title: isObject(activity)
-                        ? activity.title ||
-                          activity.name ||
-                          ""
-                        : activity,
-                      subtitle:
-                        isObject(activity)
-                          ? activity.description || ""
-                          : ""
-                    })
-                  )
-                )
-              : ui.empty({
-                  icon: "☆",
-                  title: "لا توجد أنشطة",
-                  message:
-                    "أضف الأنشطة عند تعديل الرحلة."
-                })
-        })}
-
-        ${ui.section({
-          eyebrow: "READINESS",
-          title: "الوثائق والتجهيز",
-          content: ui.grid(
-            `
-              ${ui.card({
-                icon: "▣",
-                title: "الوثائق",
-                description:
-                  `${documents.length} وثيقة مرتبطة بالرحلة`,
-                footer: ui.button({
-                  label: "عرض الوثائق",
-                  route: "more",
-                  view: "documents",
-                  params: {
-                    tripId: trip.id
-                  },
-                  block: true
-                })
-              })}
-
-              ${ui.card({
-                icon: "✓",
-                title: "قائمة التجهيز",
-                description:
-                  `تم تجهيز ${packed} من ${packing.length} عنصر`,
-                body: ui.progress(
-                  packing.length
-                    ? Math.round(
-                        (packed / packing.length) * 100
-                      )
-                    : 0,
-                  {
-                    label: "اكتمال التجهيز"
-                  }
-                ),
-                footer: ui.button({
-                  label: "فتح قائمة التجهيز",
-                  route: "more",
-                  view: "packing",
-                  params: {
-                    tripId: trip.id
-                  },
-                  block: true
-                })
-              })}
-            `,
-            {
-              columns: 2
-            }
-          )
-        })}
+          <div class="trips-details-grid">
+            ${fields.map(([label, value]) => `
+              <article class="trips-detail-box">
+                <small>${escapeHTML(label)}</small>
+                <strong>${escapeHTML(value)}</strong>
+              </article>
+            `).join("")}
+          </div>
+        </section>
 
         ${
-          trip.notes
-            ? ui.section({
-                eyebrow: "NOTES",
-                title: "ملاحظات الرحلة",
-                content: ui.card({
-                  body: `
-                    <p class="tic-card-text">
-                      ${escapeHTML(trip.notes)}
+          trip.bestMemory || trip.notes
+            ? `
+              <section class="trips-section">
+                <div class="trips-section__header">
+                  <div>
+                    <p class="trips-section__eyebrow">
+                      MEMORIES
                     </p>
-                  `
-                })
-              })
+
+                    <h2>ذكريات وملاحظات</h2>
+                  </div>
+                </div>
+
+                <div class="trips-details-grid">
+                  ${
+                    trip.bestMemory
+                      ? `
+                        <article class="trips-detail-box">
+                          <small>أجمل ذكرى</small>
+                          <strong>
+                            ${escapeHTML(trip.bestMemory)}
+                          </strong>
+                        </article>
+                      `
+                      : ""
+                  }
+
+                  ${
+                    trip.notes
+                      ? `
+                        <article class="trips-detail-box">
+                          <small>ملاحظات الرحلة</small>
+                          <strong>
+                            ${escapeHTML(trip.notes)}
+                          </strong>
+                        </article>
+                      `
+                      : ""
+                  }
+                </div>
+              </section>
+            `
             : ""
         }
-
-        ${ui.section({
-          eyebrow: "MANAGEMENT",
-          title: "إدارة الرحلة",
-          subtitle:
-            "غيّر الحالة أو نفذ إجراءات الرحلة.",
-          content: `
-            <div class="tic-card tic-card-body">
-              <div class="tic-form-grid">
-                <div class="tic-field">
-                  <label>حالة الرحلة</label>
-
-                  <select
-                    class="tic-select"
-                    data-trip-status-update
-                    data-trip-id="${escapeHTML(trip.id)}"
-                  >
-                    ${Object.entries(STATUS_LABELS)
-                      .map(
-                        ([value, label]) => `
-                          <option
-                            value="${escapeHTML(value)}"
-                            ${value === status ? "selected" : ""}
-                          >
-                            ${escapeHTML(label)}
-                          </option>
-                        `
-                      )
-                      .join("")}
-                  </select>
-                </div>
-
-                <div class="tic-field">
-                  <label>&nbsp;</label>
-
-                  ${ui.button({
-                    label: "حذف الرحلة",
-                    action: "trips-delete",
-                    params: {
-                      tripId: trip.id
-                    },
-                    danger: true,
-                    block: true
-                  })}
-                </div>
-              </div>
-            </div>
-          `
-        })}
       </div>
     `;
   };
 
-  const renderPage = (snapshot) => {
-    const ui = getUI();
+  const renderPage = (snapshot) => `
+    <div
+      class="tic-module"
+      data-page="trips"
+      data-view="${escapeHTML(state.activeView)}"
+      data-page-version="${PAGE_VERSION}"
+    >
+      ${
+        state.activeView === "details"
+          ? renderDetails(snapshot.activeTrip)
+          : renderHub(snapshot)
+      }
+    </div>
+  `;
 
-    if (state.activeView === "details") {
-      return `
-        <div
-          class="tic-module"
-          data-page="trips"
-          data-view="details"
-          data-page-version="${PAGE_VERSION}"
-        >
-          ${renderTripDetails(snapshot.activeTrip)}
-        </div>
-      `;
-    }
+  const renderMemoryModal = () => {
+    const draft = state.memoryDraft || {};
 
     return `
-      <div
-        class="tic-module"
-        data-page="trips"
-        data-view="list"
-        data-page-version="${PAGE_VERSION}"
-      >
-        ${ui.hero({
-          badge: "Trips Center",
-          title: "رحلاتي",
-          subtitle:
-            "خطط لكل رحلة، تابع ميزانيتها، وجهّز تفاصيلها من مكان واحد.",
-          actions: [
-            {
-              label: "رحلة جديدة",
-              action: "trips-new",
-              primary: true,
-              icon: "＋"
-            }
-          ]
-        })}
-
-        ${ui.section({
-          eyebrow: "OVERVIEW",
-          title: "ملخص الرحلات",
-          subtitle:
-            "نظرة سريعة على حالة جميع رحلاتك.",
-          content: renderStatistics(snapshot)
-        })}
-
-        ${ui.section({
-          eyebrow: "ALL JOURNEYS",
-          title: "جميع الرحلات",
-          subtitle:
-            "ابحث وفلتر ورتب الرحلات بسهولة.",
-          content: `
-            ${renderFilters()}
-            <div style="margin-top:16px">
-              ${renderTripsList(snapshot)}
+      <div class="trips-modal-backdrop" data-trips-modal>
+        <form class="trips-modal" data-memory-form>
+          <div class="trips-modal__header">
+            <div>
+              <h3>إضافة رحلة سابقة</h3>
+              <small style="color:#75839b">
+                سجل بسيط لذكرياتك، ويمكنك استكمال التفاصيل لاحقاً.
+              </small>
             </div>
-          `
-        })}
+
+            <button
+              type="button"
+              class="trips-modal__close"
+              data-action="trips-close-modal"
+              aria-label="إغلاق"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="trips-modal__body">
+            <div class="trips-modal__grid">
+              <div class="trips-field">
+                <label>اسم الرحلة *</label>
+                <input
+                  name="title"
+                  required
+                  value="${escapeHTML(draft.title || "")}"
+                  placeholder="مثال: رحلة المالديف"
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>الدولة *</label>
+                <input
+                  name="country"
+                  required
+                  value="${escapeHTML(draft.country || "")}"
+                  placeholder="مثال: المالديف"
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>المدينة أو الجزيرة</label>
+                <input
+                  name="city"
+                  value="${escapeHTML(draft.city || "")}"
+                  placeholder="مثال: جنوب ماليه"
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>السنة</label>
+                <input
+                  name="travelYear"
+                  type="number"
+                  min="1950"
+                  max="2100"
+                  value="${escapeHTML(
+                    draft.travelYear ||
+                    new Date().getFullYear()
+                  )}"
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>تاريخ البداية</label>
+                <input
+                  name="startDate"
+                  type="date"
+                  value="${escapeHTML(draft.startDate || "")}"
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>تاريخ النهاية</label>
+                <input
+                  name="endDate"
+                  type="date"
+                  value="${escapeHTML(draft.endDate || "")}"
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>نوع الرحلة</label>
+                <select name="tripType">
+                  ${Object.entries(TYPE_LABELS)
+                    .map(([value, label]) => `
+                      <option
+                        value="${escapeHTML(value)}"
+                        ${
+                          (draft.tripType || "family") === value
+                            ? "selected"
+                            : ""
+                        }
+                      >
+                        ${escapeHTML(label)}
+                      </option>
+                    `)
+                    .join("")}
+                </select>
+              </div>
+
+              <div class="trips-field">
+                <label>من سافر معك؟</label>
+                <input
+                  name="travelCompanions"
+                  value="${escapeHTML(draft.travelCompanions || "")}"
+                  placeholder="العائلة، الزوجة، الأصدقاء..."
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>الفندق أو السكن</label>
+                <input
+                  name="accommodation"
+                  value="${escapeHTML(draft.accommodation || "")}"
+                  placeholder="اختياري"
+                >
+              </div>
+
+              <div class="trips-field">
+                <label>التقييم</label>
+                <select name="rating">
+                  <option value="">غير محدد</option>
+                  ${[5, 4, 3, 2, 1]
+                    .map((rating) => `
+                      <option
+                        value="${rating}"
+                        ${
+                          String(draft.rating || "") === String(rating)
+                            ? "selected"
+                            : ""
+                        }
+                      >
+                        ${rating} من 5
+                      </option>
+                    `)
+                    .join("")}
+                </select>
+              </div>
+            </div>
+
+            <div class="trips-field">
+              <label>المدن أو الأماكن التي زرتها</label>
+              <input
+                name="cities"
+                value="${escapeHTML(
+                  Array.isArray(draft.cities)
+                    ? draft.cities.join("، ")
+                    : draft.cities || ""
+                )}"
+                placeholder="افصل بينها بفاصلة"
+              >
+            </div>
+
+            <div class="trips-field">
+              <label>أجمل ذكرى</label>
+              <textarea
+                name="bestMemory"
+                placeholder="ما أكثر شيء بقي في ذاكرتك؟"
+              >${escapeHTML(draft.bestMemory || "")}</textarea>
+            </div>
+
+            <div class="trips-field">
+              <label>ملاحظات إضافية</label>
+              <textarea
+                name="notes"
+                placeholder="أماكن، مطاعم، نصائح أو مواقف جميلة..."
+              >${escapeHTML(draft.notes || "")}</textarea>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:10px;font-weight:900">
+              <input
+                type="checkbox"
+                name="wouldVisitAgain"
+                value="true"
+                ${
+                  draft.wouldVisitAgain === true
+                    ? "checked"
+                    : ""
+                }
+              >
+              أرغب بزيارة هذه الوجهة مرة أخرى
+            </label>
+          </div>
+
+          <div class="trips-modal__footer">
+            <button
+              type="button"
+              class="trips-btn trips-btn--secondary"
+              data-action="trips-close-modal"
+            >
+              إلغاء
+            </button>
+
+            <button
+              type="submit"
+              class="trips-btn trips-btn--primary"
+            >
+              حفظ في مكتبة السفر
+            </button>
+          </div>
+        </form>
       </div>
     `;
   };
 
-  const applyInputFilters = () => {
+  const showMemoryModal = () => {
+    closeModal();
+
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = renderMemoryModal();
+
+    const modal =
+      wrapper.firstElementChild;
+
+    if (!modal) return false;
+
+    document.body.appendChild(modal);
+    document.body.style.overflow = "hidden";
+
+    const form =
+      modal.querySelector("[data-memory-form]");
+
+    form?.addEventListener(
+      "submit",
+      handleMemorySubmit
+    );
+
+    modal.addEventListener("click", (event) => {
+      if (
+        event.target === modal ||
+        event.target.closest(
+          '[data-action="trips-close-modal"]'
+        )
+      ) {
+        closeModal();
+      }
+    });
+
+    return true;
+  };
+
+  const closeModal = () => {
+    document
+      .querySelector("[data-trips-modal]")
+      ?.remove();
+
+    document.body.style.overflow = "";
+  };
+
+  const handleMemorySubmit = async (event) => {
+    event.preventDefault();
+
+    const formData =
+      new FormData(event.currentTarget);
+
+    const title = text(formData.get("title"));
+    const country = text(formData.get("country"));
+    const travelYear =
+      number(formData.get("travelYear")) ||
+      new Date().getFullYear();
+
+    if (!title || !country) {
+      getUI()?.toast?.(
+        "أدخل اسم الرحلة والدولة.",
+        "error"
+      );
+
+      return false;
+    }
+
+    const rawStart =
+      text(formData.get("startDate"));
+
+    const rawEnd =
+      text(formData.get("endDate"));
+
+    const fallbackStart =
+      `${travelYear}-01-01`;
+
+    const now =
+      new Date().toISOString();
+
+    const cities = text(
+      formData.get("cities")
+    )
+      .split(/[،,]/)
+      .map(text)
+      .filter(Boolean);
+
+    const trip = {
+      id: createId("memory"),
+      title,
+      destination:
+        [text(formData.get("city")), country]
+          .filter(Boolean)
+          .join("، "),
+      country,
+      city: text(formData.get("city")),
+      cities,
+      countryFlag: countryFlag(country),
+      travelYear,
+      startDate: rawStart || fallbackStart,
+      endDate: rawEnd || rawStart || fallbackStart,
+      tripType:
+        text(formData.get("tripType")) ||
+        "family",
+      travelCompanions: text(
+        formData.get("travelCompanions")
+      ),
+      accommodation: text(
+        formData.get("accommodation")
+      ),
+      rating: number(formData.get("rating")),
+      bestMemory: text(
+        formData.get("bestMemory")
+      ),
+      notes: text(formData.get("notes")),
+      wouldVisitAgain:
+        formData.get("wouldVisitAgain") === "true",
+      status: "completed",
+      isMemory: true,
+      memorySource: "manual-history",
+      budget: 0,
+      spent: 0,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    try {
+      getUI()?.showLoader?.(
+        "جاري حفظ ذكرى السفر..."
+      );
+
+      await addTripToStore(trip);
+
+      closeModal();
+
+      state.activeTab = "memories";
+      state.activeView = "hub";
+      state.memoryDraft = null;
+
+      refresh();
+
+      getUI()?.toast?.(
+        "تمت إضافة الرحلة إلى مكتبة السفر.",
+        "success"
+      );
+
+      emit("memory-created", {
+        tripId: trip.id,
+        country: trip.country
+      });
+
+      return true;
+    } catch (error) {
+      console.error(
+        "TIC Trips memory create error:",
+        error
+      );
+
+      getUI()?.toast?.(
+        "تعذر حفظ رحلة الذكريات.",
+        "error"
+      );
+
+      return false;
+    } finally {
+      getUI()?.hideLoader?.();
+    }
+  };
+
+  const readActionParams = (payload = {}) => {
+    const event =
+      payload.event ||
+      payload.originalEvent ||
+      null;
+
+    const source =
+      event?.target?.closest?.(
+        "[data-trip-id]"
+      ) ||
+      null;
+
+    return {
+      ...(payload.params || {}),
+      tripId:
+        payload.params?.tripId ||
+        payload.params?.id ||
+        source?.getAttribute("data-trip-id") ||
+        null
+    };
+  };
+
+  const applyInputBindings = () => {
     if (!state.container) return;
+
+    state.container
+      .querySelectorAll("[data-trips-tab]")
+      .forEach((button) => {
+        button.addEventListener(
+          "click",
+          () => {
+            state.activeTab =
+              button.getAttribute(
+                "data-trips-tab"
+              ) || "upcoming";
+
+            state.filters.search = "";
+            state.filters.status = "all";
+            state.filters.type = "all";
+
+            refresh();
+
+            state.container
+              ?.querySelector(
+                ".trips-section:last-of-type"
+              )
+              ?.scrollIntoView({
+                behavior: "smooth",
+                block: "start"
+              });
+          }
+        );
+      });
 
     const searchInput =
       state.container.querySelector(
         "[data-trips-search]"
-      );
-
-    const statusSelect =
-      state.container.querySelector(
-        "[data-trips-filter-status]"
-      );
-
-    const typeSelect =
-      state.container.querySelector(
-        "[data-trips-filter-type]"
-      );
-
-    const sortSelect =
-      state.container.querySelector(
-        "[data-trips-sort]"
       );
 
     searchInput?.addEventListener(
@@ -1431,69 +2928,42 @@
       }
     );
 
-    statusSelect?.addEventListener(
-      "change",
-      (event) => {
-        state.filters.status =
-          event.target.value;
-
-        refresh();
-      }
-    );
-
-    typeSelect?.addEventListener(
-      "change",
-      (event) => {
-        state.filters.type =
-          event.target.value;
-
-        refresh();
-      }
-    );
-
-    sortSelect?.addEventListener(
-      "change",
-      (event) => {
-        state.filters.sort =
-          event.target.value;
-
-        refresh();
-      }
-    );
-
-    const statusUpdate =
-      state.container.querySelector(
-        "[data-trip-status-update]"
+    state.container
+      .querySelector(
+        "[data-trips-filter-status]"
+      )
+      ?.addEventListener(
+        "change",
+        (event) => {
+          state.filters.status =
+            event.target.value;
+          refresh();
+        }
       );
 
-    statusUpdate?.addEventListener(
-      "change",
-      async (event) => {
-        const tripId =
-          event.target.getAttribute(
-            "data-trip-id"
-          );
+    state.container
+      .querySelector(
+        "[data-trips-filter-type]"
+      )
+      ?.addEventListener(
+        "change",
+        (event) => {
+          state.filters.type =
+            event.target.value;
+          refresh();
+        }
+      );
 
-        const status =
-          event.target.value;
-
-        await updateTrip(tripId, {
-          status
-        });
-
-        getUI()?.toast?.(
-          "تم تحديث حالة الرحلة.",
-          "success"
-        );
-
-        emit("status-updated", {
-          tripId,
-          status
-        });
-
-        refresh();
-      }
-    );
+    state.container
+      .querySelector("[data-trips-sort]")
+      ?.addEventListener(
+        "change",
+        (event) => {
+          state.filters.sort =
+            event.target.value;
+          refresh();
+        }
+      );
   };
 
   const refresh = (options = {}) => {
@@ -1522,7 +2992,7 @@
     state.container.innerHTML =
       renderPage(snapshot);
 
-    applyInputFilters();
+    applyInputBindings();
 
     if (preserveSearch) {
       const input =
@@ -1544,6 +3014,7 @@
 
     emit("refreshed", {
       view: state.activeView,
+      tab: state.activeTab,
       tripCount:
         snapshot.filteredTrips.length,
       activeTripId: state.activeTripId
@@ -1565,9 +3036,14 @@
     const register = (name, handler) => {
       if (ui.hasAction?.(name)) return;
 
-      state.actionUnsubscribers.push(
-        ui.registerAction(name, handler)
-      );
+      const unsubscribe =
+        ui.registerAction(name, handler);
+
+      if (typeof unsubscribe === "function") {
+        state.actionUnsubscribers.push(
+          unsubscribe
+        );
+      }
     };
 
     register("trips-new", () => {
@@ -1585,13 +3061,44 @@
       });
     });
 
+    register("trips-add-memory", () => {
+      state.memoryDraft = {};
+      return showMemoryModal();
+    });
+
+    register("trips-close-modal", () => {
+      closeModal();
+      return true;
+    });
+
+    register("trips-toggle-filters", () => {
+      state.filtersOpen =
+        !state.filtersOpen;
+      refresh();
+      return true;
+    });
+
+    register("trips-clear-filters", () => {
+      state.filters = {
+        search: "",
+        status: "all",
+        type: "all",
+        sort: "start-asc"
+      };
+
+      refresh();
+      return true;
+    });
+
     register(
       "trips-view-details",
-      ({ params }) => {
-        const tripId =
-          params.tripId || params.id;
+      (payload) => {
+        const { tripId } =
+          readActionParams(payload);
 
-        if (!tripId) return false;
+        if (!tripId || !findTrip(tripId)) {
+          return false;
+        }
 
         state.activeTripId = tripId;
         state.activeView = "details";
@@ -1607,8 +3114,8 @@
       }
     );
 
-    register("trips-back-to-list", () => {
-      state.activeView = "list";
+    register("trips-back-to-hub", () => {
+      state.activeView = "hub";
       state.activeTripId = null;
 
       refresh();
@@ -1621,13 +3128,25 @@
       return true;
     });
 
-    register("trips-edit", ({ params }) => {
-      const tripId =
-        params.tripId || params.id;
+    register("trips-edit", (payload) => {
+      const { tripId } =
+        readActionParams(payload);
 
       if (!tripId) return false;
 
+      const trip = findTrip(tripId);
+
+      if (!trip) return false;
+
       const tripForm = getTripForm();
+
+      if (
+        trip.isMemory === true &&
+        !tripForm?.openEdit
+      ) {
+        state.memoryDraft = clone(trip);
+        return showMemoryModal();
+      }
 
       if (tripForm?.openEdit) {
         return tripForm.openEdit(tripId);
@@ -1643,41 +3162,94 @@
     });
 
     register(
-      "trips-duplicate",
-      async ({ params }) => {
-        const tripId =
-          params.tripId || params.id;
+      "trips-card-menu",
+      async (payload) => {
+        const { tripId } =
+          readActionParams(payload);
 
         const trip = findTrip(tripId);
 
         if (!trip) {
-          ui.toast(
+          ui.toast?.(
             "تعذر العثور على الرحلة.",
             "error"
           );
-
           return false;
         }
 
+        const choice = window.prompt(
+          [
+            "اختر الإجراء:",
+            "1 - تعديل الرحلة",
+            "2 - إنشاء نسخة",
+            "3 - حذف الرحلة"
+          ].join("\n")
+        );
+
+        if (choice === "1") {
+          return ui.runAction?.(
+            "trips-edit",
+            {
+              params: { tripId }
+            }
+          ) || getTripForm()?.openEdit?.(tripId);
+        }
+
+        if (choice === "2") {
+          return ui.runAction?.(
+            "trips-duplicate",
+            {
+              params: { tripId }
+            }
+          );
+        }
+
+        if (choice === "3") {
+          return ui.runAction?.(
+            "trips-delete",
+            {
+              params: { tripId }
+            }
+          );
+        }
+
+        return false;
+      }
+    );
+
+    register(
+      "trips-duplicate",
+      async (payload) => {
+        const { tripId } =
+          readActionParams(payload);
+
+        const trip = findTrip(tripId);
+
+        if (!trip) return false;
+
         const confirmed =
-          await ui.confirm({
-            title: "تكرار الرحلة",
-            message:
-              `سيتم إنشاء نسخة جديدة من رحلة "${
-                trip.title ||
-                trip.destination
-              }".`,
-            confirmLabel: "إنشاء نسخة",
-            cancelLabel: "إلغاء"
-          });
+          typeof ui.confirm === "function"
+            ? await ui.confirm({
+                title: "تكرار الرحلة",
+                message:
+                  `سيتم إنشاء نسخة جديدة من "${
+                    trip.title ||
+                    trip.destination
+                  }".`,
+                confirmLabel: "إنشاء نسخة",
+                cancelLabel: "إلغاء"
+              })
+            : window.confirm(
+                "هل تريد إنشاء نسخة من هذه الرحلة؟"
+              );
 
         if (confirmed !== true) {
           return false;
         }
 
         try {
-          ui.showLoader(
-            "جاري إنشاء نسخة من الرحلة..."
+          ui.showLoader?.(
+            "جاري إنشاء نسخة..."
           );
 
           const duplicate =
@@ -1685,15 +3257,16 @@
               tripId
             );
 
-          ui.toast(
-            "تم إنشاء نسخة جديدة.",
-            "success"
-          );
-
-          state.activeView = "list";
+          state.activeView = "hub";
+          state.activeTab = "upcoming";
           state.activeTripId = null;
 
           refresh();
+
+          ui.toast?.(
+            "تم إنشاء نسخة جديدة.",
+            "success"
+          );
 
           emit("duplicated", {
             sourceTripId: tripId,
@@ -1708,68 +3281,65 @@
             error
           );
 
-          ui.toast(
+          ui.toast?.(
             "تعذر تكرار الرحلة.",
             "error"
           );
 
           return false;
         } finally {
-          ui.hideLoader();
+          ui.hideLoader?.();
         }
       }
     );
 
     register(
       "trips-delete",
-      async ({ params }) => {
-        const tripId =
-          params.tripId || params.id;
+      async (payload) => {
+        const { tripId } =
+          readActionParams(payload);
 
         const trip = findTrip(tripId);
 
-        if (!trip) {
-          ui.toast(
-            "تعذر العثور على الرحلة.",
-            "error"
-          );
-
-          return false;
-        }
+        if (!trip) return false;
 
         const confirmed =
-          await ui.confirm({
-            title: "حذف الرحلة",
-            message:
-              `سيتم حذف رحلة "${
-                trip.title ||
-                trip.destination
-              }" نهائياً.`,
-            confirmLabel: "حذف الرحلة",
-            cancelLabel: "إلغاء",
-            danger: true
-          });
+          typeof ui.confirm === "function"
+            ? await ui.confirm({
+                title: "حذف الرحلة",
+                message:
+                  `سيتم حذف "${
+                    trip.title ||
+                    trip.destination
+                  }" نهائياً.`,
+                confirmLabel: "حذف",
+                cancelLabel: "إلغاء",
+                danger: true
+              })
+            : window.confirm(
+                "هل تريد حذف هذه الرحلة نهائياً؟"
+              );
 
         if (confirmed !== true) {
           return false;
         }
 
         try {
-          ui.showLoader(
+          ui.showLoader?.(
             "جاري حذف الرحلة..."
           );
 
           await deleteTripFromStore(tripId);
 
-          ui.toast(
-            "تم حذف الرحلة.",
-            "success"
-          );
-
-          state.activeView = "list";
+          state.activeView = "hub";
           state.activeTripId = null;
 
           refresh();
+
+          ui.toast?.(
+            "تم حذف الرحلة.",
+            "success"
+          );
 
           emit("deleted", {
             tripId
@@ -1782,30 +3352,17 @@
             error
           );
 
-          ui.toast(
+          ui.toast?.(
             "تعذر حذف الرحلة.",
             "error"
           );
 
           return false;
         } finally {
-          ui.hideLoader();
+          ui.hideLoader?.();
         }
       }
     );
-
-    register("trips-clear-filters", () => {
-      state.filters = {
-        search: "",
-        status: "all",
-        type: "all",
-        sort: "start-asc"
-      };
-
-      refresh();
-
-      return true;
-    });
   };
 
   const subscribeToStore = () => {
@@ -1838,6 +3395,7 @@
         return this.diagnostics();
       }
 
+      ensureStyles();
       registerActions();
       subscribeToStore();
 
@@ -1853,10 +3411,12 @@
     render(context = {}) {
       this.init();
 
-      const params = context.params || {};
+      const params =
+        context.params || {};
 
       if (params.tripId) {
-        state.activeTripId = params.tripId;
+        state.activeTripId =
+          params.tripId;
       }
 
       if (
@@ -1864,9 +3424,12 @@
         params.tripId
       ) {
         state.activeView = "details";
-      } else if (params.view === "list") {
-        state.activeView = "list";
-        state.activeTripId = null;
+      } else {
+        state.activeView = "hub";
+      }
+
+      if (params.tab && TAB_LABELS[params.tab]) {
+        state.activeTab = params.tab;
       }
 
       return renderPage(buildSnapshot());
@@ -1885,17 +3448,21 @@
         );
       }
 
-      const params = context.params || {};
-
-      if (params.tripId) {
-        state.activeTripId = params.tripId;
-      }
+      const params =
+        context.params || {};
 
       state.activeView =
         params.view === "details" &&
         params.tripId
           ? "details"
-          : "list";
+          : "hub";
+
+      state.activeTripId =
+        params.tripId || null;
+
+      if (params.tab && TAB_LABELS[params.tab]) {
+        state.activeTab = params.tab;
+      }
 
       state.container = container;
       state.mounted = true;
@@ -1905,10 +3472,11 @@
       container.innerHTML =
         renderPage(snapshot);
 
-      applyInputFilters();
+      applyInputBindings();
 
       emit("mounted", {
         view: state.activeView,
+        tab: state.activeTab,
         activeTripId: state.activeTripId,
         tripCount: snapshot.trips.length
       });
@@ -1926,17 +3494,19 @@
         state.mounted = true;
       }
 
-      applyInputFilters();
-
+      applyInputBindings();
       return true;
     },
 
     unmount() {
+      closeModal();
+
       state.mounted = false;
       state.container = null;
 
       emit("unmounted", {
         view: state.activeView,
+        tab: state.activeTab,
         activeTripId: state.activeTripId
       });
 
@@ -1956,11 +3526,32 @@
       return refresh();
     },
 
-    openList() {
+    openHub(tab = "upcoming") {
       state.activeTripId = null;
-      state.activeView = "list";
+      state.activeView = "hub";
+
+      if (TAB_LABELS[tab]) {
+        state.activeTab = tab;
+      }
 
       return refresh();
+    },
+
+    openList() {
+      return this.openHub("all");
+    },
+
+    openMemories() {
+      return this.openHub("memories");
+    },
+
+    openCountries() {
+      return this.openHub("countries");
+    },
+
+    addPastTrip() {
+      state.memoryDraft = {};
+      return showMemoryModal();
     },
 
     setFilters(filters = {}) {
@@ -2017,11 +3608,16 @@
         }
       );
 
+      document
+        .getElementById(STYLE_ID)
+        ?.remove();
+
       state.unsubscribeStore = null;
       state.actionUnsubscribers = [];
       state.subscribers.clear();
       state.lastSnapshot = null;
-      state.activeView = "list";
+      state.activeView = "hub";
+      state.activeTab = "upcoming";
       state.activeTripId = null;
       state.initialized = false;
 
@@ -2036,8 +3632,10 @@
         initialized: state.initialized,
         mounted: state.mounted,
         activeView: state.activeView,
+        activeTab: state.activeTab,
         activeTripId: state.activeTripId,
         filters: clone(state.filters),
+        filtersOpen: state.filtersOpen,
         hasContainer: Boolean(state.container),
         storeAvailable: Boolean(getStore()),
         routerAvailable: Boolean(getRouter()),
