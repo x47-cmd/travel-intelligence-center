@@ -1,15 +1,19 @@
 /* =========================================================
    Travel Intelligence Center
-   Home Page Module V2.0.0
+   Home Page Module V2.1.0
 
    File Path:
    js/pages/home.js
 
    Purpose:
-   - Premium iPhone-first executive travel dashboard.
-   - Clean hierarchy inspired by the AI Work dashboard.
-   - Next trip, travel snapshot, readiness, budget,
-     quick actions, recommendations and alerts.
+   - Calm, premium and compact iPhone-first home page.
+   - Keeps the home page focused on positive travel inspiration.
+   - Preserves Store, Router, Trip Form and cross-page integration.
+   - Shows only:
+     1. Compact welcome card.
+     2. Compact next-trip card.
+     3. Compact travel snapshot.
+     4. One positive travel inspiration card.
 
    Dependencies:
    - js/config.js
@@ -28,7 +32,7 @@
 
   const Config = window.TICConfig || window.TIC?.Config || {};
   const PAGE_ID = "home";
-  const PAGE_VERSION = "2.0.0";
+  const PAGE_VERSION = "2.1.0";
 
   const state = {
     initialized: false,
@@ -78,6 +82,9 @@
     const result = Number(value);
     return Number.isFinite(result) ? result : fallback;
   };
+
+  const list = (value) =>
+    Array.isArray(value) ? value : [];
 
   const getStore = () =>
     window.TIC?.Store ||
@@ -218,9 +225,6 @@
     );
   };
 
-  const list = (value) =>
-    Array.isArray(value) ? value : [];
-
   const tripsFrom = (snapshot) =>
     list(snapshot.trips);
 
@@ -285,360 +289,9 @@
     return countries.size;
   };
 
-  const sum = (items, selector) =>
-    items.reduce(
-      (total, item) =>
-        total + number(selector(item)),
-      0
-    );
-
-  const budgetSummaryFrom = (snapshot) => {
-    const trips = tripsFrom(snapshot);
-
-    const totalBudget = sum(
-      trips,
-      (trip) => trip.budget
-    );
-
-    const totalSpent = sum(
-      trips,
-      (trip) => trip.spent
-    );
-
-    const available = Math.max(
-      0,
-      totalBudget - totalSpent
-    );
-
-    const usage =
-      totalBudget > 0
-        ? Math.min(
-            100,
-            Math.round(
-              (totalSpent / totalBudget) * 100
-            )
-          )
-        : 0;
-
-    const profile = isObject(snapshot.profile)
-      ? snapshot.profile
-      : {};
-
-    return {
-      totalBudget,
-      totalSpent,
-      available,
-      usage,
-      annualTravelBudget: number(
-        profile.annualTravelBudget,
-        number(
-          Config.profile?.annualTravelBudget,
-          30000
-        )
-      ),
-      monthlySaving: number(
-        profile.monthlySaving,
-        number(
-          Config.profile?.monthlySaving,
-          1500
-        )
-      )
-    };
-  };
-
-  const packingSummaryFrom = (snapshot, tripId) => {
-    const source = snapshot.packing;
-    let items = [];
-
-    if (Array.isArray(source)) {
-      items = source.filter(
-        (item) =>
-          !tripId ||
-          !item.tripId ||
-          String(item.tripId) === String(tripId)
-      );
-    } else if (isObject(source)) {
-      if (Array.isArray(source.items)) {
-        items = source.items.filter(
-          (item) =>
-            !tripId ||
-            !item.tripId ||
-            String(item.tripId) === String(tripId)
-        );
-      } else if (
-        tripId &&
-        Array.isArray(source[tripId])
-      ) {
-        items = source[tripId];
-      }
-    }
-
-    const total = items.length;
-
-    const completed = items.filter(
-      (item) =>
-        item.completed === true ||
-        item.packed === true ||
-        item.status === "completed"
-    ).length;
-
-    return {
-      total,
-      completed,
-      percentage:
-        total > 0
-          ? Math.round((completed / total) * 100)
-          : 0
-    };
-  };
-
-  const documentSummaryFrom = (snapshot, tripId) => {
-    const documents = list(snapshot.documents).filter(
-      (item) =>
-        !tripId ||
-        !item.tripId ||
-        String(item.tripId) === String(tripId)
-    );
-
-    const valid = documents.filter((item) => {
-      const status = text(item.status).toLowerCase();
-
-      if (
-        ["valid", "ready", "completed"].includes(status)
-      ) {
-        return true;
-      }
-
-      const expiryDate = toDate(item.expiryDate);
-
-      return expiryDate && expiryDate > new Date();
-    }).length;
-
-    const expiring = documents.filter((item) => {
-      const remaining = daysUntil(item.expiryDate);
-
-      return (
-        remaining !== null &&
-        remaining >= 0 &&
-        remaining <= 90
-      );
-    }).length;
-
-    return {
-      total: documents.length,
-      valid,
-      expiring,
-      percentage:
-        documents.length > 0
-          ? Math.round(
-              (valid / documents.length) * 100
-            )
-          : 0
-    };
-  };
-
-  const notificationSummaryFrom = (snapshot) => {
-    const notifications = list(
-      snapshot.notifications
-    );
-
-    const unread = notifications.filter(
-      (item) =>
-        item.read !== true &&
-        item.isRead !== true
-    );
-
-    return {
-      total: notifications.length,
-      unread: unread.length,
-      important: unread.filter(
-        (item) =>
-          item.priority === "high" ||
-          item.type === "warning" ||
-          item.type === "error"
-      ).length,
-      items: unread.slice(0, 4)
-    };
-  };
-
-  const readinessFrom = (
-    trip,
-    packing,
-    documents
-  ) => {
-    if (!trip) {
-      return {
-        score: 0,
-        label: "ابدأ التخطيط",
-        tone: "neutral",
-        items: []
-      };
-    }
-
-    const items = [
-      {
-        label: "بيانات الرحلة",
-        complete: Boolean(
-          trip.title &&
-          trip.destination &&
-          trip.startDate &&
-          trip.endDate
-        )
-      },
-      {
-        label: "الميزانية",
-        complete: number(trip.budget) > 0
-      },
-      {
-        label: "الحجز والإقامة",
-        complete: Boolean(
-          trip.accommodation ||
-          trip.bookingReference ||
-          trip.airline
-        )
-      },
-      {
-        label: "الوثائق",
-        complete:
-          documents.total > 0 &&
-          documents.percentage >= 80
-      },
-      {
-        label: "التجهيز",
-        complete:
-          packing.total > 0 &&
-          packing.percentage >= 80
-      }
-    ];
-
-    const completed = items.filter(
-      (item) => item.complete
-    ).length;
-
-    const score = Math.round(
-      (completed / items.length) * 100
-    );
-
-    return {
-      score,
-      label:
-        score >= 80
-          ? "جاهزية ممتازة"
-          : score >= 50
-            ? "جاهزية جيدة"
-            : "تحتاج تجهيز",
-      tone:
-        score >= 80
-          ? "success"
-          : score >= 50
-            ? "info"
-            : "warning",
-      items
-    };
-  };
-
-  const recommendationsFrom = (
-    snapshot,
-    nextTrip,
-    readiness,
-    budget
-  ) => {
-    const items = [];
-
-    if (!nextTrip) {
-      return [
-        {
-          icon: "✈",
-          title: "ابدأ رحلتك القادمة",
-          description:
-            "أنشئ رحلة وحدد الوجهة والمواعيد والميزانية.",
-          action: "home-new-trip",
-          label: "إنشاء رحلة"
-        },
-        {
-          icon: "☆",
-          title: "اكتشف وجهتك القادمة",
-          description:
-            "استعرض الدول والمدن واحفظ ما يعجبك.",
-          route: "guide",
-          label: "فتح الدليل"
-        }
-      ];
-    }
-
-    const remainingDays =
-      daysUntil(nextTrip.startDate);
-
-    if (
-      remainingDays !== null &&
-      remainingDays <= 30 &&
-      readiness.score < 80
-    ) {
-      items.push({
-        icon: "✓",
-        title: "أكمل جاهزية الرحلة",
-        description:
-          "موعد السفر قريب وبعض التجهيزات غير مكتملة.",
-        route: "more",
-        view: "readiness",
-        label: "مراجعة الجاهزية"
-      });
-    }
-
-    if (
-      number(nextTrip.spent) >
-      number(nextTrip.budget)
-    ) {
-      items.push({
-        icon: "!",
-        title: "راجع مصروفات الرحلة",
-        description:
-          "المصروف الحالي تجاوز الميزانية المحددة.",
-        route: "budget",
-        label: "فتح الميزانية"
-      });
-    } else if (budget.monthlySaving <= 0) {
-      items.push({
-        icon: "◈",
-        title: "فعّل ادخار السفر",
-        description:
-          "حدد مبلغاً شهرياً لرحلاتك القادمة.",
-        route: "budget",
-        view: "savings",
-        label: "إدارة الادخار"
-      });
-    }
-
-    if (
-      !nextTrip.accommodation &&
-      !nextTrip.bookingReference
-    ) {
-      items.push({
-        icon: "⌂",
-        title: "أضف معلومات الإقامة",
-        description:
-          "أكمل بيانات الفندق أو رقم الحجز.",
-        action: "home-edit-next-trip",
-        label: "تعديل الرحلة"
-      });
-    }
-
-    if (!items.length) {
-      items.push({
-        icon: "✓",
-        title: "رحلتك مرتبة",
-        description:
-          "لا توجد تنبيهات مهمة حالياً.",
-        route: "trips",
-        label: "عرض الرحلة"
-      });
-    }
-
-    return items.slice(0, 3);
-  };
-
   const buildSnapshot = () => {
     const raw = getStoreState();
+
     const profile = isObject(raw.profile)
       ? raw.profile
       : {};
@@ -647,35 +300,14 @@
     const upcomingTrips = upcomingTripsFrom(raw);
     const completedTrips = completedTripsFrom(raw);
     const nextTrip = upcomingTrips[0] || null;
-    const budget = budgetSummaryFrom(raw);
-    const packing = packingSummaryFrom(
-      raw,
-      nextTrip?.id
-    );
-    const documents = documentSummaryFrom(
-      raw,
-      nextTrip?.id
-    );
-    const notifications =
-      notificationSummaryFrom(raw);
-    const readiness = readinessFrom(
-      nextTrip,
-      packing,
-      documents
-    );
 
-    const snapshot = {
+    return {
       raw,
       profile,
       trips,
       upcomingTrips,
       completedTrips,
       nextTrip,
-      budget,
-      packing,
-      documents,
-      notifications,
-      readiness,
       statistics: {
         totalTrips: trips.length,
         upcomingTrips: upcomingTrips.length,
@@ -685,97 +317,67 @@
         memories: list(raw.memories).length
       }
     };
-
-    snapshot.recommendations =
-      recommendationsFrom(
-        raw,
-        nextTrip,
-        readiness,
-        budget
-      );
-
-    return snapshot;
   };
 
-  const renderHero = (snapshot) => {
-    const ui = getUI();
+  const formatCountdown = (trip) => {
+    if (!trip) return "";
 
+    const remainingDays = daysUntil(trip.startDate);
+
+    if (remainingDays === null) {
+      return "موعد الرحلة غير محدد";
+    }
+
+    if (remainingDays === 0) {
+      return "موعد السفر اليوم";
+    }
+
+    if (remainingDays === 1) {
+      return "متبقي يوم واحد";
+    }
+
+    if (remainingDays > 1) {
+      return `متبقي ${remainingDays} يوم`;
+    }
+
+    return "بدأت الرحلة";
+  };
+
+  const getTripDestination = (trip) =>
+    text(trip?.destination) ||
+    [trip?.city, trip?.country]
+      .filter(Boolean)
+      .join("، ") ||
+    text(trip?.title) ||
+    "رحلة قادمة";
+
+  const renderWelcome = (snapshot) => {
     const name =
       snapshot.profile.name ||
       Config.profile?.name ||
       "يوسف";
 
-    const nextTrip = snapshot.nextTrip;
-    const remainingDays = nextTrip
-      ? daysUntil(nextTrip.startDate)
-      : null;
-
-    const aside = nextTrip
-      ? `
-        <div class="tic-card tic-card-body">
-          <span class="tic-chip">
-            الرحلة القادمة
+    return `
+      <section class="tic-home-welcome" aria-labelledby="tic-home-welcome-title">
+        <div class="tic-home-welcome-copy">
+          <span class="tic-home-welcome-label">
+            TRAVEL INTELLIGENCE CENTER
           </span>
 
-          <h3 class="tic-card-title" style="margin-top:12px">
-            ${escapeHTML(
-              nextTrip.destination ||
-              nextTrip.title ||
-              "رحلة قادمة"
-            )}
-          </h3>
+          <h1 id="tic-home-welcome-title">
+            هلا ${escapeHTML(name)}
+          </h1>
 
-          <p class="tic-card-text">
-            ${
-              remainingDays === 0
-                ? "موعد السفر اليوم"
-                : remainingDays === 1
-                  ? "متبقي يوم واحد"
-                  : `متبقي ${Math.max(
-                      0,
-                      remainingDays || 0
-                    )} يوم`
-            }
+          <p>
+            خلّ رحلتك القادمة أجمل وأسهل.
           </p>
         </div>
-      `
-      : `
-        <div class="tic-card tic-card-body">
-          <span class="tic-chip">
-            خطتك القادمة
-          </span>
 
-          <h3 class="tic-card-title" style="margin-top:12px">
-            جاهز لرحلة جديدة؟
-          </h3>
-
-          <p class="tic-card-text">
-            ابدأ التخطيط من مكان واحد.
-          </p>
+        <div class="tic-home-welcome-icon" aria-hidden="true">
+          ✈
         </div>
-      `;
-
-    return ui.hero({
-      badge: "Travel Intelligence Center",
-      title: `هلا ${name}`,
-      subtitle:
-        "كل رحلاتك وميزانيتك وجاهزيتك في مركز واحد.",
-      greeting: true,
-      actions: [
-        {
-          label: "رحلة جديدة",
-          action: "home-new-trip",
-          primary: true,
-          icon: "＋"
-        },
-        {
-          label: "عرض الرحلات",
-          route: "trips",
-          soft: true
-        }
-      ],
-      aside
-    });
+      </section>
+    `;
   };
 
   const renderNextTrip = (snapshot) => {
@@ -783,20 +385,38 @@
     const trip = snapshot.nextTrip;
 
     if (!trip) {
-      return ui.empty({
-        icon: "✈",
-        title: "لا توجد رحلة قادمة",
-        message:
-          "أنشئ رحلة جديدة لتظهر هنا تفاصيل الموعد والميزانية والجاهزية.",
-        action: {
-          label: "إنشاء رحلة جديدة",
-          action: "home-new-trip",
-          primary: true
-        }
-      });
-    }
+      return `
+        <article class="tic-home-next-card tic-home-next-card-empty">
+          <div class="tic-home-next-top">
+            <div>
+              <span class="tic-home-kicker">
+                خطوتك القادمة
+              </span>
 
-    const remainingDays = daysUntil(trip.startDate);
+              <h3>
+                وين بتكون سفرتك الياية؟
+              </h3>
+            </div>
+
+            <div class="tic-home-next-icon" aria-hidden="true">
+              ✈
+            </div>
+          </div>
+
+          <p class="tic-home-next-message">
+            أنشئ رحلة جديدة وخلك جاهز لأجمل تجربة.
+          </p>
+
+          <div class="tic-home-next-actions">
+            ${ui.button({
+              label: "إنشاء رحلة",
+              action: "home-new-trip",
+              primary: true
+            })}
+          </div>
+        </article>
+      `;
+    }
 
     const duration = number(
       trip.durationDays,
@@ -806,507 +426,227 @@
       )
     );
 
-    const statusLabel = {
-      planning: "قيد التخطيط",
-      booked: "تم الحجز",
-      ready: "جاهزة",
-      ongoing: "جارية",
-      completed: "مكتملة"
-    }[text(trip.status).toLowerCase()] ||
-    "قيد التخطيط";
-
-    const countdown =
-      remainingDays === 0
-        ? "السفر اليوم"
-        : remainingDays === 1
-          ? "متبقي يوم واحد"
-          : remainingDays > 1
-            ? `متبقي ${remainingDays} يوم`
-            : "بدأت الرحلة";
-
-    const body = `
-      <div class="tic-feature-row">
-        <div>
-          <span class="tic-chip tic-chip-info">
-            ${escapeHTML(countdown)}
-          </span>
-
-          <h3 class="tic-card-title" style="margin-top:14px">
-            ${escapeHTML(
-              trip.title ||
-              trip.destination ||
-              "رحلة قادمة"
-            )}
-          </h3>
-
-          <p class="tic-card-text">
-            ${escapeHTML(
-              trip.destination ||
-              [trip.city, trip.country]
-                .filter(Boolean)
-                .join("، ")
-            )}
-          </p>
-        </div>
-
-        ${ui.status(statusLabel, {
-          value: trip.status
-        })}
-      </div>
-
-      <div class="tic-trip-meta">
-        ${ui.info(
-          "التاريخ",
-          `${ui.date(trip.startDate)} — ${ui.date(
-            trip.endDate
-          )}`
-        )}
-
-        ${ui.info(
-          "المدة",
-          `${duration} يوم`
-        )}
-
-        ${ui.info(
-          "الميزانية",
-          ui.currency(trip.budget)
-        )}
-      </div>
-
-      <div style="margin-top:16px">
-        ${ui.progress(
-          snapshot.readiness.score,
-          {
-            label: "جاهزية الرحلة",
-            hint: snapshot.readiness.label
-          }
-        )}
-      </div>
-
-      <div class="tic-grid tic-grid-2" style="margin-top:16px">
-        ${ui.button({
-          label: "عرض التفاصيل",
-          route: "trips",
-          view: "details",
-          params: {
-            tripId: trip.id
-          },
-          primary: true,
-          block: true
-        })}
-
-        ${ui.button({
-          label: "تعديل الرحلة",
-          action: "home-edit-next-trip",
-          block: true
-        })}
-      </div>
-    `;
-
-    return ui.card({
-      className: "tic-feature-card",
-      body
-    });
-  };
-
-  const renderStatistics = (snapshot) => {
-    const ui = getUI();
-
-    const stats = [
-      {
-        icon: "✈",
-        value: snapshot.statistics.totalTrips,
-        label: "إجمالي الرحلات",
-        subtitle:
-          `${snapshot.statistics.upcomingTrips} قادمة`
-      },
-      {
-        icon: "◎",
-        value: snapshot.statistics.countries,
-        label: "الدول",
-        subtitle:
-          `${snapshot.statistics.completedTrips} مكتملة`
-      },
-      {
-        icon: "☆",
-        value: snapshot.statistics.wishlist,
-        label: "الأمنيات",
-        subtitle: "وجهات محفوظة"
-      },
-      {
-        icon: "◈",
-        value: snapshot.statistics.memories,
-        label: "الذكريات",
-        subtitle: "لحظات موثقة"
-      }
-    ];
-
-    return ui.grid(
-      stats.map((item) => ui.stat(item)).join(""),
-      {
-        columns: 4
-      }
-    );
-  };
-
-  const renderReadiness = (snapshot) => {
-    const ui = getUI();
-    const readiness = snapshot.readiness;
-
-    const items = readiness.items.length
-      ? readiness.items
-          .map(
-            (item) => `
-              <div class="tic-settings-item">
-                <div class="tic-settings-item-main">
-                  <div class="tic-settings-icon">
-                    ${item.complete ? "✓" : "•"}
-                  </div>
-
-                  <div class="tic-settings-copy">
-                    <strong>
-                      ${escapeHTML(item.label)}
-                    </strong>
-
-                    <small>
-                      ${
-                        item.complete
-                          ? "مكتمل"
-                          : "يحتاج متابعة"
-                      }
-                    </small>
-                  </div>
-                </div>
-
-                ${ui.badge(
-                  item.complete
-                    ? "جاهز"
-                    : "ناقص",
-                  item.complete
-                    ? "success"
-                    : "warning"
-                )}
-              </div>
-            `
-          )
-          .join("")
-      : ui.empty({
-          icon: "✓",
-          title: "لا توجد رحلة قادمة",
-          message:
-            "تظهر جاهزية السفر بعد إنشاء رحلة."
-        });
-
-    return ui.card({
-      title: "جاهزية السفر",
-      description:
-        "ملخص سريع لما تم إنجازه قبل موعد السفر.",
-      body: `
-        <div class="tic-feature-row" style="margin-top:16px">
-          <div>
-            <strong class="tic-stat-value">
-              ${readiness.score}%
-            </strong>
-
-            <span class="tic-stat-label">
-              ${escapeHTML(readiness.label)}
-            </span>
-          </div>
-
-          ${ui.status(readiness.label, {
-            tone: readiness.tone
-          })}
-        </div>
-
-        <div style="margin-top:16px">
-          ${ui.progress(
-            readiness.score,
-            {
-              showValue: false
-            }
-          )}
-        </div>
-
-        <div class="tic-settings-list" style="margin-top:16px">
-          ${items}
-        </div>
-      `,
-      footer: ui.button({
-        label: "مراجعة الجاهزية",
-        route: "more",
-        view: "readiness",
-        block: true
-      })
-    });
-  };
-
-  const renderBudget = (snapshot) => {
-    const ui = getUI();
-    const budget = snapshot.budget;
-
     return `
-      <article class="tic-budget-overview">
-        <small>إجمالي المصروف</small>
+      <article class="tic-home-next-card">
+        <div class="tic-home-next-top">
+          <div>
+            <span class="tic-home-kicker">
+              ${escapeHTML(formatCountdown(trip))}
+            </span>
 
-        <strong>
-          ${escapeHTML(
-            ui.currency(budget.totalSpent)
-          )}
-        </strong>
+            <h3>
+              ${escapeHTML(
+                trip.title ||
+                getTripDestination(trip)
+              )}
+            </h3>
 
-        <p style="margin-top:10px;color:rgba(255,255,255,.72)">
-          ${budget.usage}% من ميزانية الرحلات
-        </p>
+            <p>
+              ${escapeHTML(getTripDestination(trip))}
+            </p>
+          </div>
 
-        <div style="margin-top:18px">
-          ${ui.progress(
-            budget.usage,
-            {
-              label: "استخدام الميزانية",
-              hint:
-                `${ui.currency(
-                  budget.available
-                )} متبقي`
-            }
-          )}
+          <div class="tic-home-next-icon" aria-hidden="true">
+            ✈
+          </div>
         </div>
 
-        <div class="tic-budget-breakdown">
-          <div class="tic-budget-breakdown-item">
-            <small>إجمالي الميزانية</small>
+        <div class="tic-home-trip-meta">
+          <div>
+            <span>التاريخ</span>
             <strong>
-              ${escapeHTML(
-                ui.currency(
-                  budget.totalBudget
-                )
-              )}
+              ${escapeHTML(ui.date(trip.startDate))}
             </strong>
           </div>
 
-          <div class="tic-budget-breakdown-item">
-            <small>الادخار الشهري</small>
+          <div>
+            <span>المدة</span>
             <strong>
-              ${escapeHTML(
-                ui.currency(
-                  budget.monthlySaving
-                )
-              )}
+              ${duration > 0 ? `${duration} يوم` : "غير محددة"}
             </strong>
           </div>
 
-          <div class="tic-budget-breakdown-item">
-            <small>الميزانية السنوية</small>
+          <div>
+            <span>الميزانية</span>
             <strong>
-              ${escapeHTML(
-                ui.currency(
-                  budget.annualTravelBudget
-                )
-              )}
+              ${escapeHTML(ui.currency(trip.budget))}
             </strong>
           </div>
         </div>
 
-        <div style="margin-top:16px">
+        <div class="tic-home-next-actions">
           ${ui.button({
-            label: "فتح مركز الميزانية",
-            route: "budget",
-            block: true,
-            soft: true
+            label: "عرض الرحلة",
+            route: "trips",
+            view: "details",
+            params: {
+              tripId: trip.id
+            },
+            primary: true
+          })}
+
+          ${ui.button({
+            label: "تعديل",
+            action: "home-edit-next-trip"
           })}
         </div>
       </article>
     `;
   };
 
-  const renderQuickActions = () => {
-    const ui = getUI();
-
-    return ui.quickActions([
-      {
-        icon: "＋",
-        title: "رحلة جديدة",
-        description:
-          "أنشئ خطة سفر جديدة.",
-        action: "home-new-trip"
-      },
+  const renderStatistics = (snapshot) => {
+    const stats = [
       {
         icon: "✈",
-        title: "رحلاتي",
-        description:
-          "عرض وإدارة السفرات.",
-        route: "trips"
+        value: snapshot.statistics.totalTrips,
+        label: "الرحلات"
       },
       {
-        icon: "⌕",
-        title: "دليل السفر",
-        description:
-          "استكشف الوجهات.",
-        route: "guide"
-      },
-      {
-        icon: "◈",
-        title: "الميزانية",
-        description:
-          "تابع المصروف والادخار.",
-        route: "budget"
-      },
-      {
-        icon: "✓",
-        title: "التجهيز",
-        description:
-          "راجع الوثائق والأمتعة.",
-        route: "more",
-        view: "readiness"
+        icon: "◎",
+        value: snapshot.statistics.countries,
+        label: "الدول"
       },
       {
         icon: "☆",
-        title: "الذكريات",
-        description:
-          "راجع لحظات السفر.",
-        route: "more",
-        view: "memories"
-      }
-    ]);
-  };
-
-  const renderRecommendations = (snapshot) => {
-    const ui = getUI();
-
-    return ui.grid(
-      snapshot.recommendations
-        .map((item) =>
-          ui.card({
-            icon: item.icon,
-            title: item.title,
-            description: item.description,
-            footer: ui.button({
-              label: item.label,
-              action: item.action,
-              route: item.route,
-              view: item.view,
-              block: true
-            })
-          })
-        )
-        .join(""),
+        value: snapshot.statistics.wishlist,
+        label: "الأمنيات"
+      },
       {
-        columns: 3
+        icon: "◈",
+        value: snapshot.statistics.memories,
+        label: "الذكريات"
       }
-    );
-  };
-
-  const renderAlerts = (snapshot) => {
-    const ui = getUI();
-    const notifications = snapshot.notifications;
-
-    if (notifications.unread === 0) {
-      return ui.empty({
-        icon: "✓",
-        title: "لا توجد تنبيهات",
-        message:
-          "كل شيء منظم ولا توجد إشعارات تحتاج انتباهك."
-      });
-    }
-
-    return ui.list(
-      notifications.items.map((item) => ({
-        icon:
-          item.type === "error" ||
-          item.type === "warning"
-            ? "!"
-            : "i",
-        title:
-          item.title ||
-          "تنبيه سفر",
-        subtitle:
-          item.message ||
-          item.description ||
-          "",
-        badge:
-          item.priority === "high"
-            ? "مهم"
-            : "",
-        badgeTone:
-          item.priority === "high"
-            ? "warning"
-            : "neutral"
-      }))
-    );
-  };
-
-  const renderPage = (snapshot) => {
-    const ui = getUI();
-
-    const overviewGrid = ui.grid(
-      `${renderReadiness(snapshot)}${renderBudget(
-        snapshot
-      )}`,
-      {
-        columns: 2
-      }
-    );
+    ];
 
     return `
-      <div
-        class="tic-module"
-        data-page="home"
-        data-page-version="${PAGE_VERSION}"
-      >
-        ${renderHero(snapshot)}
+      <div class="tic-home-stats">
+        ${stats
+          .map(
+            (item) => `
+              <article class="tic-home-stat">
+                <span class="tic-home-stat-icon" aria-hidden="true">
+                  ${item.icon}
+                </span>
 
-        ${ui.section({
-          eyebrow: "NEXT JOURNEY",
-          title: "الرحلة القادمة",
-          subtitle:
-            "أهم معلومات رحلتك القادمة في مكان واحد.",
-          content: renderNextTrip(snapshot)
-        })}
+                <strong>
+                  ${number(item.value)}
+                </strong>
 
-        ${ui.section({
-          eyebrow: "TRAVEL SNAPSHOT",
-          title: "سفراتك",
-          subtitle:
-            "نظرة تنفيذية سريعة على سجل سفرك.",
-          content: renderStatistics(snapshot)
-        })}
-
-        ${ui.section({
-          eyebrow: "TRAVEL CONTROL",
-          title: "الجاهزية والميزانية",
-          subtitle:
-            "تابع استعدادك التنظيمي والمالي.",
-          content: overviewGrid
-        })}
-
-        ${ui.section({
-          eyebrow: "QUICK ACCESS",
-          title: "اختصارات السفر",
-          subtitle:
-            "وصول سريع لأهم أدوات التطبيق.",
-          content: renderQuickActions()
-        })}
-
-        ${ui.section({
-          eyebrow: "TRAVEL INTELLIGENCE",
-          title: "توصيات ذكية",
-          subtitle:
-            "اقتراحات مبنية على حالة رحلاتك.",
-          content:
-            renderRecommendations(snapshot)
-        })}
-
-        ${ui.section({
-          eyebrow: "UPDATES",
-          title: "التنبيهات",
-          subtitle:
-            snapshot.notifications.unread > 0
-              ? `لديك ${snapshot.notifications.unread} تنبيه غير مقروء.`
-              : "لا توجد تنبيهات جديدة.",
-          content: renderAlerts(snapshot)
-        })}
+                <small>
+                  ${escapeHTML(item.label)}
+                </small>
+              </article>
+            `
+          )
+          .join("")}
       </div>
     `;
   };
+
+  const renderInspiration = (snapshot) => {
+    const trip = snapshot.nextTrip;
+    const remainingDays = trip
+      ? daysUntil(trip.startDate)
+      : null;
+
+    let title = "رحلتك تبدأ بفكرة جميلة";
+    let message =
+      "اختر وجهة تحبها، وخطط لها على راحتك، وخلك مستمتع من أول خطوة.";
+
+    if (trip && remainingDays !== null) {
+      if (remainingDays <= 7 && remainingDays >= 0) {
+        title = "قرب موعد المغامرة";
+        message =
+          "خفف جدولك، رتب أغراضك بهدوء، واستمتع بحماس الأيام الأخيرة قبل السفر.";
+      } else if (remainingDays <= 30 && remainingDays > 7) {
+        title = "كل يوم يقربك من رحلتك";
+        message =
+          "استمتع بالتخطيط وخلك مرن؛ أجمل الرحلات تبدأ قبل الوصول.";
+      } else if (remainingDays > 30) {
+        title = "عندك وقت تخلي الرحلة أجمل";
+        message =
+          "اكتشف تفاصيل أكثر عن وجهتك واختَر التجارب اللي تناسبك.";
+      }
+    }
+
+    return `
+      <article class="tic-home-inspiration">
+        <div class="tic-home-inspiration-icon" aria-hidden="true">
+          ✦
+        </div>
+
+        <div class="tic-home-inspiration-copy">
+          <span>
+            إلهام السفر
+          </span>
+
+          <h3>
+            ${escapeHTML(title)}
+          </h3>
+
+          <p>
+            ${escapeHTML(message)}
+          </p>
+        </div>
+      </article>
+    `;
+  };
+
+  const renderSectionHeader = ({
+    eyebrow,
+    title,
+    subtitle = ""
+  }) => `
+    <header class="tic-home-section-header">
+      <span>
+        ${escapeHTML(eyebrow)}
+      </span>
+
+      <h2>
+        ${escapeHTML(title)}
+      </h2>
+
+      ${
+        subtitle
+          ? `<p>${escapeHTML(subtitle)}</p>`
+          : ""
+      }
+    </header>
+  `;
+
+  const renderPage = (snapshot) => `
+    <div
+      class="tic-module tic-home-page"
+      data-page="home"
+      data-page-version="${PAGE_VERSION}"
+    >
+      ${renderWelcome(snapshot)}
+
+      <section class="tic-home-section tic-home-next-section">
+        ${renderSectionHeader({
+          eyebrow: "NEXT JOURNEY",
+          title: "الرحلة القادمة",
+          subtitle: "تفاصيل سفرتك الأقرب بشكل بسيط."
+        })}
+
+        ${renderNextTrip(snapshot)}
+      </section>
+
+      <section class="tic-home-section tic-home-snapshot-section">
+        ${renderSectionHeader({
+          eyebrow: "YOUR TRAVEL",
+          title: "سفراتك",
+          subtitle: "أرقام خفيفة من سجل سفرك."
+        })}
+
+        ${renderStatistics(snapshot)}
+      </section>
+
+      <section class="tic-home-section tic-home-inspiration-section">
+        ${renderInspiration(snapshot)}
+      </section>
+    </div>
+  `;
 
   const refresh = () => {
     if (!state.container || !state.mounted) {
@@ -1408,7 +748,9 @@
     }
 
     state.unsubscribeStore = store.subscribe(() => {
-      if (state.mounted) refresh();
+      if (state.mounted) {
+        refresh();
+      }
     });
   };
 
