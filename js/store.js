@@ -8,17 +8,17 @@
    Purpose:
    - Single source of truth for all application data.
    - Handles localStorage persistence.
-   - Preserves all Trip Form V4 flight, hotel and travel fields.
+   - Preserves all rich trip fields, including flight times,
+     hotel details, import metadata and advanced form data.
    - Provides read, write, update, delete, backup,
-     restore, reset, import, export, and subscriptions.
+     restore, reset, import, export and subscriptions.
 
-   V1.1.0 Fixes:
-   - Preserves departure and arrival dates/times after saving.
-   - Preserves airport lead time and calculates no default overwrite.
-   - Preserves airline, flight, airport, terminal, gate, seat and PNR.
-   - Preserves hotel, travelers, activities and optional trip fields.
-   - Keeps unknown future trip fields instead of deleting them.
-   - Adds Store compatibility aliases used by Trip Form and pages.
+   Fixes in V1.1.0:
+   - Prevents normalizeTrip from deleting advanced trip fields.
+   - Preserves departure/arrival dates and times after saving.
+   - Preserves airport, airline, terminal, gate, seat and PNR.
+   - Preserves hotel details and smart-import metadata.
+   - Adds getTripById, addTrip and upsertTrip compatibility APIs.
 ========================================================= */
 
 (function (window) {
@@ -35,8 +35,10 @@
   const STORAGE_KEY = Config.storage.stateKey;
   const BACKUP_KEY = Config.storage.backupKey;
   const SCHEMA_VERSION = Config.storage.schemaVersion;
-  const AUTO_SAVE_DELAY = Number(Config.storage.autoSaveDelay) || 120;
-  const MAX_BACKUPS = Number(Config.storage.maxBackups) || 3;
+  const AUTO_SAVE_DELAY =
+    Number(Config.storage.autoSaveDelay) || 120;
+  const MAX_BACKUPS =
+    Number(Config.storage.maxBackups) || 3;
 
   const listeners = new Set();
   let saveTimer = null;
@@ -66,55 +68,82 @@
     }
   };
 
-  const nowISO = () => new Date().toISOString();
+  const nowISO = () =>
+    new Date().toISOString();
 
   const createId = (prefix = "item") => {
     const random =
       typeof crypto !== "undefined" &&
       typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
-        : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        : `${Date.now()}_${Math.random()
+            .toString(36)
+            .slice(2, 10)}`;
 
     return `${prefix}_${random}`;
   };
 
-  const text = (value) =>
-    String(value ?? "").trim();
-
   const toNumber = (value, fallback = 0) => {
     const result = Number(value);
-    return Number.isFinite(result) ? result : fallback;
+    return Number.isFinite(result)
+      ? result
+      : fallback;
   };
 
-  const toBoolean = (value, fallback = false) => {
-    if (typeof value === "boolean") {
-      return value;
-    }
+  const toText = (value, fallback = "") =>
+    String(
+      value === undefined ||
+      value === null
+        ? fallback
+        : value
+    ).trim();
 
-    if (value === "true" || value === 1 || value === "1") {
+  const toBoolean = (
+    value,
+    fallback = false
+  ) => {
+    if (
+      value === true ||
+      value === "true" ||
+      value === 1 ||
+      value === "1"
+    ) {
       return true;
     }
 
-    if (value === "false" || value === 0 || value === "0") {
+    if (
+      value === false ||
+      value === "false" ||
+      value === 0 ||
+      value === "0"
+    ) {
       return false;
     }
 
     return fallback;
   };
 
-  const normalizeDate = (value) => {
-    if (!value) return "";
+  const toArray = (value) =>
+    Array.isArray(value)
+      ? clone(value)
+      : [];
 
-    const raw = text(value);
+  const normalizeDateValue = (value) => {
+    const raw = toText(value);
 
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    if (!raw) {
+      return "";
+    }
+
+    const exactDate = raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})$/
+    );
+
+    if (exactDate) {
       return raw;
     }
 
-    const date =
-      value instanceof Date
-        ? value
-        : new Date(value);
+    const date = new Date(raw);
 
     if (Number.isNaN(date.getTime())) {
       return raw;
@@ -122,22 +151,50 @@
 
     return [
       date.getFullYear(),
-      String(date.getMonth() + 1).padStart(2, "0"),
-      String(date.getDate()).padStart(2, "0")
+      String(
+        date.getMonth() + 1
+      ).padStart(2, "0"),
+      String(
+        date.getDate()
+      ).padStart(2, "0")
     ].join("-");
   };
 
-  const normalizeTime = (value) => {
-    if (!value) return "";
+  const normalizeTimeValue = (value) => {
+    const raw = toText(value);
 
-    const raw = text(value);
+    if (!raw) {
+      return "";
+    }
 
-    if (/^\d{1,2}:\d{2}$/.test(raw)) {
-      const [hours, minutes] = raw.split(":");
+    const direct = raw.match(
+      /^(\d{1,2}):(\d{2})(?::\d{2})?$/
+    );
 
-      return `${String(Math.min(23, toNumber(hours))).padStart(2, "0")}:${String(
-        Math.min(59, toNumber(minutes))
-      ).padStart(2, "0")}`;
+    if (direct) {
+      const hours = Math.max(
+        0,
+        Math.min(
+          23,
+          toNumber(direct[1])
+        )
+      );
+
+      const minutes = Math.max(
+        0,
+        Math.min(
+          59,
+          toNumber(direct[2])
+        )
+      );
+
+      return `${String(hours).padStart(
+        2,
+        "0"
+      )}:${String(minutes).padStart(
+        2,
+        "0"
+      )}`;
     }
 
     const arabicPeriod = raw.match(
@@ -145,15 +202,31 @@
     );
 
     if (arabicPeriod) {
-      let hours = toNumber(arabicPeriod[1]) % 12;
+      let hours =
+        toNumber(arabicPeriod[1]) % 12;
 
       if (arabicPeriod[3] === "م") {
         hours += 12;
       }
 
-      return `${String(hours).padStart(2, "0")}:${String(
-        Math.min(59, toNumber(arabicPeriod[2]))
-      ).padStart(2, "0")}`;
+      const minutes = Math.max(
+        0,
+        Math.min(
+          59,
+          toNumber(
+            arabicPeriod[2],
+            0
+          )
+        )
+      );
+
+      return `${String(hours).padStart(
+        2,
+        "0"
+      )}:${String(minutes).padStart(
+        2,
+        "0"
+      )}`;
     }
 
     const englishPeriod = raw.match(
@@ -161,65 +234,73 @@
     );
 
     if (englishPeriod) {
-      let hours = toNumber(englishPeriod[1]) % 12;
+      let hours =
+        toNumber(englishPeriod[1]) % 12;
 
-      if (englishPeriod[3].toUpperCase() === "PM") {
+      if (
+        englishPeriod[3].toUpperCase() ===
+        "PM"
+      ) {
         hours += 12;
       }
 
-      return `${String(hours).padStart(2, "0")}:${String(
-        Math.min(59, toNumber(englishPeriod[2]))
-      ).padStart(2, "0")}`;
+      const minutes = Math.max(
+        0,
+        Math.min(
+          59,
+          toNumber(
+            englishPeriod[2],
+            0
+          )
+        )
+      );
+
+      return `${String(hours).padStart(
+        2,
+        "0"
+      )}:${String(minutes).padStart(
+        2,
+        "0"
+      )}`;
     }
 
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-      return raw;
-    }
-
-    return `${String(date.getHours()).padStart(2, "0")}:${String(
-      date.getMinutes()
-    ).padStart(2, "0")}`;
+    return raw;
   };
 
-  const normalizeArray = (value) =>
-    Array.isArray(value) ? clone(value) : [];
-
-  const normalizeStringArray = (value) => {
-    if (Array.isArray(value)) {
-      return value
-        .map((item) => text(item))
-        .filter(Boolean);
-    }
-
-    if (typeof value === "string") {
-      return value
-        .split(/\n|,/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-    }
-
-    return [];
-  };
-
-  const deepMerge = (target, source) => {
-    const output = isObject(target) ? clone(target) : {};
+  const deepMerge = (
+    target,
+    source
+  ) => {
+    const output = isObject(target)
+      ? clone(target)
+      : {};
 
     if (!isObject(source)) {
       return output;
     }
 
-    Object.keys(source).forEach((key) => {
-      const sourceValue = source[key];
-      const targetValue = output[key];
+    Object.keys(source).forEach(
+      (key) => {
+        const sourceValue =
+          source[key];
 
-      if (isObject(sourceValue) && isObject(targetValue)) {
-        output[key] = deepMerge(targetValue, sourceValue);
-      } else {
-        output[key] = clone(sourceValue);
+        const targetValue =
+          output[key];
+
+        if (
+          isObject(sourceValue) &&
+          isObject(targetValue)
+        ) {
+          output[key] = deepMerge(
+            targetValue,
+            sourceValue
+          );
+        } else {
+          output[key] =
+            clone(sourceValue);
+        }
       }
-    });
+    );
 
     return output;
   };
@@ -236,15 +317,24 @@
 
     profile: {
       id: "profile_main",
-      name: Config.defaults.profileName,
-      country: Config.defaults.country,
-      city: Config.defaults.city,
-      language: Config.defaults.language,
-      currency: Config.defaults.currency,
-      travelStyle: "Premium Family",
-      homeAirport: "Abu Dhabi",
-      annualTravelBudget: 30000,
-      monthlyTravelSaving: 1500,
+      name:
+        Config.defaults.profileName,
+      country:
+        Config.defaults.country,
+      city:
+        Config.defaults.city,
+      language:
+        Config.defaults.language,
+      currency:
+        Config.defaults.currency,
+      travelStyle:
+        "Premium Family",
+      homeAirport:
+        "Abu Dhabi",
+      annualTravelBudget:
+        30000,
+      monthlyTravelSaving:
+        1500,
       avatar: "",
       createdAt: nowISO(),
       updatedAt: nowISO()
@@ -306,25 +396,46 @@
     notifications: [],
 
     settings: {
-      currency: Config.defaults.currency,
-      language: Config.defaults.language,
-      theme: Config.defaults.theme,
-      dateFormat: Config.defaults.dateFormat,
-      enableAnimations: Config.app.enableAnimations,
-      enableNotifications: true,
-      confirmBeforeDelete: true,
-      autoBackup: true
+      currency:
+        Config.defaults.currency,
+      language:
+        Config.defaults.language,
+      theme:
+        Config.defaults.theme,
+      dateFormat:
+        Config.defaults.dateFormat,
+      enableAnimations:
+        Config.app.enableAnimations,
+      enableNotifications:
+        true,
+      confirmBeforeDelete:
+        true,
+      autoBackup:
+        true
     }
   });
 
-  const isValidTripStatus = (status) => {
-    const value = text(status);
+  const resolveTripStatus = (
+    status
+  ) => {
+    const raw =
+      toText(status) ||
+      toText(
+        Config.defaults.tripStatus,
+        "planning"
+      );
 
-    if (!value) {
-      return false;
+    if (
+      isObject(Config.tripStatuses) &&
+      Object.prototype.hasOwnProperty.call(
+        Config.tripStatuses,
+        raw
+      )
+    ) {
+      return raw;
     }
 
-    const allowedFallback = [
+    const supportedStatuses = [
       "draft",
       "planning",
       "planned",
@@ -338,334 +449,545 @@
       "archived"
     ];
 
-    if (Array.isArray(Config.tripStatuses)) {
-      return Config.tripStatuses.some((item) => {
-        if (typeof item === "string") {
-          return item === value;
-        }
-
-        return item?.value === value || item?.id === value;
-      });
+    if (
+      supportedStatuses.includes(raw)
+    ) {
+      return raw;
     }
 
-    if (isObject(Config.tripStatuses)) {
-      return Object.prototype.hasOwnProperty.call(
-        Config.tripStatuses,
-        value
-      );
-    }
-
-    return allowedFallback.includes(value);
+    return toText(
+      Config.defaults.tripStatus,
+      "planning"
+    );
   };
 
-  const normalizeTrip = (trip = {}) => {
-    const source = isObject(trip) ? clone(trip) : {};
-    const defaultStatus =
-      Config.defaults.tripStatus ||
-      "planning";
+  const normalizeTrip = (
+    trip = {}
+  ) => {
+    const source = isObject(trip)
+      ? clone(trip)
+      : {};
+
+    const maxTravelers =
+      toNumber(
+        Config.validation?.trip
+          ?.maxTravelers,
+        99
+      );
+
+    const maxBudget =
+      toNumber(
+        Config.validation?.trip
+          ?.maxBudget,
+        Number.MAX_SAFE_INTEGER
+      );
+
+    const notesMaxLength =
+      toNumber(
+        Config.validation?.trip
+          ?.notesMaxLength,
+        10000
+      );
 
     const normalized = {
-      /*
-       * Keep all existing and future trip fields first.
-       * Explicit normalized values below safely override them.
-       */
       ...source,
 
-      id: source.id || createId("trip"),
+      id:
+        source.id ||
+        createId("trip"),
 
-      title: text(source.title),
-      destination: text(source.destination),
-      country: text(source.country),
-      city: text(source.city),
+      title:
+        toText(source.title),
 
-      purpose: text(source.purpose) || "leisure",
-      tripType: text(source.tripType) || "family",
+      destination:
+        toText(source.destination),
+
+      country:
+        toText(source.country),
+
+      city:
+        toText(source.city),
+
+      purpose:
+        toText(
+          source.purpose,
+          "leisure"
+        ) || "leisure",
+
+      tripType:
+        toText(
+          source.tripType,
+          "family"
+        ) || "family",
+
       travelStyle:
-        text(source.travelStyle) ||
-        text(state?.profile?.travelStyle) ||
-        "premium-family",
+        toText(
+          source.travelStyle,
+          "premium-family"
+        ) || "premium-family",
 
-      status: isValidTripStatus(source.status)
-        ? text(source.status)
-        : defaultStatus,
+      priority:
+        toText(
+          source.priority,
+          "normal"
+        ) || "normal",
 
-      priority: text(source.priority) || "normal",
+      status:
+        resolveTripStatus(
+          source.status
+        ),
 
-      startDate: normalizeDate(source.startDate),
-      endDate: normalizeDate(source.endDate),
-      durationDays: Math.max(
-        0,
-        Math.round(toNumber(source.durationDays, 0))
-      ),
+      startDate:
+        normalizeDateValue(
+          source.startDate
+        ),
 
-      travelers: Math.max(
-        1,
-        Math.min(
-          Config.validation.trip.maxTravelers,
-          Math.round(
+      endDate:
+        normalizeDateValue(
+          source.endDate
+        ),
+
+      durationDays:
+        Math.max(
+          0,
+          toNumber(
+            source.durationDays,
+            0
+          )
+        ),
+
+      travelers:
+        Math.max(
+          1,
+          Math.min(
+            maxTravelers,
             toNumber(
               source.travelers,
-              Config.defaults.travelers
+              Config.defaults
+                .travelers || 1
             )
           )
-        )
-      ),
+        ),
 
-      adults: Math.max(
-        0,
-        Math.round(
+      adults:
+        Math.max(
+          0,
           toNumber(
             source.adults,
-            source.travelers || Config.defaults.travelers
+            source.travelers || 1
           )
-        )
-      ),
+        ),
 
-      children: Math.max(
-        0,
-        Math.round(toNumber(source.children, 0))
-      ),
+      children:
+        Math.max(
+          0,
+          toNumber(
+            source.children,
+            0
+          )
+        ),
 
-      infants: Math.max(
-        0,
-        Math.round(toNumber(source.infants, 0))
-      ),
+      infants:
+        Math.max(
+          0,
+          toNumber(
+            source.infants,
+            0
+          )
+        ),
 
-      budget: Math.max(
-        0,
-        Math.min(
-          Config.validation.trip.maxBudget,
-          toNumber(source.budget, Config.defaults.budget)
-        )
-      ),
+      budget:
+        Math.max(
+          0,
+          Math.min(
+            maxBudget,
+            toNumber(
+              source.budget,
+              Config.defaults
+                .budget || 0
+            )
+          )
+        ),
 
-      spent: Math.max(
-        0,
-        toNumber(source.spent, 0)
-      ),
+      spent:
+        Math.max(
+          0,
+          toNumber(
+            source.spent,
+            0
+          )
+        ),
 
       currency:
-        text(source.currency) ||
+        toText(
+          source.currency,
+          Config.defaults.currency
+        ) ||
         Config.defaults.currency,
 
-      /*
-       * Flight fields used by Trip Form V4 and Home V2.3.
-       */
-      departureAirport: text(source.departureAirport),
-      arrivalAirport: text(source.arrivalAirport),
-      airline: text(source.airline),
-      flightNumber: text(source.flightNumber),
+      departureAirport:
+        toText(
+          source.departureAirport ||
+          source.originAirport
+        ),
 
-      departureDate: normalizeDate(
-        source.departureDate
-      ),
+      arrivalAirport:
+        toText(
+          source.arrivalAirport ||
+          source.destinationAirport
+        ),
 
-      departureTime: normalizeTime(
-        source.departureTime
-      ),
+      airline:
+        toText(
+          source.airline ||
+          source.airlineName
+        ),
 
-      arrivalDate: normalizeDate(
-        source.arrivalDate
-      ),
+      flightNumber:
+        toText(
+          source.flightNumber ||
+          source.flightNo
+        ),
 
-      arrivalTime: normalizeTime(
-        source.arrivalTime
-      ),
+      departureDate:
+        normalizeDateValue(
+          source.departureDate ||
+          source.flightDate
+        ),
+
+      departureTime:
+        normalizeTimeValue(
+          source.departureTime ||
+          source.flightTime ||
+          source.flightDepartureTime
+        ),
+
+      arrivalDate:
+        normalizeDateValue(
+          source.arrivalDate
+        ),
+
+      arrivalTime:
+        normalizeTimeValue(
+          source.arrivalTime ||
+          source.flightArrivalTime
+        ),
 
       departureDateTime:
-        source.departureDateTime || "",
+        toText(
+          source.departureDateTime
+        ),
 
       arrivalDateTime:
-        source.arrivalDateTime || "",
+        toText(
+          source.arrivalDateTime
+        ),
 
-      terminal: text(source.terminal),
-      gate: text(source.gate),
-      seatNumber: text(source.seatNumber),
-      bookingReference: text(source.bookingReference),
+      terminal:
+        toText(
+          source.terminal ||
+          source.departureTerminal
+        ),
 
-      airportLeadMinutes: Math.max(
-        0,
-        toNumber(source.airportLeadMinutes, 120)
-      ),
+      gate:
+        toText(
+          source.gate ||
+          source.departureGate
+        ),
 
-      /*
-       * Keep legacy and nested flight structures.
-       */
-      flight: isObject(source.flight)
-        ? clone(source.flight)
-        : {},
+      seatNumber:
+        toText(
+          source.seatNumber ||
+          source.seat
+        ),
 
-      outboundFlight: isObject(source.outboundFlight)
-        ? clone(source.outboundFlight)
-        : {},
+      bookingReference:
+        toText(
+          source.bookingReference ||
+          source.pnr ||
+          source.confirmationNumber
+        ),
 
-      flights: normalizeArray(source.flights),
+      airportLeadMinutes:
+        Math.max(
+          0,
+          toNumber(
+            source.airportLeadMinutes ??
+            source.arriveAirportBeforeMinutes,
+            120
+          )
+        ),
 
-      /*
-       * Hotel and accommodation fields.
-       */
       accommodation:
-        typeof source.accommodation === "string"
-          ? text(source.accommodation)
-          : isObject(source.accommodation)
-            ? clone(source.accommodation)
+        typeof source.accommodation ===
+        "string"
+          ? source.accommodation.trim()
+          : source.accommodation
+            ? clone(
+                source.accommodation
+              )
             : "",
 
-      accommodationName: text(source.accommodationName),
-      accommodationAddress: text(source.accommodationAddress),
-      hotelName: text(source.hotelName),
-      hotelAddress: text(source.hotelAddress),
-      hotelBookingReference: text(
-        source.hotelBookingReference ||
-        source.hotelConfirmationNumber
-      ),
+      accommodationAddress:
+        toText(
+          source.accommodationAddress ||
+          source.hotelAddress
+        ),
 
-      hotelConfirmationNumber: text(
-        source.hotelConfirmationNumber ||
-        source.hotelBookingReference
-      ),
+      hotelName:
+        toText(
+          source.hotelName ||
+          source.accommodationName
+        ),
 
-      hotelCheckIn: normalizeDate(
-        source.hotelCheckIn ||
-        source.checkIn
-      ),
+      hotelBookingReference:
+        toText(
+          source.hotelBookingReference ||
+          source.hotelConfirmationNumber
+        ),
 
-      hotelCheckOut: normalizeDate(
-        source.hotelCheckOut ||
-        source.checkOut
-      ),
+      hotelCheckIn:
+        normalizeDateValue(
+          source.hotelCheckIn ||
+          source.checkIn
+        ),
 
-      checkIn: normalizeDate(
-        source.checkIn ||
-        source.hotelCheckIn
-      ),
+      hotelCheckOut:
+        normalizeDateValue(
+          source.hotelCheckOut ||
+          source.checkOut
+        ),
 
-      checkOut: normalizeDate(
-        source.checkOut ||
-        source.hotelCheckOut
-      ),
+      transport:
+        toText(
+          source.transport
+        ),
 
-      hotel: isObject(source.hotel)
-        ? clone(source.hotel)
-        : {},
+      activities:
+        toArray(
+          source.activities
+        ),
 
-      /*
-       * Additional trip information.
-       */
-      transport: text(source.transport),
-      activities: normalizeStringArray(source.activities),
-      emergencyContact: text(source.emergencyContact),
+      notes:
+        toText(
+          source.notes
+        ).slice(
+          0,
+          notesMaxLength
+        ),
 
-      visaRequired: toBoolean(
-        source.visaRequired,
-        false
-      ),
+      emergencyContact:
+        toText(
+          source.emergencyContact
+        ),
 
-      insuranceRequired: toBoolean(
-        source.insuranceRequired,
-        true
-      ),
+      visaRequired:
+        toBoolean(
+          source.visaRequired,
+          false
+        ),
 
-      featured: toBoolean(
-        source.featured,
-        false
-      ),
+      insuranceRequired:
+        toBoolean(
+          source.insuranceRequired,
+          true
+        ),
 
-      ticketImport: isObject(source.ticketImport)
-        ? clone(source.ticketImport)
-        : source.ticketImport || null,
+      featured:
+        toBoolean(
+          source.featured,
+          false
+        ),
 
-      hotelImport: isObject(source.hotelImport)
-        ? clone(source.hotelImport)
-        : source.hotelImport || null,
+      ticketImport:
+        source.ticketImport
+          ? clone(
+              source.ticketImport
+            )
+          : null,
 
-      bookings: normalizeArray(source.bookings),
-      itinerary: normalizeArray(source.itinerary),
-      expenses: normalizeArray(source.expenses),
-      documents: normalizeArray(source.documents),
-      packing: normalizeArray(source.packing),
-      memories: normalizeArray(source.memories),
+      hotelImport:
+        source.hotelImport
+          ? clone(
+              source.hotelImport
+            )
+          : null,
 
-      notes: String(source.notes || "").slice(
-        0,
-        Config.validation.trip.notesMaxLength
-      ),
+      flight:
+        isObject(source.flight)
+          ? clone(source.flight)
+          : source.flight || null,
 
-      coverImage: text(source.coverImage),
-      archivedAt: source.archivedAt || null,
-      createdAt: source.createdAt || nowISO(),
-      updatedAt: nowISO()
+      outboundFlight:
+        isObject(
+          source.outboundFlight
+        )
+          ? clone(
+              source.outboundFlight
+            )
+          : source.outboundFlight ||
+            null,
+
+      hotel:
+        isObject(source.hotel)
+          ? clone(source.hotel)
+          : source.hotel || null,
+
+      flights:
+        toArray(
+          source.flights
+        ),
+
+      bookings:
+        toArray(
+          source.bookings
+        ),
+
+      itinerary:
+        toArray(
+          source.itinerary
+        ),
+
+      expenses:
+        toArray(
+          source.expenses
+        ),
+
+      documents:
+        toArray(
+          source.documents
+        ),
+
+      packing:
+        toArray(
+          source.packing
+        ),
+
+      memories:
+        toArray(
+          source.memories
+        ),
+
+      coverImage:
+        toText(
+          source.coverImage
+        ),
+
+      archivedAt:
+        source.archivedAt ||
+        null,
+
+      createdAt:
+        source.createdAt ||
+        nowISO(),
+
+      updatedAt:
+        nowISO()
     };
-
-    /*
-     * Calculate duration only when both dates are valid and the supplied
-     * duration is absent or zero.
-     */
-    if (
-      normalized.startDate &&
-      normalized.endDate &&
-      normalized.durationDays <= 0
-    ) {
-      const start = new Date(
-        `${normalized.startDate}T00:00:00`
-      );
-
-      const end = new Date(
-        `${normalized.endDate}T00:00:00`
-      );
-
-      if (
-        !Number.isNaN(start.getTime()) &&
-        !Number.isNaN(end.getTime()) &&
-        end >= start
-      ) {
-        normalized.durationDays =
-          Math.floor(
-            (end.getTime() - start.getTime()) /
-            86400000
-          ) + 1;
-      }
-    }
 
     return normalized;
   };
 
-  const normalizeExpense = (expense = {}) => ({
+  const normalizeExpense = (
+    expense = {}
+  ) => ({
     ...clone(expense),
 
-    id: expense.id || createId("expense"),
-    tripId: expense.tripId || null,
-    category: expense.category || "other",
-    title: text(expense.title),
-    amount: Math.max(0, toNumber(expense.amount, 0)),
-    currency: expense.currency || Config.defaults.currency,
-    date: expense.date || new Date().toISOString().slice(0, 10),
-    notes: String(expense.notes || ""),
-    createdAt: expense.createdAt || nowISO(),
-    updatedAt: nowISO()
+    id:
+      expense.id ||
+      createId("expense"),
+
+    tripId:
+      expense.tripId ||
+      null,
+
+    category:
+      expense.category ||
+      "other",
+
+    title:
+      toText(expense.title),
+
+    amount:
+      Math.max(
+        0,
+        toNumber(
+          expense.amount,
+          0
+        )
+      ),
+
+    currency:
+      expense.currency ||
+      Config.defaults.currency,
+
+    date:
+      expense.date ||
+      new Date()
+        .toISOString()
+        .slice(0, 10),
+
+    notes:
+      toText(expense.notes),
+
+    createdAt:
+      expense.createdAt ||
+      nowISO(),
+
+    updatedAt:
+      nowISO()
   });
 
-  const normalizeState = (input) => {
-    const defaults = getDefaultState();
-    const merged = deepMerge(
-      defaults,
-      isObject(input) ? input : {}
-    );
+  const normalizeState = (
+    input
+  ) => {
+    const defaults =
+      getDefaultState();
 
-    merged.meta.appId = Config.id;
-    merged.meta.appVersion = Config.appVersion;
-    merged.meta.schemaVersion = SCHEMA_VERSION;
-    merged.meta.updatedAt = nowISO();
+    const merged =
+      deepMerge(
+        defaults,
+        isObject(input)
+          ? input
+          : {}
+      );
 
-    merged.trips = Array.isArray(merged.trips)
-      ? merged.trips.map(normalizeTrip)
-      : [];
+    merged.meta.appId =
+      Config.id;
 
-    merged.budgets.expenses = Array.isArray(
-      merged.budgets.expenses
-    )
-      ? merged.budgets.expenses.map(normalizeExpense)
-      : [];
+    merged.meta.appVersion =
+      Config.appVersion;
+
+    merged.meta.schemaVersion =
+      SCHEMA_VERSION;
+
+    merged.meta.updatedAt =
+      nowISO();
+
+    merged.trips =
+      Array.isArray(
+        merged.trips
+      )
+        ? merged.trips.map(
+            normalizeTrip
+          )
+        : [];
+
+    merged.budgets =
+      isObject(merged.budgets)
+        ? merged.budgets
+        : clone(
+            defaults.budgets
+          );
+
+    merged.budgets.expenses =
+      Array.isArray(
+        merged.budgets.expenses
+      )
+        ? merged.budgets.expenses.map(
+            normalizeExpense
+          )
+        : [];
 
     [
       "destinations",
@@ -675,7 +997,11 @@
       "memories",
       "notifications"
     ].forEach((key) => {
-      if (!Array.isArray(merged[key])) {
+      if (
+        !Array.isArray(
+          merged[key]
+        )
+      ) {
         merged[key] = [];
       }
     });
@@ -683,85 +1009,146 @@
     return merged;
   };
 
-  const calculateStatistics = (currentState) => {
-    const trips = Array.isArray(currentState.trips)
-      ? currentState.trips
-      : [];
+  const calculateStatistics = (
+    currentState
+  ) => {
+    const trips =
+      Array.isArray(
+        currentState.trips
+      )
+        ? currentState.trips
+        : [];
 
-    const expenses = Array.isArray(
-      currentState.budgets?.expenses
-    )
-      ? currentState.budgets.expenses
-      : [];
+    const expenses =
+      Array.isArray(
+        currentState.budgets
+          ?.expenses
+      )
+        ? currentState.budgets
+            .expenses
+        : [];
 
-    const wishlist = Array.isArray(
-      currentState.wishlist
-    )
-      ? currentState.wishlist
-      : [];
+    const wishlist =
+      Array.isArray(
+        currentState.wishlist
+      )
+        ? currentState.wishlist
+        : [];
 
-    const visibleTrips = trips.filter(
-      (trip) => trip.status !== "archived"
-    );
+    const visibleTrips =
+      trips.filter(
+        (trip) =>
+          trip.status !==
+          "archived"
+      );
 
-    const completedTrips = visibleTrips.filter(
-      (trip) => trip.status === "completed"
-    );
+    const completedTrips =
+      visibleTrips.filter(
+        (trip) =>
+          trip.status ===
+          "completed"
+      );
 
-    const countries = new Set(
-      completedTrips
-        .map((trip) => text(trip.country))
-        .filter(Boolean)
-    );
+    const upcomingStatuses = [
+      "draft",
+      "planning",
+      "planned",
+      "booked",
+      "confirmed",
+      "ready"
+    ];
 
-    const cities = new Set(
-      completedTrips
-        .map((trip) => text(trip.city))
-        .filter(Boolean)
-    );
+    const activeStatuses = [
+      "ongoing",
+      "active"
+    ];
 
-    const totalTravelSpend = expenses.reduce(
-      (total, expense) =>
-        total + toNumber(expense.amount, 0),
-      0
-    );
+    const countries =
+      new Set(
+        completedTrips
+          .map((trip) =>
+            toText(
+              trip.country
+            )
+          )
+          .filter(Boolean)
+      );
 
-    const totalTravelBudget = visibleTrips.reduce(
-      (total, trip) =>
-        total + toNumber(trip.budget, 0),
-      0
-    );
+    const cities =
+      new Set(
+        completedTrips
+          .map((trip) =>
+            toText(
+              trip.city
+            )
+          )
+          .filter(Boolean)
+      );
+
+    const totalTravelSpend =
+      expenses.reduce(
+        (total, expense) =>
+          total +
+          toNumber(
+            expense.amount,
+            0
+          ),
+        0
+      );
+
+    const totalTravelBudget =
+      visibleTrips.reduce(
+        (total, trip) =>
+          total +
+          toNumber(
+            trip.budget,
+            0
+          ),
+        0
+      );
 
     currentState.statistics = {
-      totalTrips: visibleTrips.length,
+      totalTrips:
+        visibleTrips.length,
 
       completedTrips:
         completedTrips.length,
 
-      upcomingTrips: visibleTrips.filter((trip) =>
-        [
-          "draft",
-          "planning",
-          "planned",
-          "booked",
-          "confirmed",
-          "ready"
-        ].includes(trip.status)
-      ).length,
+      upcomingTrips:
+        visibleTrips.filter(
+          (trip) =>
+            upcomingStatuses.includes(
+              trip.status
+            )
+        ).length,
 
-      activeTrips: visibleTrips.filter((trip) =>
-        ["active", "ongoing"].includes(trip.status)
-      ).length,
+      activeTrips:
+        visibleTrips.filter(
+          (trip) =>
+            activeStatuses.includes(
+              trip.status
+            )
+        ).length,
 
-      visitedCountries: countries.size,
-      visitedCities: cities.size,
-      wishlistCount: wishlist.length,
+      visitedCountries:
+        countries.size,
+
+      visitedCities:
+        cities.size,
+
+      wishlistCount:
+        wishlist.length,
+
       totalTravelSpend,
+
       totalTravelBudget,
-      savedForTravel: toNumber(
-        currentState.budgets?.savingsBalance,
-        0
-      )
+
+      savedForTravel:
+        toNumber(
+          currentState.budgets
+            ?.savingsBalance,
+          0
+        )
     };
 
     currentState.budgets.totalSpent =
@@ -772,7 +1159,10 @@
 
   const readStoredState = () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw =
+        localStorage.getItem(
+          STORAGE_KEY
+        );
 
       if (!raw) {
         return null;
@@ -789,45 +1179,64 @@
     }
   };
 
-  let state = calculateStatistics(
-    normalizeState(
-      readStoredState() ||
-      getDefaultState()
-    )
-  );
+  let state =
+    calculateStatistics(
+      normalizeState(
+        readStoredState() ||
+        getDefaultState()
+      )
+    );
 
-  const notify = (event = {}) => {
-    const snapshot = clone(state);
+  const notify = (
+    event = {}
+  ) => {
+    const snapshot =
+      clone(state);
 
-    listeners.forEach((listener) => {
-      try {
-        listener(snapshot, event);
-      } catch (error) {
-        console.error(
-          "TIC Store subscriber error:",
-          error
-        );
+    listeners.forEach(
+      (listener) => {
+        try {
+          listener(
+            snapshot,
+            event
+          );
+        } catch (error) {
+          console.error(
+            "TIC Store subscriber error:",
+            error
+          );
+        }
       }
-    });
+    );
 
     window.dispatchEvent(
-      new CustomEvent("tic:store-change", {
-        detail: {
-          state: snapshot,
-          event
+      new CustomEvent(
+        "tic:store-change",
+        {
+          detail: {
+            state:
+              snapshot,
+            event
+          }
         }
-      })
+      )
     );
   };
 
   const persistImmediately = (
-    event = { type: "persist" }
+    event = {
+      type: "persist"
+    }
   ) => {
     try {
-      window.clearTimeout(saveTimer);
+      window.clearTimeout(
+        saveTimer
+      );
+
       saveTimer = null;
 
-      state.meta.updatedAt = nowISO();
+      state.meta.updatedAt =
+        nowISO();
 
       localStorage.setItem(
         STORAGE_KEY,
@@ -848,24 +1257,41 @@
   };
 
   const schedulePersist = (
-    event = { type: "update" }
+    event = {
+      type: "update"
+    }
   ) => {
-    window.clearTimeout(saveTimer);
+    window.clearTimeout(
+      saveTimer
+    );
 
-    saveTimer = window.setTimeout(() => {
-      persistImmediately(event);
-    }, AUTO_SAVE_DELAY);
+    saveTimer =
+      window.setTimeout(
+        () => {
+          persistImmediately(
+            event
+          );
+        },
+        AUTO_SAVE_DELAY
+      );
   };
 
   const replaceState = (
     nextState,
-    event = { type: "replace" }
+    event = {
+      type: "replace"
+    }
   ) => {
-    state = calculateStatistics(
-      normalizeState(nextState)
-    );
+    state =
+      calculateStatistics(
+        normalizeState(
+          nextState
+        )
+      );
 
-    persistImmediately(event);
+    persistImmediately(
+      event
+    );
 
     return clone(state);
   };
@@ -875,12 +1301,15 @@
     path,
     value
   ) => {
-    const parts = Array.isArray(path)
-      ? path
-      : String(path)
-          .split(".")
-          .map((part) => part.trim())
-          .filter(Boolean);
+    const parts =
+      Array.isArray(path)
+        ? path
+        : String(path)
+            .split(".")
+            .map((part) =>
+              part.trim()
+            )
+            .filter(Boolean);
 
     if (!parts.length) {
       return false;
@@ -890,23 +1319,33 @@
 
     for (
       let index = 0;
-      index < parts.length - 1;
+      index <
+      parts.length - 1;
       index += 1
     ) {
-      const key = parts[index];
+      const key =
+        parts[index];
 
       if (
-        !isObject(cursor[key]) &&
-        !Array.isArray(cursor[key])
+        !isObject(
+          cursor[key]
+        ) &&
+        !Array.isArray(
+          cursor[key]
+        )
       ) {
         cursor[key] = {};
       }
 
-      cursor = cursor[key];
+      cursor =
+        cursor[key];
     }
 
-    cursor[parts[parts.length - 1]] =
-      clone(value);
+    cursor[
+      parts[
+        parts.length - 1
+      ]
+    ] = clone(value);
 
     return true;
   };
@@ -916,12 +1355,15 @@
     path,
     fallback = null
   ) => {
-    const parts = Array.isArray(path)
-      ? path
-      : String(path)
-          .split(".")
-          .map((part) => part.trim())
-          .filter(Boolean);
+    const parts =
+      Array.isArray(path)
+        ? path
+        : String(path)
+            .split(".")
+            .map((part) =>
+              part.trim()
+            )
+            .filter(Boolean);
 
     if (!parts.length) {
       return clone(target);
@@ -933,34 +1375,45 @@
       if (
         cursor === null ||
         cursor === undefined ||
-        !Object.prototype.hasOwnProperty.call(
-          cursor,
-          key
-        )
+        !Object.prototype
+          .hasOwnProperty.call(
+            cursor,
+            key
+          )
       ) {
-        return clone(fallback);
+        return clone(
+          fallback
+        );
       }
 
-      cursor = cursor[key];
+      cursor =
+        cursor[key];
     }
 
     return clone(cursor);
   };
 
-  const findTripIndex = (tripId) =>
+  const findTripIndex = (
+    tripId
+  ) =>
     state.trips.findIndex(
       (trip) =>
-        String(trip.id) === String(tripId)
+        String(trip.id) ===
+        String(tripId)
     );
 
   const Store = {
-    version: "1.1.0",
+    version:
+      "1.1.0",
 
     getState() {
       return clone(state);
     },
 
-    get(path, fallback = null) {
+    get(
+      path,
+      fallback = null
+    ) {
       return getByPath(
         state,
         path,
@@ -968,7 +1421,11 @@
       );
     },
 
-    set(path, value, options = {}) {
+    set(
+      path,
+      value,
+      options = {}
+    ) {
       if (
         !setByPath(
           state,
@@ -979,11 +1436,17 @@
         return false;
       }
 
-      state = calculateStatistics(
-        normalizeState(state)
-      );
+      state =
+        calculateStatistics(
+          normalizeState(
+            state
+          )
+        );
 
-      if (options.immediate === true) {
+      if (
+        options.immediate ===
+        true
+      ) {
         return persistImmediately({
           type: "set",
           path
@@ -998,47 +1461,38 @@
       return true;
     },
 
-    patch(path, partialValue, options = {}) {
-      /*
-       * Compatibility:
-       * Store.patch({ trips: [...] })
-       * Store.patch("profile", { ... })
-       */
+    patch(
+      path,
+      partialValue,
+      options = {}
+    ) {
       if (
         isObject(path) &&
-        partialValue === undefined
+        partialValue ===
+          undefined
       ) {
-        const nextState = deepMerge(
-          state,
-          path
+        return this.update(
+          (draft) =>
+            deepMerge(
+              draft,
+              path
+            ),
+          options
         );
-
-        state = calculateStatistics(
-          normalizeState(nextState)
-        );
-
-        if (options.immediate === true) {
-          return persistImmediately({
-            type: "patch"
-          });
-        }
-
-        schedulePersist({
-          type: "patch"
-        });
-
-        return true;
       }
 
-      const current = getByPath(
-        state,
-        path,
-        {}
-      );
+      const current =
+        getByPath(
+          state,
+          path,
+          {}
+        );
 
       if (
         !isObject(current) ||
-        !isObject(partialValue)
+        !isObject(
+          partialValue
+        )
       ) {
         return this.set(
           path,
@@ -1057,27 +1511,41 @@
       );
     },
 
-    update(mutator, options = {}) {
+    update(
+      mutator,
+      options = {}
+    ) {
       if (
-        typeof mutator !== "function"
+        typeof mutator !==
+        "function"
       ) {
         throw new TypeError(
           "TIC Store update requires a function."
         );
       }
 
-      const draft = clone(state);
-      const result = mutator(draft);
+      const draft =
+        clone(state);
+
+      const result =
+        mutator(draft);
+
       const nextState =
         result === undefined
           ? draft
           : result;
 
-      state = calculateStatistics(
-        normalizeState(nextState)
-      );
+      state =
+        calculateStatistics(
+          normalizeState(
+            nextState
+          )
+        );
 
-      if (options.immediate === true) {
+      if (
+        options.immediate ===
+        true
+      ) {
         persistImmediately({
           type: "update"
         });
@@ -1092,17 +1560,22 @@
 
     subscribe(listener) {
       if (
-        typeof listener !== "function"
+        typeof listener !==
+        "function"
       ) {
         throw new TypeError(
           "TIC Store subscriber must be a function."
         );
       }
 
-      listeners.add(listener);
+      listeners.add(
+        listener
+      );
 
       return () => {
-        listeners.delete(listener);
+        listeners.delete(
+          listener
+        );
       };
     },
 
@@ -1113,13 +1586,28 @@
     },
 
     createTrip(tripData) {
-      const trip = normalizeTrip(
-        tripData
-      );
+      const trip =
+        normalizeTrip(
+          tripData
+        );
+
+      const titleMinLength =
+        toNumber(
+          Config.validation?.trip
+            ?.titleMinLength,
+          1
+        );
+
+      const titleMaxLength =
+        toNumber(
+          Config.validation?.trip
+            ?.titleMaxLength,
+          200
+        );
 
       if (
         trip.title.length <
-        Config.validation.trip.titleMinLength
+        titleMinLength
       ) {
         throw new Error(
           "اسم الرحلة قصير جداً."
@@ -1128,41 +1616,111 @@
 
       if (
         trip.title.length >
-        Config.validation.trip.titleMaxLength
+        titleMaxLength
       ) {
         throw new Error(
           "اسم الرحلة أطول من الحد المسموح."
         );
       }
 
-      state.trips.unshift(trip);
-
-      state = calculateStatistics(
-        normalizeState(state)
+      state.trips.unshift(
+        trip
       );
+
+      state =
+        calculateStatistics(
+          normalizeState(
+            state
+          )
+        );
+
+      const savedTrip =
+        state.trips.find(
+          (item) =>
+            item.id ===
+            trip.id
+        ) || trip;
 
       persistImmediately({
         type: "trip-created",
-        tripId: trip.id
+        tripId:
+          savedTrip.id
       });
 
       return clone(
-        state.trips.find(
-          (item) => item.id === trip.id
-        ) || trip
+        savedTrip
       );
     },
 
     addTrip(tripData) {
-      return this.createTrip(tripData);
+      return this.createTrip(
+        tripData
+      );
+    },
+
+    updateTrip(
+      tripId,
+      changes = {}
+    ) {
+      const index =
+        findTripIndex(
+          tripId
+        );
+
+      if (index === -1) {
+        return null;
+      }
+
+      const current =
+        state.trips[index];
+
+      const updatedTrip =
+        normalizeTrip({
+          ...current,
+          ...clone(changes),
+          id:
+            current.id,
+          createdAt:
+            current.createdAt
+        });
+
+      state.trips[index] =
+        updatedTrip;
+
+      state =
+        calculateStatistics(
+          normalizeState(
+            state
+          )
+        );
+
+      const savedTrip =
+        state.trips.find(
+          (item) =>
+            String(item.id) ===
+            String(tripId)
+        ) ||
+        updatedTrip;
+
+      persistImmediately({
+        type: "trip-updated",
+        tripId
+      });
+
+      return clone(
+        savedTrip
+      );
     },
 
     upsertTrip(tripData) {
-      const tripId = tripData?.id;
+      const tripId =
+        tripData?.id;
 
       if (
         tripId &&
-        findTripIndex(tripId) !== -1
+        findTripIndex(
+          tripId
+        ) !== -1
       ) {
         return this.updateTrip(
           tripId,
@@ -1175,53 +1733,13 @@
       );
     },
 
-    updateTrip(tripId, changes = {}) {
-      const index = findTripIndex(
-        tripId
-      );
-
-      if (index === -1) {
-        return null;
-      }
-
-      const existing = clone(
-        state.trips[index]
-      );
-
-      const updatedTrip = normalizeTrip({
-        ...existing,
-        ...clone(changes),
-        id: existing.id,
-        createdAt: existing.createdAt
-      });
-
-      state.trips[index] =
-        updatedTrip;
-
-      state = calculateStatistics(
-        normalizeState(state)
-      );
-
-      persistImmediately({
-        type: "trip-updated",
-        tripId
-      });
-
-      return clone(
+    getTrip(tripId) {
+      const trip =
         state.trips.find(
           (item) =>
             String(item.id) ===
             String(tripId)
-        ) || updatedTrip
-      );
-    },
-
-    getTrip(tripId) {
-      const trip = state.trips.find(
-        (item) =>
-          String(item.id) ===
-          String(tripId)
-      );
+        );
 
       return trip
         ? clone(trip)
@@ -1229,30 +1747,41 @@
     },
 
     getTripById(tripId) {
-      return this.getTrip(tripId);
+      return this.getTrip(
+        tripId
+      );
     },
 
     deleteTrip(tripId) {
-      const index = findTripIndex(
-        tripId
-      );
+      const index =
+        findTripIndex(
+          tripId
+        );
 
       if (index === -1) {
         return false;
       }
 
-      state.trips.splice(index, 1);
+      state.trips.splice(
+        index,
+        1
+      );
 
       state.budgets.expenses =
         state.budgets.expenses.filter(
           (expense) =>
-            String(expense.tripId) !==
+            String(
+              expense.tripId
+            ) !==
             String(tripId)
         );
 
-      state = calculateStatistics(
-        normalizeState(state)
-      );
+      state =
+        calculateStatistics(
+          normalizeState(
+            state
+          )
+        );
 
       persistImmediately({
         type: "trip-deleted",
@@ -1266,8 +1795,10 @@
       return this.updateTrip(
         tripId,
         {
-          status: "archived",
-          archivedAt: nowISO()
+          status:
+            "archived",
+          archivedAt:
+            nowISO()
         }
       );
     },
@@ -1276,16 +1807,21 @@
       return this.updateTrip(
         tripId,
         {
-          status: "planning",
-          archivedAt: null
+          status:
+            "planning",
+          archivedAt:
+            null
         }
       );
     },
 
-    addExpense(expenseData) {
-      const expense = normalizeExpense(
-        expenseData
-      );
+    addExpense(
+      expenseData
+    ) {
+      const expense =
+        normalizeExpense(
+          expenseData
+        );
 
       if (!expense.title) {
         throw new Error(
@@ -1293,7 +1829,9 @@
         );
       }
 
-      if (expense.amount <= 0) {
+      if (
+        expense.amount <= 0
+      ) {
         throw new Error(
           "قيمة المصروف يجب أن تكون أكبر من صفر."
         );
@@ -1303,33 +1841,52 @@
         expense
       );
 
-      if (expense.tripId) {
-        const tripIndex = findTripIndex(
-          expense.tripId
-        );
+      if (
+        expense.tripId
+      ) {
+        const tripIndex =
+          findTripIndex(
+            expense.tripId
+          );
 
-        if (tripIndex !== -1) {
-          state.trips[tripIndex].spent =
+        if (
+          tripIndex !== -1
+        ) {
+          state.trips[
+            tripIndex
+          ].spent =
             toNumber(
-              state.trips[tripIndex].spent,
+              state.trips[
+                tripIndex
+              ].spent,
               0
-            ) + expense.amount;
+            ) +
+            expense.amount;
 
-          state.trips[tripIndex].updatedAt =
+          state.trips[
+            tripIndex
+          ].updatedAt =
             nowISO();
         }
       }
 
-      state = calculateStatistics(
-        normalizeState(state)
-      );
+      state =
+        calculateStatistics(
+          normalizeState(
+            state
+          )
+        );
 
       persistImmediately({
-        type: "expense-created",
-        expenseId: expense.id
+        type:
+          "expense-created",
+        expenseId:
+          expense.id
       });
 
-      return clone(expense);
+      return clone(
+        expense
+      );
     },
 
     updateExpense(
@@ -1339,7 +1896,12 @@
       const index =
         state.budgets.expenses.findIndex(
           (expense) =>
-            expense.id === expenseId
+            String(
+              expense.id
+            ) ===
+            String(
+              expenseId
+            )
         );
 
       if (index === -1) {
@@ -1347,70 +1909,99 @@
       }
 
       const oldExpense =
-        state.budgets.expenses[index];
+        state.budgets.expenses[
+          index
+        ];
 
       const newExpense =
         normalizeExpense({
           ...oldExpense,
           ...clone(changes),
-          id: expenseId,
+          id:
+            expenseId,
           createdAt:
             oldExpense.createdAt
         });
 
-      state.budgets.expenses[index] =
-        newExpense;
+      state.budgets.expenses[
+        index
+      ] = newExpense;
 
       [
         oldExpense.tripId,
         newExpense.tripId
       ]
         .filter(Boolean)
-        .forEach((tripId) => {
-          const tripIndex =
-            findTripIndex(tripId);
+        .forEach(
+          (tripId) => {
+            const tripIndex =
+              findTripIndex(
+                tripId
+              );
 
-          if (tripIndex !== -1) {
-            state.trips[tripIndex].spent =
-              state.budgets.expenses
-                .filter(
-                  (expense) =>
-                    expense.tripId ===
-                    tripId
-                )
-                .reduce(
-                  (total, expense) =>
-                    total +
-                    toNumber(
-                      expense.amount,
-                      0
-                    ),
-                  0
-                );
+            if (
+              tripIndex !== -1
+            ) {
+              state.trips[
+                tripIndex
+              ].spent =
+                state.budgets.expenses
+                  .filter(
+                    (expense) =>
+                      String(
+                        expense.tripId
+                      ) ===
+                      String(
+                        tripId
+                      )
+                  )
+                  .reduce(
+                    (
+                      total,
+                      expense
+                    ) =>
+                      total +
+                      toNumber(
+                        expense.amount,
+                        0
+                      ),
+                    0
+                  );
 
-            state.trips[
-              tripIndex
-            ].updatedAt = nowISO();
+              state.trips[
+                tripIndex
+              ].updatedAt =
+                nowISO();
+            }
           }
-        });
+        );
 
-      state = calculateStatistics(
-        normalizeState(state)
-      );
+      state =
+        calculateStatistics(
+          normalizeState(
+            state
+          )
+        );
 
       persistImmediately({
-        type: "expense-updated",
+        type:
+          "expense-updated",
         expenseId
       });
 
-      return clone(newExpense);
+      return clone(
+        newExpense
+      );
     },
 
-    deleteExpense(expenseId) {
+    deleteExpense(
+      expenseId
+    ) {
       const expense =
         state.budgets.expenses.find(
           (item) =>
-            item.id === expenseId
+            String(item.id) ===
+            String(expenseId)
         );
 
       if (!expense) {
@@ -1420,25 +2011,39 @@
       state.budgets.expenses =
         state.budgets.expenses.filter(
           (item) =>
-            item.id !== expenseId
+            String(item.id) !==
+            String(expenseId)
         );
 
-      if (expense.tripId) {
+      if (
+        expense.tripId
+      ) {
         const tripIndex =
           findTripIndex(
             expense.tripId
           );
 
-        if (tripIndex !== -1) {
-          state.trips[tripIndex].spent =
+        if (
+          tripIndex !== -1
+        ) {
+          state.trips[
+            tripIndex
+          ].spent =
             state.budgets.expenses
               .filter(
                 (item) =>
-                  item.tripId ===
-                  expense.tripId
+                  String(
+                    item.tripId
+                  ) ===
+                  String(
+                    expense.tripId
+                  )
               )
               .reduce(
-                (total, item) =>
+                (
+                  total,
+                  item
+                ) =>
                   total +
                   toNumber(
                     item.amount,
@@ -1449,16 +2054,21 @@
 
           state.trips[
             tripIndex
-          ].updatedAt = nowISO();
+          ].updatedAt =
+            nowISO();
         }
       }
 
-      state = calculateStatistics(
-        normalizeState(state)
-      );
+      state =
+        calculateStatistics(
+          normalizeState(
+            state
+          )
+        );
 
       persistImmediately({
-        type: "expense-deleted",
+        type:
+          "expense-deleted",
         expenseId
       });
 
@@ -1470,15 +2080,21 @@
         this.getBackups();
 
       const backup = {
-        id: createId("backup"),
-        createdAt: nowISO(),
-        schemaVersion: SCHEMA_VERSION,
+        id:
+          createId("backup"),
+        createdAt:
+          nowISO(),
+        schemaVersion:
+          SCHEMA_VERSION,
         appVersion:
           Config.appVersion,
-        state: clone(state)
+        state:
+          clone(state)
       };
 
-      backups.unshift(backup);
+      backups.unshift(
+        backup
+      );
 
       const limitedBackups =
         backups.slice(
@@ -1498,11 +2114,15 @@
           backup.createdAt;
 
         persistImmediately({
-          type: "backup-created",
-          backupId: backup.id
+          type:
+            "backup-created",
+          backupId:
+            backup.id
         });
 
-        return clone(backup);
+        return clone(
+          backup
+        );
       } catch (error) {
         console.error(
           "TIC Store: failed to create backup.",
@@ -1520,11 +2140,14 @@
             BACKUP_KEY
           );
 
-        const backups = raw
-          ? JSON.parse(raw)
-          : [];
+        const backups =
+          raw
+            ? JSON.parse(raw)
+            : [];
 
-        return Array.isArray(backups)
+        return Array.isArray(
+          backups
+        )
           ? backups
           : [];
       } catch (error) {
@@ -1537,11 +2160,14 @@
       }
     },
 
-    restoreBackup(backupId) {
+    restoreBackup(
+      backupId
+    ) {
       const backup =
         this.getBackups().find(
           (item) =>
-            item.id === backupId
+            item.id ===
+            backupId
         );
 
       if (
@@ -1554,7 +2180,8 @@
       replaceState(
         backup.state,
         {
-          type: "backup-restored",
+          type:
+            "backup-restored",
           backupId
         }
       );
@@ -1565,13 +2192,16 @@
     exportData() {
       return JSON.stringify(
         {
-          exportedAt: nowISO(),
-          appId: Config.id,
+          exportedAt:
+            nowISO(),
+          appId:
+            Config.id,
           appVersion:
             Config.appVersion,
           schemaVersion:
             SCHEMA_VERSION,
-          state: clone(state)
+          state:
+            clone(state)
         },
         null,
         2
@@ -1579,22 +2209,29 @@
     },
 
     importData(payload) {
-      let parsed = payload;
+      let parsed =
+        payload;
 
       if (
-        typeof payload === "string"
+        typeof payload ===
+        "string"
       ) {
         parsed =
-          JSON.parse(payload);
+          JSON.parse(
+            payload
+          );
       }
 
       const importedState =
-        parsed && parsed.state
+        parsed &&
+        parsed.state
           ? parsed.state
           : parsed;
 
       if (
-        !isObject(importedState)
+        !isObject(
+          importedState
+        )
       ) {
         throw new Error(
           "ملف البيانات غير صالح."
@@ -1606,7 +2243,8 @@
       replaceState(
         importedState,
         {
-          type: "data-imported"
+          type:
+            "data-imported"
         }
       );
 
@@ -1621,14 +2259,16 @@
         this.createBackup();
       }
 
-      state = calculateStatistics(
-        normalizeState(
-          getDefaultState()
-        )
-      );
+      state =
+        calculateStatistics(
+          normalizeState(
+            getDefaultState()
+          )
+        );
 
       persistImmediately({
-        type: "store-reset"
+        type:
+          "store-reset"
       });
 
       return clone(state);
@@ -1636,9 +2276,12 @@
 
     diagnostics() {
       return {
-        version: this.version,
-        storageKey: STORAGE_KEY,
-        backupKey: BACKUP_KEY,
+        version:
+          this.version,
+        storageKey:
+          STORAGE_KEY,
+        backupKey:
+          BACKUP_KEY,
         schemaVersion:
           SCHEMA_VERSION,
         subscriberCount:
@@ -1646,46 +2289,30 @@
         tripCount:
           state.trips.length,
         expenseCount:
-          state.budgets.expenses.length,
+          state.budgets
+            .expenses.length,
         lastUpdatedAt:
           state.meta.updatedAt,
         lastBackupAt:
-          state.meta.lastBackupAt,
-
-        tripFieldsPreserved: [
-          "departureDate",
-          "departureTime",
-          "arrivalDate",
-          "arrivalTime",
-          "airportLeadMinutes",
-          "departureAirport",
-          "arrivalAirport",
-          "airline",
-          "flightNumber",
-          "terminal",
-          "gate",
-          "seatNumber",
-          "bookingReference",
-          "accommodation",
-          "hotelBookingReference",
-          "hotelCheckIn",
-          "hotelCheckOut"
-        ]
+          state.meta
+            .lastBackupAt
       };
     }
   };
 
-  /*
-   * Persist normalized legacy data immediately on startup.
-   * This migrates existing trips to the V1.1.0 schema while preserving
-   * previously stored fields.
-   */
-  persistImmediately({
-    type: readStoredState()
-      ? "store-migrated"
-      : "store-initialized",
-    version: Store.version
-  });
+  if (
+    !readStoredState()
+  ) {
+    persistImmediately({
+      type:
+        "store-initialized"
+    });
+  } else {
+    persistImmediately({
+      type:
+        "store-migrated-v1.1.0"
+    });
+  }
 
   window.TIC =
     window.TIC || {};
