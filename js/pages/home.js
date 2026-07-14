@@ -1,19 +1,23 @@
 /* =========================================================
    Travel Intelligence Center
-   Home Page Module V2.1.0
+   Home Page Module V2.2.0
 
    File Path:
    js/pages/home.js
 
    Purpose:
    - Calm, premium and compact iPhone-first home page.
-   - Keeps the home page focused on positive travel inspiration.
+   - Keeps the current empty-state appearance when no trip exists.
+   - Shows a smarter next-trip summary when an upcoming trip exists.
+   - Supports flexible flight, airport, hotel and booking field names.
    - Preserves Store, Router, Trip Form and cross-page integration.
-   - Shows only:
-     1. Compact welcome card.
-     2. Compact next-trip card.
-     3. Compact travel snapshot.
-     4. One positive travel inspiration card.
+   - Keeps ticket/hotel scan entry points ready for Trip Form integration.
+
+   Important:
+   - Image/ticket/hotel reading is handled by Trip Form or a future
+     document-reading service, not by the Home Page itself.
+   - This page automatically displays extracted data once saved
+     inside the trip record.
 
    Dependencies:
    - js/config.js
@@ -32,7 +36,8 @@
 
   const Config = window.TICConfig || window.TIC?.Config || {};
   const PAGE_ID = "home";
-  const PAGE_VERSION = "2.1.0";
+  const PAGE_VERSION = "2.2.0";
+  const DEFAULT_AIRPORT_LEAD_MINUTES = 120;
 
   const state = {
     initialized: false,
@@ -85,6 +90,29 @@
 
   const list = (value) =>
     Array.isArray(value) ? value : [];
+
+  const firstText = (...values) => {
+    for (const value of values) {
+      const result = text(value);
+      if (result) return result;
+    }
+
+    return "";
+  };
+
+  const firstValue = (...values) => {
+    for (const value of values) {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== ""
+      ) {
+        return value;
+      }
+    }
+
+    return null;
+  };
 
   const getStore = () =>
     window.TIC?.Store ||
@@ -179,14 +207,31 @@
   const toDate = (value) => {
     if (!value) return null;
 
-    const result =
-      value instanceof Date
-        ? value
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime())
+        ? null
         : new Date(value);
+    }
 
-    return Number.isNaN(result.getTime())
-      ? null
-      : result;
+    if (typeof value === "number") {
+      const numericDate = new Date(value);
+
+      return Number.isNaN(numericDate.getTime())
+        ? null
+        : numericDate;
+    }
+
+    const raw = text(value);
+
+    if (!raw) return null;
+
+    const direct = new Date(raw);
+
+    if (!Number.isNaN(direct.getTime())) {
+      return direct;
+    }
+
+    return null;
   };
 
   const startOfDay = (value) => {
@@ -204,6 +249,15 @@
         startOfDay(date).getTime() -
         startOfDay(new Date()).getTime()
       ) / 86400000
+    );
+  };
+
+  const minutesUntil = (value) => {
+    const date = toDate(value);
+    if (!date) return null;
+
+    return Math.round(
+      (date.getTime() - Date.now()) / 60000
     );
   };
 
@@ -225,27 +279,368 @@
     );
   };
 
+  const combineDateAndTime = (dateValue, timeValue) => {
+    if (!dateValue && !timeValue) return null;
+
+    const date = toDate(dateValue);
+
+    if (!date) {
+      return toDate(timeValue);
+    }
+
+    const time = text(timeValue);
+
+    if (!time) {
+      return date;
+    }
+
+    const match = time.match(
+      /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/
+    );
+
+    if (!match) {
+      const combined = toDate(
+        `${date.toISOString().slice(0, 10)}T${time}`
+      );
+
+      return combined || date;
+    }
+
+    const result = new Date(date);
+    result.setHours(
+      number(match[1]),
+      number(match[2]),
+      number(match[3]),
+      0
+    );
+
+    return result;
+  };
+
+  const subtractMinutes = (dateValue, minutes) => {
+    const date = toDate(dateValue);
+
+    if (!date) return null;
+
+    return new Date(
+      date.getTime() - number(minutes) * 60000
+    );
+  };
+
+  const formatTime = (value) => {
+    const date = toDate(value);
+
+    if (!date) {
+      const raw = text(value);
+      return raw || "";
+    }
+
+    try {
+      return new Intl.DateTimeFormat("ar-AE", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+      }).format(date);
+    } catch (error) {
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+  };
+
+  const formatShortDate = (value) => {
+    const date = toDate(value);
+
+    if (!date) return "";
+
+    try {
+      return new Intl.DateTimeFormat("ar-AE", {
+        day: "numeric",
+        month: "short",
+        year: "numeric"
+      }).format(date);
+    } catch (error) {
+      return date.toLocaleDateString();
+    }
+  };
+
+  const formatDateTime = (value) => {
+    const date = toDate(value);
+
+    if (!date) return "";
+
+    return `${formatShortDate(date)} • ${formatTime(date)}`;
+  };
+
   const tripsFrom = (snapshot) =>
     list(snapshot.trips);
 
+  const getTripDepartureDateTime = (trip) => {
+    const flight = isObject(trip?.flight)
+      ? trip.flight
+      : {};
+
+    const outbound = isObject(trip?.outboundFlight)
+      ? trip.outboundFlight
+      : {};
+
+    const directDateTime = firstValue(
+      trip?.departureDateTime,
+      trip?.flightDateTime,
+      trip?.flightDepartureDateTime,
+      outbound.departureDateTime,
+      flight.departureDateTime
+    );
+
+    if (directDateTime) {
+      return toDate(directDateTime);
+    }
+
+    const dateValue = firstValue(
+      trip?.departureDate,
+      trip?.flightDate,
+      outbound.departureDate,
+      flight.departureDate,
+      trip?.startDate
+    );
+
+    const timeValue = firstValue(
+      trip?.departureTime,
+      trip?.flightTime,
+      trip?.flightDepartureTime,
+      outbound.departureTime,
+      flight.departureTime
+    );
+
+    return combineDateAndTime(
+      dateValue,
+      timeValue
+    );
+  };
+
+  const getTripArrivalDateTime = (trip) => {
+    const flight = isObject(trip?.flight)
+      ? trip.flight
+      : {};
+
+    const outbound = isObject(trip?.outboundFlight)
+      ? trip.outboundFlight
+      : {};
+
+    const directDateTime = firstValue(
+      trip?.arrivalDateTime,
+      trip?.flightArrivalDateTime,
+      outbound.arrivalDateTime,
+      flight.arrivalDateTime
+    );
+
+    if (directDateTime) {
+      return toDate(directDateTime);
+    }
+
+    return combineDateAndTime(
+      firstValue(
+        trip?.arrivalDate,
+        outbound.arrivalDate,
+        flight.arrivalDate,
+        trip?.startDate
+      ),
+      firstValue(
+        trip?.arrivalTime,
+        trip?.flightArrivalTime,
+        outbound.arrivalTime,
+        flight.arrivalTime
+      )
+    );
+  };
+
+  const getFlightDetails = (trip) => {
+    const flight = isObject(trip?.flight)
+      ? trip.flight
+      : {};
+
+    const outbound = isObject(trip?.outboundFlight)
+      ? trip.outboundFlight
+      : {};
+
+    const departureDateTime =
+      getTripDepartureDateTime(trip);
+
+    const arrivalDateTime =
+      getTripArrivalDateTime(trip);
+
+    const airportLeadMinutes = Math.max(
+      0,
+      number(
+        firstValue(
+          trip?.airportLeadMinutes,
+          trip?.arriveAirportBeforeMinutes,
+          flight.airportLeadMinutes,
+          outbound.airportLeadMinutes
+        ),
+        DEFAULT_AIRPORT_LEAD_MINUTES
+      )
+    );
+
+    return {
+      airline: firstText(
+        trip?.airline,
+        trip?.airlineName,
+        outbound.airline,
+        outbound.airlineName,
+        flight.airline,
+        flight.airlineName
+      ),
+      flightNumber: firstText(
+        trip?.flightNumber,
+        trip?.flightNo,
+        outbound.flightNumber,
+        outbound.flightNo,
+        flight.flightNumber,
+        flight.flightNo
+      ),
+      departureAirport: firstText(
+        trip?.departureAirport,
+        trip?.originAirport,
+        outbound.departureAirport,
+        outbound.originAirport,
+        flight.departureAirport,
+        flight.originAirport
+      ),
+      arrivalAirport: firstText(
+        trip?.arrivalAirport,
+        trip?.destinationAirport,
+        outbound.arrivalAirport,
+        outbound.destinationAirport,
+        flight.arrivalAirport,
+        flight.destinationAirport
+      ),
+      terminal: firstText(
+        trip?.terminal,
+        trip?.departureTerminal,
+        outbound.terminal,
+        outbound.departureTerminal,
+        flight.terminal,
+        flight.departureTerminal
+      ),
+      gate: firstText(
+        trip?.gate,
+        trip?.departureGate,
+        outbound.gate,
+        outbound.departureGate,
+        flight.gate,
+        flight.departureGate
+      ),
+      bookingReference: firstText(
+        trip?.bookingReference,
+        trip?.pnr,
+        trip?.confirmationNumber,
+        outbound.bookingReference,
+        flight.bookingReference
+      ),
+      departureDateTime,
+      arrivalDateTime,
+      airportLeadMinutes,
+      airportArrivalDateTime:
+        subtractMinutes(
+          departureDateTime,
+          airportLeadMinutes
+        )
+    };
+  };
+
+  const getHotelDetails = (trip) => {
+    const accommodation = isObject(
+      trip?.accommodation
+    )
+      ? trip.accommodation
+      : {};
+
+    const hotel = isObject(trip?.hotel)
+      ? trip.hotel
+      : {};
+
+    return {
+      name: firstText(
+        trip?.hotelName,
+        trip?.accommodationName,
+        accommodation.name,
+        accommodation.hotelName,
+        hotel.name,
+        hotel.hotelName,
+        typeof trip?.accommodation === "string"
+          ? trip.accommodation
+          : ""
+      ),
+      address: firstText(
+        trip?.hotelAddress,
+        accommodation.address,
+        hotel.address
+      ),
+      confirmationNumber: firstText(
+        trip?.hotelConfirmationNumber,
+        trip?.hotelBookingReference,
+        accommodation.confirmationNumber,
+        accommodation.bookingReference,
+        hotel.confirmationNumber,
+        hotel.bookingReference
+      ),
+      checkIn: firstValue(
+        trip?.hotelCheckIn,
+        trip?.checkIn,
+        accommodation.checkIn,
+        hotel.checkIn
+      ),
+      checkOut: firstValue(
+        trip?.hotelCheckOut,
+        trip?.checkOut,
+        accommodation.checkOut,
+        hotel.checkOut
+      )
+    };
+  };
+
   const upcomingTripsFrom = (snapshot) => {
-    const today = startOfDay(new Date());
+    const now = new Date();
+    const today = startOfDay(now);
 
     return tripsFrom(snapshot)
       .filter((trip) => {
-        const startDate = toDate(trip.startDate);
-        const status = text(trip.status).toLowerCase();
+        const departureDateTime =
+          getTripDepartureDateTime(trip);
+
+        const startDate =
+          departureDateTime ||
+          toDate(trip.startDate);
+
+        const status = text(
+          trip.status
+        ).toLowerCase();
 
         return (
           startDate &&
-          startOfDay(startDate) >= today &&
+          (
+            startOfDay(startDate) >= today ||
+            (
+              toDate(trip.endDate) &&
+              toDate(trip.endDate) >= now
+            )
+          ) &&
           !["completed", "cancelled"].includes(status)
         );
       })
-      .sort(
-        (a, b) =>
-          toDate(a.startDate) - toDate(b.startDate)
-      );
+      .sort((a, b) => {
+        const aDate =
+          getTripDepartureDateTime(a) ||
+          toDate(a.startDate);
+
+        const bDate =
+          getTripDepartureDateTime(b) ||
+          toDate(b.startDate);
+
+        return aDate - bDate;
+      });
   };
 
   const completedTripsFrom = (snapshot) =>
@@ -308,6 +703,12 @@
       upcomingTrips,
       completedTrips,
       nextTrip,
+      nextFlight: nextTrip
+        ? getFlightDetails(nextTrip)
+        : null,
+      nextHotel: nextTrip
+        ? getHotelDetails(nextTrip)
+        : null,
       statistics: {
         totalTrips: trips.length,
         upcomingTrips: upcomingTrips.length,
@@ -322,7 +723,44 @@
   const formatCountdown = (trip) => {
     if (!trip) return "";
 
-    const remainingDays = daysUntil(trip.startDate);
+    const departureDateTime =
+      getTripDepartureDateTime(trip);
+
+    const target =
+      departureDateTime ||
+      toDate(trip.startDate);
+
+    if (!target) {
+      return "موعد الرحلة غير محدد";
+    }
+
+    const remainingMinutes =
+      minutesUntil(target);
+
+    if (
+      remainingMinutes !== null &&
+      remainingMinutes >= 0 &&
+      remainingMinutes < 1440
+    ) {
+      const hours = Math.floor(
+        remainingMinutes / 60
+      );
+
+      const minutes =
+        remainingMinutes % 60;
+
+      if (hours === 0) {
+        return `متبقي ${minutes} دقيقة`;
+      }
+
+      if (minutes === 0) {
+        return `متبقي ${hours} ساعة`;
+      }
+
+      return `متبقي ${hours} ساعة و${minutes} دقيقة`;
+    }
+
+    const remainingDays = daysUntil(target);
 
     if (remainingDays === null) {
       return "موعد الرحلة غير محدد";
@@ -350,6 +788,110 @@
       .join("، ") ||
     text(trip?.title) ||
     "رحلة قادمة";
+
+  const getTripStage = (trip) => {
+    if (!trip) return "empty";
+
+    const departure =
+      getTripDepartureDateTime(trip) ||
+      toDate(trip.startDate);
+
+    const remainingMinutes =
+      minutesUntil(departure);
+
+    const remainingDays =
+      daysUntil(departure);
+
+    if (
+      remainingMinutes !== null &&
+      remainingMinutes <= 0 &&
+      remainingMinutes >= -1440
+    ) {
+      return "travel-day";
+    }
+
+    if (
+      remainingMinutes !== null &&
+      remainingMinutes > 0 &&
+      remainingMinutes <= 1440
+    ) {
+      return "within-day";
+    }
+
+    if (
+      remainingDays !== null &&
+      remainingDays <= 7
+    ) {
+      return "within-week";
+    }
+
+    if (
+      remainingDays !== null &&
+      remainingDays <= 30
+    ) {
+      return "within-month";
+    }
+
+    return "planning";
+  };
+
+  const getSmartTripMessage = (
+    trip,
+    flight,
+    hotel
+  ) => {
+    const stage = getTripStage(trip);
+
+    if (stage === "travel-day") {
+      return {
+        title: "رحلتك بدأت",
+        message:
+          "تأكد من مستنداتك واتجه إلى بوابة الصعود في الوقت المناسب."
+      };
+    }
+
+    if (stage === "within-day") {
+      if (flight?.airportArrivalDateTime) {
+        return {
+          title: "اليوم موعد السفر",
+          message:
+            `يفضل تكون في المطار الساعة ${formatTime(
+              flight.airportArrivalDateTime
+            )}.`
+        };
+      }
+
+      return {
+        title: "اليوم موعد السفر",
+        message:
+          "جهز مستنداتك وتأكد من وقت التوجه إلى المطار."
+      };
+    }
+
+    if (stage === "within-week") {
+      return {
+        title: "قرب موعد الرحلة",
+        message:
+          hotel?.name
+            ? "راجع التذكرة والحجز وخلك جاهز لأيام جميلة."
+            : "راجع التذكرة وأضف بيانات الفندق إذا ما اكتملت."
+      };
+    }
+
+    if (stage === "within-month") {
+      return {
+        title: "كل يوم يقربك من الرحلة",
+        message:
+          "راجع حجوزاتك وخطط لأهم التجارب اللي تباها."
+      };
+    }
+
+    return {
+      title: "رحلتك القادمة مرتبة",
+      message:
+        "خذ وقتك في التخطيط واستمتع بحماس الرحلة من الحين."
+    };
+  };
 
   const renderWelcome = (snapshot) => {
     const name =
@@ -380,43 +922,106 @@
     `;
   };
 
-  const renderNextTrip = (snapshot) => {
+  const renderEmptyNextTrip = () => {
+    const ui = getUI();
+
+    return `
+      <article class="tic-home-next-card tic-home-next-card-empty">
+        <div class="tic-home-next-top">
+          <div>
+            <span class="tic-home-kicker">
+              خطوتك القادمة
+            </span>
+
+            <h3>
+              وين بتكون سفرتك الياية؟
+            </h3>
+          </div>
+
+          <div class="tic-home-next-icon" aria-hidden="true">
+            ✈
+          </div>
+        </div>
+
+        <p class="tic-home-next-message">
+          أنشئ رحلة جديدة وخلك جاهز لأجمل تجربة.
+        </p>
+
+        <div class="tic-home-next-actions">
+          ${ui.button({
+            label: "إنشاء رحلة",
+            action: "home-new-trip",
+            primary: true
+          })}
+        </div>
+      </article>
+    `;
+  };
+
+  const renderTripFact = (
+    label,
+    value,
+    options = {}
+  ) => {
+    if (!text(value)) return "";
+
+    return `
+      <div class="tic-home-trip-fact${
+        options.emphasis
+          ? " is-emphasis"
+          : ""
+      }">
+        <span>
+          ${escapeHTML(label)}
+        </span>
+
+        <strong>
+          ${escapeHTML(value)}
+        </strong>
+      </div>
+    `;
+  };
+
+  const renderFlightRoute = (flight) => {
+    if (
+      !flight?.departureAirport &&
+      !flight?.arrivalAirport
+    ) {
+      return "";
+    }
+
+    return `
+      <div class="tic-home-flight-route">
+        <div>
+          <small>من</small>
+          <strong>
+            ${escapeHTML(
+              flight.departureAirport ||
+              "غير محدد"
+            )}
+          </strong>
+        </div>
+
+        <span aria-hidden="true">✈</span>
+
+        <div>
+          <small>إلى</small>
+          <strong>
+            ${escapeHTML(
+              flight.arrivalAirport ||
+              "غير محدد"
+            )}
+          </strong>
+        </div>
+      </div>
+    `;
+  };
+
+  const renderSmartNextTrip = (snapshot) => {
     const ui = getUI();
     const trip = snapshot.nextTrip;
-
-    if (!trip) {
-      return `
-        <article class="tic-home-next-card tic-home-next-card-empty">
-          <div class="tic-home-next-top">
-            <div>
-              <span class="tic-home-kicker">
-                خطوتك القادمة
-              </span>
-
-              <h3>
-                وين بتكون سفرتك الياية؟
-              </h3>
-            </div>
-
-            <div class="tic-home-next-icon" aria-hidden="true">
-              ✈
-            </div>
-          </div>
-
-          <p class="tic-home-next-message">
-            أنشئ رحلة جديدة وخلك جاهز لأجمل تجربة.
-          </p>
-
-          <div class="tic-home-next-actions">
-            ${ui.button({
-              label: "إنشاء رحلة",
-              action: "home-new-trip",
-              primary: true
-            })}
-          </div>
-        </article>
-      `;
-    }
+    const flight = snapshot.nextFlight;
+    const hotel = snapshot.nextHotel;
 
     const duration = number(
       trip.durationDays,
@@ -426,8 +1031,58 @@
       )
     );
 
+    const smartMessage =
+      getSmartTripMessage(
+        trip,
+        flight,
+        hotel
+      );
+
+    const airlineFlight = [
+      flight.airline,
+      flight.flightNumber
+    ]
+      .filter(Boolean)
+      .join(" • ");
+
+    const terminalGate = [
+      flight.terminal
+        ? `مبنى ${flight.terminal}`
+        : "",
+      flight.gate
+        ? `بوابة ${flight.gate}`
+        : ""
+    ]
+      .filter(Boolean)
+      .join(" • ");
+
+    const tripDate = flight.departureDateTime
+      ? formatDateTime(
+          flight.departureDateTime
+        )
+      : formatShortDate(trip.startDate);
+
+    const hasFlightDetails = Boolean(
+      airlineFlight ||
+      flight.departureDateTime ||
+      terminalGate ||
+      flight.departureAirport ||
+      flight.arrivalAirport
+    );
+
+    const hasHotelDetails = Boolean(
+      hotel.name ||
+      hotel.confirmationNumber ||
+      hotel.checkIn
+    );
+
     return `
-      <article class="tic-home-next-card">
+      <article
+        class="tic-home-next-card tic-home-next-card-smart"
+        data-trip-stage="${escapeHTML(
+          getTripStage(trip)
+        )}"
+      >
         <div class="tic-home-next-top">
           <div>
             <span class="tic-home-kicker">
@@ -451,28 +1106,132 @@
           </div>
         </div>
 
-        <div class="tic-home-trip-meta">
-          <div>
-            <span>التاريخ</span>
-            <strong>
-              ${escapeHTML(ui.date(trip.startDate))}
-            </strong>
-          </div>
+        <div class="tic-home-trip-highlight">
+          <strong>
+            ${escapeHTML(smartMessage.title)}
+          </strong>
 
-          <div>
-            <span>المدة</span>
-            <strong>
-              ${duration > 0 ? `${duration} يوم` : "غير محددة"}
-            </strong>
-          </div>
-
-          <div>
-            <span>الميزانية</span>
-            <strong>
-              ${escapeHTML(ui.currency(trip.budget))}
-            </strong>
-          </div>
+          <p>
+            ${escapeHTML(smartMessage.message)}
+          </p>
         </div>
+
+        <div class="tic-home-trip-meta">
+          ${renderTripFact(
+            "موعد السفر",
+            tripDate
+          )}
+
+          ${renderTripFact(
+            "المدة",
+            duration > 0
+              ? `${duration} يوم`
+              : "غير محددة"
+          )}
+
+          ${renderTripFact(
+            "الميزانية",
+            ui.currency(trip.budget)
+          )}
+        </div>
+
+        ${
+          hasFlightDetails
+            ? `
+              <section class="tic-home-detail-block">
+                <header>
+                  <span>تفاصيل الطيران</span>
+                  <strong>رحلتك الجوية</strong>
+                </header>
+
+                ${renderFlightRoute(flight)}
+
+                <div class="tic-home-detail-grid">
+                  ${renderTripFact(
+                    "شركة ورقم الرحلة",
+                    airlineFlight
+                  )}
+
+                  ${renderTripFact(
+                    "الإقلاع",
+                    flight.departureDateTime
+                      ? formatTime(
+                          flight.departureDateTime
+                        )
+                      : ""
+                  )}
+
+                  ${renderTripFact(
+                    "الوصول",
+                    flight.arrivalDateTime
+                      ? formatTime(
+                          flight.arrivalDateTime
+                        )
+                      : ""
+                  )}
+
+                  ${renderTripFact(
+                    "المبنى والبوابة",
+                    terminalGate
+                  )}
+
+                  ${renderTripFact(
+                    "كن في المطار",
+                    flight.airportArrivalDateTime
+                      ? formatTime(
+                          flight.airportArrivalDateTime
+                        )
+                      : "",
+                    {
+                      emphasis: true
+                    }
+                  )}
+                </div>
+              </section>
+            `
+            : `
+              <button
+                type="button"
+                class="tic-home-add-details"
+                data-tic-action="home-edit-next-trip"
+              >
+                <span aria-hidden="true">＋</span>
+                أضف بيانات التذكرة والطيران
+              </button>
+            `
+        }
+
+        ${
+          hasHotelDetails
+            ? `
+              <section class="tic-home-detail-block tic-home-hotel-block">
+                <header>
+                  <span>الإقامة</span>
+                  <strong>
+                    ${escapeHTML(
+                      hotel.name ||
+                      "حجز الفندق"
+                    )}
+                  </strong>
+                </header>
+
+                <div class="tic-home-detail-grid">
+                  ${renderTripFact(
+                    "تسجيل الدخول",
+                    hotel.checkIn
+                      ? formatDateTime(hotel.checkIn)
+                      : ""
+                  )}
+
+                  ${renderTripFact(
+                    "رقم الحجز",
+                    hotel.confirmationNumber
+                  )}
+                </div>
+              </section>
+            `
+            : ""
+        }
 
         <div class="tic-home-next-actions">
           ${ui.button({
@@ -486,13 +1245,18 @@
           })}
 
           ${ui.button({
-            label: "تعديل",
+            label: "تعديل البيانات",
             action: "home-edit-next-trip"
           })}
         </div>
       </article>
     `;
   };
+
+  const renderNextTrip = (snapshot) =>
+    snapshot.nextTrip
+      ? renderSmartNextTrip(snapshot)
+      : renderEmptyNextTrip();
 
   const renderStatistics = (snapshot) => {
     const stats = [
@@ -546,7 +1310,10 @@
   const renderInspiration = (snapshot) => {
     const trip = snapshot.nextTrip;
     const remainingDays = trip
-      ? daysUntil(trip.startDate)
+      ? daysUntil(
+          getTripDepartureDateTime(trip) ||
+          trip.startDate
+        )
       : null;
 
     let title = "رحلتك تبدأ بفكرة جميلة";
@@ -554,18 +1321,24 @@
       "اختر وجهة تحبها، وخطط لها على راحتك، وخلك مستمتع من أول خطوة.";
 
     if (trip && remainingDays !== null) {
-      if (remainingDays <= 7 && remainingDays >= 0) {
+      if (
+        remainingDays <= 7 &&
+        remainingDays >= 0
+      ) {
         title = "قرب موعد المغامرة";
         message =
-          "خفف جدولك، رتب أغراضك بهدوء، واستمتع بحماس الأيام الأخيرة قبل السفر.";
-      } else if (remainingDays <= 30 && remainingDays > 7) {
+          "رتب أمورك بهدوء واستمتع بحماس الأيام الأخيرة قبل السفر.";
+      } else if (
+        remainingDays <= 30 &&
+        remainingDays > 7
+      ) {
         title = "كل يوم يقربك من رحلتك";
         message =
-          "استمتع بالتخطيط وخلك مرن؛ أجمل الرحلات تبدأ قبل الوصول.";
+          "استمتع بالتخطيط؛ أجمل الرحلات تبدأ قبل الوصول.";
       } else if (remainingDays > 30) {
         title = "عندك وقت تخلي الرحلة أجمل";
         message =
-          "اكتشف تفاصيل أكثر عن وجهتك واختَر التجارب اللي تناسبك.";
+          "اكتشف تفاصيل أكثر عن وجهتك واختر التجارب اللي تناسبك.";
       }
     }
 
@@ -619,6 +1392,9 @@
       class="tic-module tic-home-page"
       data-page="home"
       data-page-version="${PAGE_VERSION}"
+      data-has-next-trip="${
+        snapshot.nextTrip ? "true" : "false"
+      }"
     >
       ${renderWelcome(snapshot)}
 
@@ -626,7 +1402,9 @@
         ${renderSectionHeader({
           eyebrow: "NEXT JOURNEY",
           title: "الرحلة القادمة",
-          subtitle: "تفاصيل سفرتك الأقرب بشكل بسيط."
+          subtitle: snapshot.nextTrip
+            ? "أهم تفاصيل سفرتك الأقرب في مكان واحد."
+            : "تفاصيل سفرتك الأقرب بشكل بسيط."
         })}
 
         ${renderNextTrip(snapshot)}
@@ -668,6 +1446,52 @@
     return true;
   };
 
+  const openCreateTrip = () => {
+    const tripForm = getTripForm();
+
+    if (
+      tripForm &&
+      typeof tripForm.openCreate === "function"
+    ) {
+      return tripForm.openCreate({
+        source: "home",
+        mode: "create",
+        smartImport: true
+      });
+    }
+
+    return getRouter()?.go?.("trip-form", {
+      params: {
+        mode: "create",
+        smartImport: true
+      },
+      source: "home-new-trip"
+    });
+  };
+
+  const openEditTrip = (tripId) => {
+    const tripForm = getTripForm();
+
+    if (
+      tripForm &&
+      typeof tripForm.openEdit === "function"
+    ) {
+      return tripForm.openEdit(tripId, {
+        source: "home",
+        smartImport: true
+      });
+    }
+
+    return getRouter()?.go?.("trip-form", {
+      params: {
+        mode: "edit",
+        tripId,
+        smartImport: true
+      },
+      source: "home-edit-next-trip"
+    });
+  };
+
   const registerActions = () => {
     const ui = getUI();
 
@@ -686,23 +1510,10 @@
       );
     };
 
-    register("home-new-trip", () => {
-      const tripForm = getTripForm();
-
-      if (
-        tripForm &&
-        typeof tripForm.openCreate === "function"
-      ) {
-        return tripForm.openCreate();
-      }
-
-      return getRouter()?.go?.("trip-form", {
-        params: {
-          mode: "create"
-        },
-        source: "home-new-trip"
-      });
-    });
+    register(
+      "home-new-trip",
+      openCreateTrip
+    );
 
     register("home-edit-next-trip", () => {
       const tripId =
@@ -717,22 +1528,7 @@
         return false;
       }
 
-      const tripForm = getTripForm();
-
-      if (
-        tripForm &&
-        typeof tripForm.openEdit === "function"
-      ) {
-        return tripForm.openEdit(tripId);
-      }
-
-      return getRouter()?.go?.("trip-form", {
-        params: {
-          mode: "edit",
-          tripId
-        },
-        source: "home-edit-next-trip"
-      });
+      return openEditTrip(tripId);
     });
   };
 
@@ -890,6 +1686,10 @@
     },
 
     diagnostics() {
+      const snapshot =
+        state.lastSnapshot ||
+        buildSnapshot();
+
       return {
         id: this.id,
         title: this.title,
@@ -909,7 +1709,13 @@
           state.subscribers.size,
         hasSnapshot: Boolean(
           state.lastSnapshot
-        )
+        ),
+        hasNextTrip: Boolean(
+          snapshot.nextTrip
+        ),
+        nextTripId:
+          snapshot.nextTrip?.id || null,
+        smartImportRequested: true
       };
     }
   };
