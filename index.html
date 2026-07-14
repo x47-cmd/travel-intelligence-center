@@ -22,64 +22,126 @@
   <meta name="format-detection" content="telephone=no" />
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Travel Center" />
+  <meta
+    name="apple-mobile-web-app-status-bar-style"
+    content="default"
+  />
+  <meta
+    name="apple-mobile-web-app-title"
+    content="Travel Center"
+  />
 
   <!-- =====================================================
-       Travel Intelligence Center V1.0.0
-       Core build: 14-file clean architecture
-       PWA, Service Worker, AI, and cloud services are
-       intentionally excluded until the core is stable.
+       Travel Intelligence Center V2.0.0
+       Premium iPhone-first interface
+       Core architecture remains stable
   ====================================================== -->
 
-  <link rel="stylesheet" href="css/style.css?v=1.0.0" />
+  <link
+    rel="stylesheet"
+    href="css/style.css?v=2.0.0"
+  />
 
   <!-- =====================================================
        1. Configuration and Static Data
   ====================================================== -->
-  <script defer src="js/config.js?v=1.0.0"></script>
-  <script defer src="js/data.js?v=1.0.0"></script>
+  <script
+    defer
+    src="js/config.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/data.js?v=1.0.0"
+  ></script>
 
   <!-- =====================================================
        2. Core Services
        Store → Router → UI
   ====================================================== -->
-  <script defer src="js/store.js?v=1.0.0"></script>
-<script defer src="js/router.js?v=1.0.0"></script>
-<script defer src="js/ui.js?v=1.0.0"></script>
+  <script
+    defer
+    src="js/store.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/router.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/ui.js?v=2.0.0"
+  ></script>
 
   <!-- =====================================================
        3. Shared Feature
   ====================================================== -->
-  <script defer src="js/features/trip-form.js?v=1.0.0"></script>
+  <script
+    defer
+    src="js/features/trip-form.js?v=2.0.0"
+  ></script>
 
   <!-- =====================================================
        4. Application Pages
   ====================================================== -->
-  <script defer src="js/pages/home.js?v=1.0.0"></script>
-  <script defer src="js/pages/trips.js?v=1.0.0"></script>
-  <script defer src="js/pages/guide.js?v=1.0.0"></script>
-  <script defer src="js/pages/budget.js?v=1.0.0"></script>
-  <script defer src="js/pages/more.js?v=1.0.0"></script>
+  <script
+    defer
+    src="js/pages/home.js?v=2.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/trips.js?v=2.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/guide.js?v=2.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/budget.js?v=2.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/more.js?v=2.0.0"
+  ></script>
 
   <!-- =====================================================
        5. Application Bootstrap
        Must remain the final JavaScript file.
   ====================================================== -->
-  <script defer src="js/app.js?v=1.0.0"></script>
+  <script
+    defer
+    src="js/app.js?v=2.0.0"
+  ></script>
 </head>
 
 <body>
-  <div id="app" class="app-shell">
+  <div
+    id="app"
+    class="tic-app"
+  >
 
-    <header class="topbar" role="banner">
-      <div class="topbar__brand">
-        <p class="topbar__eyebrow">Travel Intelligence Center</p>
-        <h1 class="topbar__title">مركز السفر الذكي</h1>
+    <header
+      class="tic-topbar"
+      role="banner"
+    >
+      <div class="tic-topbar-brand">
+        <p class="tic-kicker">
+          Travel Intelligence Center
+        </p>
+
+        <h1>
+          مركز السفر الذكي
+        </h1>
       </div>
 
       <button
-        class="icon-button"
+        class="tic-icon-btn"
         type="button"
         data-route="more"
         aria-label="فتح صفحة المزيد"
@@ -91,103 +153,110 @@
 
     <main
       id="app-view"
-      class="app-view"
+      class="tic-page"
       data-router-view
       aria-live="polite"
       aria-busy="true"
       tabindex="-1"
     >
-      <section class="startup-card" aria-labelledby="startup-title">
-        <span class="startup-card__badge">Loading</span>
+      <section
+        class="tic-empty-state"
+        aria-labelledby="startup-title"
+      >
+        <div
+          class="tic-empty-icon"
+          aria-hidden="true"
+        >
+          ✈
+        </div>
 
-        <h2 id="startup-title" class="startup-card__title">
+        <h2 id="startup-title">
           جاري تشغيل مركز السفر الذكي...
         </h2>
 
-        <p class="startup-card__text">
-          يتم تجهيز الرحلات، الوجهات، الميزانيات، المستندات،
-          التجهيز، الذكريات، وقائمة الأمنيات.
+        <p>
+          يتم تجهيز الرحلات، الوجهات، الميزانيات،
+          المستندات، التجهيز، الذكريات، وقائمة الأمنيات.
         </p>
+
+        <div
+          class="tic-loading"
+          aria-hidden="true"
+        >
+          <div class="tic-spinner"></div>
+        </div>
       </section>
     </main>
 
     <nav
-      class="bottom-nav"
+      class="tic-bottom-nav"
       data-bottom-nav
       aria-label="التنقل الرئيسي"
       role="navigation"
     >
       <button
-        class="bottom-nav__item is-active"
+        class="tic-nav-item active"
         type="button"
         data-route="home"
         aria-label="الرئيسية"
         aria-current="page"
       >
-        <span class="bottom-nav__icon" aria-hidden="true">🏠</span>
-        <span class="bottom-nav__label">الرئيسية</span>
+        <span aria-hidden="true">⌂</span>
+        <small>الرئيسية</small>
       </button>
 
       <button
-        class="bottom-nav__item"
+        class="tic-nav-item"
         type="button"
         data-route="trips"
         aria-label="رحلاتي"
       >
-        <span class="bottom-nav__icon" aria-hidden="true">✈️</span>
-        <span class="bottom-nav__label">رحلاتي</span>
+        <span aria-hidden="true">✈</span>
+        <small>رحلاتي</small>
       </button>
 
       <button
-        class="bottom-nav__item"
+        class="tic-nav-item"
         type="button"
         data-route="guide"
         aria-label="الدليل"
       >
-        <span class="bottom-nav__icon" aria-hidden="true">🌍</span>
-        <span class="bottom-nav__label">الدليل</span>
+        <span aria-hidden="true">◎</span>
+        <small>الدليل</small>
       </button>
 
       <button
-        class="bottom-nav__item"
+        class="tic-nav-item"
         type="button"
         data-route="budget"
         aria-label="الميزانية"
       >
-        <span class="bottom-nav__icon" aria-hidden="true">💰</span>
-        <span class="bottom-nav__label">الميزانية</span>
+        <span aria-hidden="true">◈</span>
+        <small>الميزانية</small>
       </button>
 
       <button
-        class="bottom-nav__item"
+        class="tic-nav-item"
         type="button"
         data-route="more"
         aria-label="المزيد"
       >
-        <span class="bottom-nav__icon" aria-hidden="true">☰</span>
-        <span class="bottom-nav__label">المزيد</span>
+        <span aria-hidden="true">☰</span>
+        <small>المزيد</small>
       </button>
     </nav>
-
-    <div
-      id="app-toast-region"
-      class="toast-region"
-      aria-live="polite"
-      aria-atomic="true"
-    ></div>
-
-    <div
-      id="app-modal-root"
-      class="modal-root"
-      aria-live="assertive"
-    ></div>
 
   </div>
 
   <noscript>
-    <section class="noscript-message">
+    <section class="tic-empty-state">
+      <div class="tic-empty-icon">!</div>
+
       <h2>JavaScript مطلوب</h2>
-      <p>هذا التطبيق يحتاج إلى JavaScript للعمل.</p>
+
+      <p>
+        هذا التطبيق يحتاج إلى JavaScript للعمل.
+      </p>
     </section>
   </noscript>
 </body>
