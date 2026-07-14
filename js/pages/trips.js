@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V3.0.0
+   Trips Page Module V3.0.1
 
    File Path:
    js/pages/trips.js
@@ -29,7 +29,7 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.0.0";
+  const PAGE_VERSION = "3.0.1";
   const STYLE_ID = "tic-trips-v3-styles";
 
   const state = {
@@ -218,7 +218,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.0.0"] {
+      [data-page="trips"][data-page-version="3.0.1"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -3177,40 +3177,147 @@
           return false;
         }
 
-        const choice = window.prompt(
-          [
-            "اختر الإجراء:",
-            "1 - تعديل الرحلة",
-            "2 - إنشاء نسخة",
-            "3 - حذف الرحلة"
-          ].join("\n")
-        );
+        const choice =
+          typeof ui.dialog === "function"
+            ? await ui.dialog({
+                title: "إجراءات الرحلة",
+                message:
+                  trip.title ||
+                  trip.destination ||
+                  "الرحلة",
+                icon: "✈",
+                actions: [
+                  {
+                    label: "إلغاء",
+                    result: "cancel"
+                  },
+                  {
+                    label: "تعديل",
+                    result: "edit",
+                    primary: true
+                  },
+                  {
+                    label: "نسخ",
+                    result: "duplicate"
+                  },
+                  {
+                    label: "حذف",
+                    result: "delete",
+                    danger: true
+                  }
+                ]
+              })
+            : window.prompt(
+                "اكتب: edit أو duplicate أو delete"
+              );
 
-        if (choice === "1") {
-          return ui.runAction?.(
-            "trips-edit",
-            {
-              params: { tripId }
-            }
-          ) || getTripForm()?.openEdit?.(tripId);
+        if (choice === "edit") {
+          const tripForm = getTripForm();
+
+          if (tripForm?.openEdit) {
+            return tripForm.openEdit(tripId);
+          }
+
+          return getRouter()?.go?.("trip-form", {
+            params: {
+              mode: "edit",
+              tripId
+            },
+            source: "trips-card-menu-edit"
+          });
         }
 
-        if (choice === "2") {
-          return ui.runAction?.(
-            "trips-duplicate",
-            {
-              params: { tripId }
-            }
-          );
+        if (choice === "duplicate") {
+          const confirmed =
+            typeof ui.confirm === "function"
+              ? await ui.confirm({
+                  title: "تكرار الرحلة",
+                  message:
+                    `سيتم إنشاء نسخة جديدة من "${
+                      trip.title ||
+                      trip.destination
+                    }".`,
+                  confirmLabel: "إنشاء نسخة",
+                  cancelLabel: "إلغاء"
+                })
+              : window.confirm(
+                  "هل تريد إنشاء نسخة من هذه الرحلة؟"
+                );
+
+          if (confirmed !== true) {
+            return false;
+          }
+
+          try {
+            ui.showLoader?.(
+              "جاري إنشاء نسخة..."
+            );
+
+            const duplicate =
+              await duplicateTripInStore(
+                tripId
+              );
+
+            state.activeView = "hub";
+            state.activeTab = "upcoming";
+            state.activeTripId = null;
+
+            refresh();
+
+            ui.toast?.(
+              "تم إنشاء نسخة جديدة.",
+              "success"
+            );
+
+            return duplicate;
+          } finally {
+            ui.hideLoader?.();
+          }
         }
 
-        if (choice === "3") {
-          return ui.runAction?.(
-            "trips-delete",
-            {
-              params: { tripId }
-            }
-          );
+        if (choice === "delete") {
+          const confirmed =
+            typeof ui.confirm === "function"
+              ? await ui.confirm({
+                  title: "حذف الرحلة",
+                  message:
+                    `سيتم حذف "${
+                      trip.title ||
+                      trip.destination
+                    }" نهائياً.`,
+                  confirmLabel: "حذف",
+                  cancelLabel: "إلغاء",
+                  danger: true
+                })
+              : window.confirm(
+                  "هل تريد حذف هذه الرحلة نهائياً؟"
+                );
+
+          if (confirmed !== true) {
+            return false;
+          }
+
+          try {
+            ui.showLoader?.(
+              "جاري حذف الرحلة..."
+            );
+
+            await deleteTripFromStore(tripId);
+
+            state.activeView = "hub";
+            state.activeTripId = null;
+
+            refresh();
+
+            ui.toast?.(
+              "تم حذف الرحلة.",
+              "success"
+            );
+
+            return true;
+          } finally {
+            ui.hideLoader?.();
+          }
         }
 
         return false;
