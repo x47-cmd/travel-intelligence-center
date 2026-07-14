@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Global Premium Design System V2.2.0
+   Global Premium Design System V2.3.0
 
    File Path:
    css/style.css
@@ -13,7 +13,7 @@
    - Unified cards, forms, pages, modals and navigation
    - Calm and compact Home Page V2.2.0
    - Smart next-trip details
-   - Premium Trip Form Wizard V3.0.0
+   - Fast Single-Page Trip Form V4.0.0
 ========================================================= */
 
 /* =========================================================
@@ -1201,13 +1201,18 @@ p {
 }
 
 /* =========================================================
-   11.2 Trip Form Wizard V3.0.0
+   11.2 Fast Single-Page Trip Form V4.0.0
 ========================================================= */
 
 .tic-trip-form-page {
   width: 100%;
-  max-width: 820px;
+  max-width: 760px;
   margin-inline: auto;
+}
+
+.tic-trip-form-simple {
+  display: grid;
+  gap: 16px;
 }
 
 .tic-trip-form-intro {
@@ -1216,10 +1221,11 @@ p {
   justify-content: space-between;
   gap: 14px;
   padding: 18px;
-  border: 1px solid rgba(255,255,255,.15);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 24px;
-  background: linear-gradient(135deg, #159587, #0f766e 55%, #0b2b40);
-  box-shadow: 0 18px 42px rgba(15,118,110,.16);
+  background:
+    linear-gradient(135deg, #159587 0%, #0f766e 55%, #0b2b40 100%);
+  box-shadow: 0 18px 42px rgba(15, 118, 110, 0.16);
   color: #ffffff;
 }
 
@@ -1229,24 +1235,24 @@ p {
 
 .tic-trip-form-intro span {
   display: block;
-  color: rgba(255,255,255,.68);
+  color: rgba(255, 255, 255, 0.68);
   font-size: 0.64rem;
   font-weight: 900;
-  letter-spacing: .08em;
+  letter-spacing: 0.08em;
 }
 
 .tic-trip-form-intro h1 {
   margin-top: 4px;
   color: #ffffff;
-  font-size: clamp(1.55rem, 6vw, 2rem);
+  font-size: clamp(1.45rem, 6vw, 1.9rem);
   line-height: 1.15;
   font-weight: 900;
 }
 
 .tic-trip-form-intro p {
   margin-top: 6px;
-  max-width: 540px;
-  color: rgba(255,255,255,.8);
+  max-width: 520px;
+  color: rgba(255, 255, 255, 0.82);
   font-size: 0.78rem;
   line-height: 1.55;
 }
@@ -1254,106 +1260,87 @@ p {
 .tic-trip-form-intro .tic-icon-btn {
   width: 42px;
   height: 42px;
-  border-color: rgba(255,255,255,.18);
-  background: rgba(255,255,255,.12);
-  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
   box-shadow: none;
-}
-
-.tic-trip-stepper {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(58px, 1fr));
-  gap: 7px;
-  margin-top: 14px;
-  overflow-x: auto;
-  padding: 2px 1px 8px;
-  scrollbar-width: none;
-}
-
-.tic-trip-stepper::-webkit-scrollbar {
-  display: none;
-}
-
-.tic-trip-step {
-  display: grid;
-  justify-items: center;
-  gap: 5px;
-  min-width: 58px;
-  padding: 7px 4px;
-  border-radius: 15px;
-  background: transparent;
-  color: var(--tic-muted);
-  cursor: pointer;
-}
-
-.tic-trip-step > span {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--tic-border);
-  border-radius: 10px;
-  background: #ffffff;
-  font-size: 0.72rem;
-  font-weight: 900;
-}
-
-.tic-trip-step > small {
-  font-size: 0.58rem;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.tic-trip-step.is-active {
-  background: var(--tic-primary-soft);
-  color: var(--tic-primary-dark);
-}
-
-.tic-trip-step.is-active > span {
-  border-color: var(--tic-primary);
-  background: var(--tic-primary);
   color: #ffffff;
 }
 
-.tic-trip-step.is-complete > span {
-  border-color: #bfe8d2;
-  background: var(--tic-success-soft);
-  color: var(--tic-success);
-}
-
-.tic-trip-wizard {
-  margin-top: 12px;
-}
-
-.tic-trip-form-step {
+.tic-trip-form-compact {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
-.tic-trip-form-step-header {
-  padding-inline: 2px;
+.tic-trip-main-card {
+  overflow: visible;
+  padding: 18px;
 }
 
-.tic-trip-form-step-header span {
+.tic-trip-form-simple-header {
+  margin-bottom: 14px;
+}
+
+.tic-trip-form-simple-header > span {
   display: block;
   color: var(--tic-primary);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 900;
+  letter-spacing: 0.08em;
 }
 
-.tic-trip-form-step-header h2 {
+.tic-trip-form-simple-header h2 {
   margin-top: 3px;
   color: var(--tic-navy);
-  font-size: 1.28rem;
-  line-height: 1.25;
+  font-size: 1.18rem;
+  line-height: 1.3;
   font-weight: 900;
 }
 
-.tic-trip-form-step-header p {
+.tic-trip-form-simple-header p {
   margin-top: 4px;
   color: var(--tic-muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   line-height: 1.55;
+}
+
+.tic-trip-form-simple .tic-form-grid {
+  min-width: 0;
+}
+
+.tic-trip-form-simple .tic-field,
+.tic-trip-form-simple .tic-input,
+.tic-trip-form-simple .tic-select,
+.tic-trip-form-simple .tic-textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tic-trip-form-simple .tic-input,
+.tic-trip-form-simple .tic-select {
+  min-height: 48px;
+}
+
+.tic-trip-form-simple input[type="date"],
+.tic-trip-form-simple input[type="time"] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: 12px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.tic-trip-form-simple input[type="date"]::-webkit-date-and-time-value,
+.tic-trip-form-simple input[type="time"]::-webkit-date-and-time-value {
+  min-width: 0;
+  text-align: start;
+}
+
+.tic-trip-form-simple input[type="date"]::-webkit-calendar-picker-indicator,
+.tic-trip-form-simple input[type="time"]::-webkit-calendar-picker-indicator {
+  margin: 0;
+  padding: 2px;
 }
 
 .tic-trip-duration-card {
@@ -1361,23 +1348,28 @@ p {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 58px;
-  padding: 12px 14px;
+  min-height: 54px;
+  padding: 11px 13px;
   border: 1px solid #dcece8;
-  border-radius: 16px;
+  border-radius: 15px;
   background: var(--tic-primary-soft);
 }
 
 .tic-trip-duration-card span {
   color: var(--tic-primary-dark);
-  font-size: 0.76rem;
+  font-size: 0.75rem;
   font-weight: 800;
 }
 
 .tic-trip-duration-card strong {
   color: var(--tic-primary-dark);
-  font-size: 1rem;
+  font-size: 0.96rem;
   font-weight: 900;
+}
+
+.tic-trip-smart-import {
+  display: grid;
+  gap: 12px;
 }
 
 .tic-trip-import-grid {
@@ -1389,23 +1381,25 @@ p {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  padding: 14px;
+  gap: 11px;
+  min-width: 0;
+  padding: 13px;
   border: 1px dashed #a9d8cf;
-  border-radius: 19px;
-  background: linear-gradient(135deg, #f8fffd, #effaf7);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, #f8fffd 0%, #effaf7 100%);
 }
 
 .tic-trip-import-icon {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 15px;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
   background: #ffffff;
   box-shadow: var(--tic-shadow-xs);
   color: var(--tic-primary);
-  font-size: 1.15rem;
+  font-size: 1.08rem;
 }
 
 .tic-trip-import-copy {
@@ -1414,28 +1408,35 @@ p {
 
 .tic-trip-import-copy strong {
   display: block;
-  font-size: 0.86rem;
+  overflow: hidden;
+  color: var(--tic-text);
+  font-size: 0.84rem;
   font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tic-trip-import-copy p {
   margin-top: 3px;
   color: var(--tic-muted);
-  font-size: 0.7rem;
-  line-height: 1.5;
+  font-size: 0.69rem;
+  line-height: 1.45;
 }
 
 .tic-trip-import-card .tic-btn {
-  min-height: 40px;
+  min-height: 39px;
   padding: 8px 12px;
   border-radius: 13px;
-  font-size: 0.74rem;
+  font-size: 0.73rem;
 }
 
 .tic-trip-import-status {
   grid-column: 2 / -1;
+  overflow: hidden;
   color: var(--tic-muted);
-  font-size: 0.66rem;
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tic-trip-import-status[data-tone="success"] {
@@ -1450,65 +1451,116 @@ p {
   color: var(--tic-info);
 }
 
-.tic-trip-budget-preview strong {
-  font-size: 1.9rem;
-}
-
-.tic-trip-review-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.tic-trip-review-card {
-  min-width: 0;
-  padding: 14px;
+.tic-trip-advanced {
+  overflow: hidden;
   border: 1px solid var(--tic-border);
-  border-radius: 18px;
-  background: #ffffff;
+  border-radius: 20px;
+  background: var(--tic-surface);
   box-shadow: var(--tic-shadow-xs);
 }
 
-.tic-trip-review-card > span {
+.tic-trip-advanced-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 74px;
+  padding: 15px 17px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.tic-trip-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tic-trip-advanced-summary > div {
+  min-width: 0;
+}
+
+.tic-trip-advanced-summary strong {
+  display: block;
+  color: var(--tic-text);
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.tic-trip-advanced-summary small {
+  display: block;
+  margin-top: 3px;
+  color: var(--tic-muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.tic-trip-advanced-summary > span {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: var(--tic-primary-soft);
+  color: var(--tic-primary);
+  font-size: 1rem;
+  transition: transform var(--tic-transition);
+}
+
+.tic-trip-advanced[open] .tic-trip-advanced-summary {
+  border-bottom: 1px solid var(--tic-border);
+}
+
+.tic-trip-advanced[open] .tic-trip-advanced-summary > span {
+  transform: rotate(45deg);
+}
+
+.tic-trip-advanced-content {
+  display: grid;
+  gap: 20px;
+  padding: 17px;
+}
+
+.tic-trip-advanced-section {
+  display: grid;
+  gap: 12px;
+}
+
+.tic-trip-advanced-section + .tic-trip-advanced-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--tic-border);
+}
+
+.tic-trip-advanced-section > header span {
   display: block;
   color: var(--tic-primary);
-  font-size: 0.64rem;
+  font-size: 0.63rem;
   font-weight: 900;
+  letter-spacing: 0.08em;
 }
 
-.tic-trip-review-card > strong {
-  display: block;
-  margin-top: 5px;
-  overflow: hidden;
+.tic-trip-advanced-section > header h3 {
+  margin-top: 3px;
   color: var(--tic-text);
-  font-size: 0.88rem;
+  font-size: 0.98rem;
   font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tic-trip-review-card > small {
-  display: block;
-  margin-top: 4px;
-  overflow: hidden;
-  color: var(--tic-muted);
-  font-size: 0.68rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tic-trip-form-actions {
   position: sticky;
   z-index: 20;
-  bottom: calc(var(--tic-bottom-nav-height) + 8px + env(safe-area-inset-bottom));
+  bottom: calc(
+    var(--tic-bottom-nav-height) +
+    7px +
+    env(safe-area-inset-bottom)
+  );
   display: flex;
   gap: 9px;
-  margin-top: 16px;
+  margin-top: 2px;
   padding: 10px;
-  border: 1px solid rgba(226,232,240,.92);
+  border: 1px solid rgba(226, 232, 240, 0.94);
   border-radius: 18px;
-  background: rgba(255,255,255,.96);
-  box-shadow: 0 14px 34px rgba(15,23,42,.11);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.11);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
@@ -1520,11 +1572,22 @@ p {
   font-size: 0.8rem;
 }
 
+.tic-trip-form-actions-simple .tic-btn-primary {
+  flex: 1.35;
+}
+
 .tic-field.has-error .tic-input,
 .tic-field.has-error .tic-select,
 .tic-field.has-error .tic-textarea {
   border-color: #e7a8b1;
   background: var(--tic-danger-soft);
+}
+
+.tic-trip-form-simple .tic-field label small {
+  margin-inline-start: 5px;
+  color: var(--tic-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
 }
 
 
@@ -2152,6 +2215,24 @@ p {
     grid-template-columns: 1fr;
   }
 
+  .tic-trip-form-intro {
+    padding: 16px;
+    border-radius: 21px;
+  }
+
+  .tic-trip-main-card {
+    padding: 15px;
+    border-radius: 20px;
+  }
+
+  .tic-trip-form-simple .tic-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tic-trip-form-simple .tic-field {
+    grid-column: 1 / -1;
+  }
+
   .tic-trip-import-card {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -2165,18 +2246,32 @@ p {
     grid-column: 1 / -1;
   }
 
-  .tic-trip-review-grid {
-    grid-template-columns: 1fr;
+  .tic-trip-advanced-summary {
+    min-height: 68px;
+    padding: 14px 15px;
+  }
+
+  .tic-trip-advanced-content {
+    padding: 15px;
   }
 
   .tic-trip-form-actions {
-    bottom: calc(var(--tic-bottom-nav-height) + 5px + env(safe-area-inset-bottom));
+    bottom: calc(
+      var(--tic-bottom-nav-height) +
+      5px +
+      env(safe-area-inset-bottom)
+    );
   }
 }
 
 @media (min-width: 760px) {
   .tic-trip-import-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tic-trip-main-card,
+  .tic-trip-advanced-content {
+    padding: 20px;
   }
 
   .tic-home-detail-grid {
