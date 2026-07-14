@@ -1,18 +1,15 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V1.0.0
+   Trips Page Module V2.0.0
 
    File Path:
    js/pages/trips.js
 
    Purpose:
-   - Provides the complete trip management center.
-   - Displays trip statistics, search, filters, sorting,
-     trip cards, trip details, status updates, duplication,
-     deletion, and direct access to trip editing.
-   - Reads and writes through the central TIC Store.
-   - Integrates with TIC UI, TIC Router, and Trip Form.
-   - Registers itself as the "trips" page module.
+   - Premium iPhone-first trip management center.
+   - Clean executive overview, filters, cards and details.
+   - Full create, edit, duplicate, delete and status flow.
+   - Uses TIC Store, TIC Router, TIC UI and Trip Form.
 
    Dependencies:
    - js/config.js
@@ -29,9 +26,8 @@
 (function (window, document) {
   "use strict";
 
-  const Config = window.TICConfig || window.TIC?.Config || {};
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "1.0.0";
+  const PAGE_VERSION = "2.0.0";
 
   const state = {
     initialized: false,
@@ -92,15 +88,13 @@
     !Array.isArray(value);
 
   const clone = (value) => {
-    if (value === undefined) {
-      return undefined;
-    }
+    if (value === undefined) return undefined;
 
     if (typeof structuredClone === "function") {
       try {
         return structuredClone(value);
       } catch (error) {
-        // Continue to JSON fallback.
+        // Continue to fallback.
       }
     }
 
@@ -119,32 +113,37 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
 
-  const normalizeText = (value) =>
+  const text = (value) =>
     String(value ?? "").trim();
 
-  const normalizeNumber = (value, fallback = 0) => {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
+  const number = (value, fallback = 0) => {
+    const result = Number(value);
+    return Number.isFinite(result) ? result : fallback;
   };
 
   const toDate = (value) => {
-    if (!value) {
-      return null;
-    }
+    if (!value) return null;
 
-    const date = value instanceof Date ? value : new Date(value);
+    const result =
+      value instanceof Date
+        ? value
+        : new Date(value);
 
-    return Number.isNaN(date.getTime()) ? null : date;
+    return Number.isNaN(result.getTime())
+      ? null
+      : result;
   };
 
   const startOfDay = (value) => {
-    const date = value instanceof Date ? new Date(value) : new Date(value);
-    date.setHours(0, 0, 0, 0);
-    return date;
+    const result = new Date(value);
+    result.setHours(0, 0, 0, 0);
+    return result;
   };
 
   const createId = () =>
-    `trip_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    `trip_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
 
   const getStore = () =>
     window.TIC?.Store ||
@@ -195,7 +194,7 @@
       try {
         listener(payload);
       } catch (error) {
-        console.error("TIC Trips Page subscriber error:", error);
+        console.error("TIC Trips subscriber error:", error);
       }
     });
 
@@ -211,9 +210,7 @@
   const getStoreState = () => {
     const store = getStore();
 
-    if (!store) {
-      return {};
-    }
+    if (!store) return {};
 
     if (typeof store.getState === "function") {
       return clone(store.getState()) || {};
@@ -236,6 +233,7 @@
 
   const getTrips = () => {
     const snapshot = getStoreState();
+
     return Array.isArray(snapshot.trips)
       ? clone(snapshot.trips)
       : [];
@@ -243,14 +241,17 @@
 
   const findTrip = (tripId) =>
     getTrips().find(
-      (trip) => String(trip.id) === String(tripId)
+      (trip) =>
+        String(trip.id) === String(tripId)
     ) || null;
 
   const saveTrips = (trips) => {
     const store = getStore();
 
     if (!store) {
-      throw new Error("TIC Trips Page Error: store is not available.");
+      throw new Error(
+        "TIC Trips Error: store is unavailable."
+      );
     }
 
     if (typeof store.set === "function") {
@@ -272,7 +273,7 @@
     }
 
     throw new Error(
-      "TIC Trips Page Error: store does not support trip persistence."
+      "TIC Trips Error: persistence is unavailable."
     );
   };
 
@@ -280,9 +281,7 @@
     const store = getStore();
     const existing = findTrip(tripId);
 
-    if (!existing) {
-      return null;
-    }
+    if (!existing) return null;
 
     const updated = {
       ...existing,
@@ -303,7 +302,8 @@
 
     const trips = getTrips();
     const index = trips.findIndex(
-      (trip) => String(trip.id) === String(tripId)
+      (trip) =>
+        String(trip.id) === String(tripId)
     );
 
     if (index >= 0) {
@@ -327,27 +327,31 @@
       return true;
     }
 
-    const trips = getTrips().filter(
-      (trip) => String(trip.id) !== String(tripId)
+    saveTrips(
+      getTrips().filter(
+        (trip) =>
+          String(trip.id) !== String(tripId)
+      )
     );
 
-    saveTrips(trips);
     return true;
   };
 
   const duplicateTripInStore = async (tripId) => {
     const original = findTrip(tripId);
 
-    if (!original) {
-      return null;
-    }
+    if (!original) return null;
 
     const now = new Date().toISOString();
 
     const duplicate = {
       ...clone(original),
       id: createId(),
-      title: `${original.title || original.destination || "رحلة"} - نسخة`,
+      title: `${
+        original.title ||
+        original.destination ||
+        "رحلة"
+      } - نسخة`,
       status: "planning",
       spent: 0,
       featured: false,
@@ -358,13 +362,17 @@
     const store = getStore();
 
     if (typeof store?.addTrip === "function") {
-      const result = await store.addTrip(duplicate);
-      return result || duplicate;
+      return (
+        (await store.addTrip(duplicate)) ||
+        duplicate
+      );
     }
 
     if (typeof store?.createTrip === "function") {
-      const result = await store.createTrip(duplicate);
-      return result || duplicate;
+      return (
+        (await store.createTrip(duplicate)) ||
+        duplicate
+      );
     }
 
     if (typeof store?.upsertTrip === "function") {
@@ -379,9 +387,9 @@
     return duplicate;
   };
 
-  const calculateDuration = (trip) => {
-    if (normalizeNumber(trip.durationDays) > 0) {
-      return normalizeNumber(trip.durationDays);
+  const durationDays = (trip) => {
+    if (number(trip.durationDays) > 0) {
+      return number(trip.durationDays);
     }
 
     const start = toDate(trip.startDate);
@@ -393,55 +401,63 @@
 
     return (
       Math.floor(
-        (startOfDay(end).getTime() -
-          startOfDay(start).getTime()) /
-          86400000
+        (
+          startOfDay(end).getTime() -
+          startOfDay(start).getTime()
+        ) / 86400000
       ) + 1
     );
   };
 
-  const calculateDaysUntil = (trip) => {
+  const daysUntil = (trip) => {
     const start = toDate(trip.startDate);
 
-    if (!start) {
-      return null;
-    }
+    if (!start) return null;
 
     return Math.ceil(
-      (startOfDay(start).getTime() -
-        startOfDay(new Date()).getTime()) /
-        86400000
+      (
+        startOfDay(start).getTime() -
+        startOfDay(new Date()).getTime()
+      ) / 86400000
     );
   };
 
-  const getTripStatus = (trip) => {
-    const rawStatus = normalizeText(trip.status).toLowerCase();
+  const tripStatus = (trip) => {
+    const raw = text(trip.status).toLowerCase();
 
-    if (rawStatus) {
-      return rawStatus;
-    }
+    if (raw) return raw;
 
-    const now = startOfDay(new Date());
+    const today = startOfDay(new Date());
     const start = toDate(trip.startDate);
     const end = toDate(trip.endDate);
 
-    if (start && end && now >= startOfDay(start) && now <= startOfDay(end)) {
+    if (
+      start &&
+      end &&
+      today >= startOfDay(start) &&
+      today <= startOfDay(end)
+    ) {
       return "ongoing";
     }
 
-    if (end && startOfDay(end) < now) {
+    if (
+      end &&
+      startOfDay(end) < today
+    ) {
       return "completed";
     }
 
     return "planning";
   };
 
-  const getFilteredTrips = (trips) => {
-    const search = normalizeText(state.filters.search).toLowerCase();
+  const filteredTripsFrom = (trips) => {
+    const search =
+      text(state.filters.search).toLowerCase();
 
-    let result = trips.filter((trip) => {
-      const status = getTripStatus(trip);
-      const type = normalizeText(trip.tripType).toLowerCase();
+    const result = trips.filter((trip) => {
+      const status = tripStatus(trip);
+      const type =
+        text(trip.tripType).toLowerCase();
 
       const matchesSearch =
         !search ||
@@ -466,7 +482,11 @@
         state.filters.type === "all" ||
         type === state.filters.type;
 
-      return matchesSearch && matchesStatus && matchesType;
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesType
+      );
     });
 
     result.sort((a, b) => {
@@ -484,19 +504,25 @@
           );
 
         case "budget-desc":
-          return normalizeNumber(b.budget) - normalizeNumber(a.budget);
+          return number(b.budget) - number(a.budget);
 
         case "title-asc":
-          return normalizeText(a.title).localeCompare(
-            normalizeText(b.title),
+          return text(a.title).localeCompare(
+            text(b.title),
             "ar"
           );
 
         case "start-asc":
         default:
           return (
-            (toDate(a.startDate)?.getTime() || Number.MAX_SAFE_INTEGER) -
-            (toDate(b.startDate)?.getTime() || Number.MAX_SAFE_INTEGER)
+            (
+              toDate(a.startDate)?.getTime() ||
+              Number.MAX_SAFE_INTEGER
+            ) -
+            (
+              toDate(b.startDate)?.getTime() ||
+              Number.MAX_SAFE_INTEGER
+            )
           );
       }
     });
@@ -504,73 +530,69 @@
     return result;
   };
 
-  const getStatistics = (trips) => {
-    const total = trips.length;
-    const upcoming = trips.filter((trip) =>
-      ["planning", "booked", "ready"].includes(getTripStatus(trip))
-    ).length;
-
-    const ongoing = trips.filter(
-      (trip) => getTripStatus(trip) === "ongoing"
-    ).length;
-
-    const completed = trips.filter(
-      (trip) => getTripStatus(trip) === "completed"
-    ).length;
-
-    const totalBudget = trips.reduce(
-      (totalValue, trip) =>
-        totalValue + normalizeNumber(trip.budget),
+  const statisticsFrom = (trips) => ({
+    total: trips.length,
+    upcoming: trips.filter((trip) =>
+      ["planning", "booked", "ready"].includes(
+        tripStatus(trip)
+      )
+    ).length,
+    ongoing: trips.filter(
+      (trip) =>
+        tripStatus(trip) === "ongoing"
+    ).length,
+    completed: trips.filter(
+      (trip) =>
+        tripStatus(trip) === "completed"
+    ).length,
+    totalBudget: trips.reduce(
+      (total, trip) =>
+        total + number(trip.budget),
       0
-    );
-
-    const totalSpent = trips.reduce(
-      (totalValue, trip) =>
-        totalValue + normalizeNumber(trip.spent),
+    ),
+    totalSpent: trips.reduce(
+      (total, trip) =>
+        total + number(trip.spent),
       0
-    );
+    )
+  });
 
-    return {
-      total,
-      upcoming,
-      ongoing,
-      completed,
-      totalBudget,
-      totalSpent
-    };
-  };
-
-  const getRelatedDocuments = (tripId) => {
+  const relatedDocuments = (tripId) => {
     const snapshot = getStoreState();
-    const documents = Array.isArray(snapshot.documents)
-      ? snapshot.documents
-      : [];
 
-    return documents.filter(
-      (documentItem) =>
-        String(documentItem.tripId || "") === String(tripId)
+    return (
+      Array.isArray(snapshot.documents)
+        ? snapshot.documents
+        : []
+    ).filter(
+      (item) =>
+        String(item.tripId || "") ===
+        String(tripId)
     );
   };
 
-  const getRelatedPacking = (tripId) => {
-    const snapshot = getStoreState();
-    const packing = snapshot.packing;
+  const relatedPacking = (tripId) => {
+    const source = getStoreState().packing;
 
-    if (Array.isArray(packing)) {
-      return packing.filter(
-        (item) => String(item.tripId || "") === String(tripId)
+    if (Array.isArray(source)) {
+      return source.filter(
+        (item) =>
+          String(item.tripId || "") ===
+          String(tripId)
       );
     }
 
-    if (isObject(packing)) {
-      if (Array.isArray(packing.items)) {
-        return packing.items.filter(
-          (item) => String(item.tripId || "") === String(tripId)
+    if (isObject(source)) {
+      if (Array.isArray(source.items)) {
+        return source.items.filter(
+          (item) =>
+            String(item.tripId || "") ===
+            String(tripId)
         );
       }
 
-      if (Array.isArray(packing[tripId])) {
-        return packing[tripId];
+      if (Array.isArray(source[tripId])) {
+        return source[tripId];
       }
     }
 
@@ -579,76 +601,63 @@
 
   const buildSnapshot = () => {
     const trips = getTrips();
-    const filteredTrips = getFilteredTrips(trips);
-    const activeTrip = state.activeTripId
-      ? trips.find(
-          (trip) => String(trip.id) === String(state.activeTripId)
-        ) || null
-      : null;
 
     const snapshot = {
       trips,
-      filteredTrips,
-      activeTrip,
-      statistics: getStatistics(trips),
+      filteredTrips: filteredTripsFrom(trips),
+      activeTrip: state.activeTripId
+        ? trips.find(
+            (trip) =>
+              String(trip.id) ===
+              String(state.activeTripId)
+          ) || null
+        : null,
+      statistics: statisticsFrom(trips),
       filters: clone(state.filters),
       activeView: state.activeView
     };
 
     state.lastSnapshot = snapshot;
+
     return snapshot;
   };
 
   const renderStatistics = (snapshot) => {
     const ui = getUI();
-    const statistics = snapshot.statistics;
 
-    const cards = [
+    return ui.grid(
+      [
+        {
+          icon: "✈",
+          value: snapshot.statistics.total,
+          label: "إجمالي الرحلات",
+          subtitle: "كل الرحلات"
+        },
+        {
+          icon: "◷",
+          value: snapshot.statistics.upcoming,
+          label: "رحلات قادمة",
+          subtitle: "مخططة أو محجوزة"
+        },
+        {
+          icon: "◎",
+          value: snapshot.statistics.ongoing,
+          label: "رحلات جارية",
+          subtitle: "تحدث الآن"
+        },
+        {
+          icon: "✓",
+          value: snapshot.statistics.completed,
+          label: "رحلات مكتملة",
+          subtitle: "ضمن السجل"
+        }
+      ]
+        .map((item) => ui.stat(item))
+        .join(""),
       {
-        icon: "✈",
-        value: statistics.total,
-        label: "إجمالي الرحلات",
-        subtitle: "كل الرحلات المسجلة"
-      },
-      {
-        icon: "◷",
-        value: statistics.upcoming,
-        label: "رحلات قادمة",
-        subtitle: "قيد التخطيط أو الحجز"
-      },
-      {
-        icon: "◎",
-        value: statistics.ongoing,
-        label: "رحلات جارية",
-        subtitle: "تحدث الآن"
-      },
-      {
-        icon: "✓",
-        value: statistics.completed,
-        label: "رحلات مكتملة",
-        subtitle: "ضمن سجل السفر"
+        columns: 4
       }
-    ];
-
-    const content = cards
-      .map((card) =>
-        ui?.stat
-          ? ui.stat(card)
-          : `
-            <article class="tic-stat">
-              <strong>${escapeHTML(card.value)}</strong>
-              <span>${escapeHTML(card.label)}</span>
-            </article>
-          `
-      )
-      .join("");
-
-    return ui?.grid
-      ? ui.grid(content, {
-          columns: 4,
-          className: "trips-statistics"
-        })
-      : `<div class="tic-grid tic-grid--4">${content}</div>`;
+    );
   };
 
   const renderFilters = () => {
@@ -656,737 +665,45 @@
       value === current ? "selected" : "";
 
     return `
-      <section class="trips-toolbar">
-        <div class="trips-toolbar__search">
-          <span class="trips-toolbar__search-icon" aria-hidden="true">⌕</span>
+      <div class="tic-toolbar">
+        <input
+          type="search"
+          class="tic-input"
+          data-trips-search
+          value="${escapeHTML(
+            state.filters.search
+          )}"
+          placeholder="ابحث باسم الرحلة أو الوجهة..."
+          aria-label="البحث في الرحلات"
+        >
+
+        <div class="tic-form-grid">
+          <div class="tic-field">
+            <label>الحالة</label>
 
-          <input
-            type="search"
-            class="tic-field__control"
-            data-trips-search
-            value="${escapeHTML(state.filters.search)}"
-            placeholder="ابحث باسم الرحلة أو الوجهة..."
-            aria-label="البحث في الرحلات"
-          >
-        </div>
-
-        <div class="trips-toolbar__filters">
-          <select
-            class="tic-field__control"
-            data-trips-filter-status
-            aria-label="فلترة حسب الحالة"
-          >
-            <option value="all" ${selected("all", state.filters.status)}>
-              كل الحالات
-            </option>
-            ${Object.entries(STATUS_LABELS)
-              .map(
-                ([value, label]) => `
-                  <option
-                    value="${escapeHTML(value)}"
-                    ${selected(value, state.filters.status)}
-                  >
-                    ${escapeHTML(label)}
-                  </option>
-                `
-              )
-              .join("")}
-          </select>
-
-          <select
-            class="tic-field__control"
-            data-trips-filter-type
-            aria-label="فلترة حسب النوع"
-          >
-            <option value="all" ${selected("all", state.filters.type)}>
-              كل الأنواع
-            </option>
-            ${Object.entries(TYPE_LABELS)
-              .map(
-                ([value, label]) => `
-                  <option
-                    value="${escapeHTML(value)}"
-                    ${selected(value, state.filters.type)}
-                  >
-                    ${escapeHTML(label)}
-                  </option>
-                `
-              )
-              .join("")}
-          </select>
-
-          <select
-            class="tic-field__control"
-            data-trips-sort
-            aria-label="ترتيب الرحلات"
-          >
-            ${SORT_OPTIONS.map(
-              (option) => `
-                <option
-                  value="${escapeHTML(option.value)}"
-                  ${selected(option.value, state.filters.sort)}
-                >
-                  ${escapeHTML(option.label)}
-                </option>
-              `
-            ).join("")}
-          </select>
-
-          <button
-            type="button"
-            class="button button--secondary"
-            data-action="trips-clear-filters"
-          >
-            مسح الفلاتر
-          </button>
-        </div>
-      </section>
-    `;
-  };
-
-  const renderTripCard = (trip) => {
-    const ui = getUI();
-    const status = getTripStatus(trip);
-    const statusLabel = STATUS_LABELS[status] || status;
-    const statusTone = STATUS_TONES[status] || "neutral";
-    const daysUntil = calculateDaysUntil(trip);
-    const duration = calculateDuration(trip);
-    const budget = normalizeNumber(trip.budget);
-    const spent = normalizeNumber(trip.spent);
-    const usage =
-      budget > 0
-        ? Math.min(100, Math.round((spent / budget) * 100))
-        : 0;
-
-    const countdown =
-      daysUntil === null
-        ? "الموعد غير محدد"
-        : daysUntil === 0
-          ? "السفر اليوم"
-          : daysUntil === 1
-            ? "متبقي يوم"
-            : daysUntil > 1
-              ? `متبقي ${daysUntil} يوم`
-              : status === "completed"
-                ? "رحلة مكتملة"
-                : "بدأت الرحلة";
-
-    return `
-      <article
-        class="trip-card"
-        data-trip-card="${escapeHTML(trip.id)}"
-      >
-        <header class="trip-card__header">
-          <div class="trip-card__heading">
-            <span class="trip-card__eyebrow">
-              ${escapeHTML(TYPE_LABELS[trip.tripType] || "رحلة")}
-            </span>
-
-            <h3 class="trip-card__title">
-              ${escapeHTML(
-                trip.title ||
-                trip.destination ||
-                "رحلة بدون اسم"
-              )}
-            </h3>
-
-            <p class="trip-card__destination">
-              ${escapeHTML(
-                trip.destination ||
-                [trip.city, trip.country].filter(Boolean).join("، ")
-              )}
-            </p>
-          </div>
-
-          ${
-            ui?.status
-              ? ui.status(statusLabel, {
-                  value: status,
-                  tone: statusTone
-                })
-              : `<span class="tic-badge">${escapeHTML(statusLabel)}</span>`
-          }
-        </header>
-
-        <div class="trip-card__countdown">
-          <strong>${escapeHTML(countdown)}</strong>
-          <span>
-            ${
-              trip.startDate
-                ? escapeHTML(ui?.date ? ui.date(trip.startDate) : trip.startDate)
-                : "—"
-            }
-            —
-            ${
-              trip.endDate
-                ? escapeHTML(ui?.date ? ui.date(trip.endDate) : trip.endDate)
-                : "—"
-            }
-          </span>
-        </div>
-
-        <div class="trip-card__details">
-          <div class="trip-card__detail">
-            <span>المدة</span>
-            <strong>${duration || 0} يوم</strong>
-          </div>
-
-          <div class="trip-card__detail">
-            <span>المسافرون</span>
-            <strong>${normalizeNumber(trip.travelers, 1)}</strong>
-          </div>
-
-          <div class="trip-card__detail">
-            <span>الميزانية</span>
-            <strong>
-              ${escapeHTML(
-                ui?.currency ? ui.currency(budget) : budget
-              )}
-            </strong>
-          </div>
-        </div>
-
-        ${
-          ui?.progress
-            ? ui.progress(usage, {
-                label: "استخدام الميزانية",
-                compact: true,
-                hint: `${ui.currency(spent)} مصروف`
-              })
-            : ""
-        }
-
-        <footer class="trip-card__footer">
-          ${
-            ui?.button
-              ? ui.button({
-                  label: "عرض التفاصيل",
-                  action: "trips-view-details",
-                  params: { tripId: trip.id },
-                  primary: true,
-                  small: true
-                })
-              : ""
-          }
-
-          ${
-            ui?.iconButton
-              ? ui.iconButton({
-                  icon: "✎",
-                  action: "trips-edit",
-                  params: { tripId: trip.id },
-                  ariaLabel: "تعديل الرحلة"
-                })
-              : ""
-          }
-
-          ${
-            ui?.iconButton
-              ? ui.iconButton({
-                  icon: "⧉",
-                  action: "trips-duplicate",
-                  params: { tripId: trip.id },
-                  ariaLabel: "تكرار الرحلة"
-                })
-              : ""
-          }
-
-          ${
-            ui?.iconButton
-              ? ui.iconButton({
-                  icon: "×",
-                  action: "trips-delete",
-                  params: { tripId: trip.id },
-                  tone: "danger",
-                  ariaLabel: "حذف الرحلة"
-                })
-              : ""
-          }
-        </footer>
-      </article>
-    `;
-  };
-
-  const renderTripsList = (snapshot) => {
-    const ui = getUI();
-
-    if (snapshot.filteredTrips.length === 0) {
-      return ui?.empty
-        ? ui.empty({
-            icon: "✈",
-            title:
-              snapshot.trips.length === 0
-                ? "لا توجد رحلات بعد"
-                : "لا توجد نتائج مطابقة",
-            message:
-              snapshot.trips.length === 0
-                ? "أنشئ رحلتك الأولى وسيتم عرضها هنا."
-                : "غيّر البحث أو الفلاتر لعرض رحلات أخرى.",
-            action:
-              snapshot.trips.length === 0
-                ? {
-                    label: "إنشاء رحلة جديدة",
-                    action: "trips-new",
-                    primary: true
-                  }
-                : {
-                    label: "مسح الفلاتر",
-                    action: "trips-clear-filters"
-                  }
-          })
-        : "";
-    }
-
-    const cards = snapshot.filteredTrips
-      .map(renderTripCard)
-      .join("");
-
-    return `
-      <div class="trips-list-summary">
-        <span>
-          عرض ${snapshot.filteredTrips.length} من ${snapshot.trips.length} رحلة
-        </span>
-      </div>
-
-      ${
-        ui?.grid
-          ? ui.grid(cards, {
-              columns: 2,
-              className: "trips-grid"
-            })
-          : `<div class="tic-grid tic-grid--2 trips-grid">${cards}</div>`
-      }
-    `;
-  };
-
-  const renderTripDetails = (trip) => {
-    const ui = getUI();
-
-    if (!trip) {
-      return ui?.empty
-        ? ui.empty({
-            icon: "!",
-            title: "تعذر العثور على الرحلة",
-            message: "قد تكون الرحلة حُذفت أو لم تعد متوفرة.",
-            action: {
-              label: "العودة إلى الرحلات",
-              action: "trips-back-to-list"
-            }
-          })
-        : "";
-    }
-
-    const status = getTripStatus(trip);
-    const documents = getRelatedDocuments(trip.id);
-    const packing = getRelatedPacking(trip.id);
-    const packed = packing.filter(
-      (item) =>
-        item.completed === true ||
-        item.packed === true ||
-        item.status === "completed"
-    ).length;
-
-    const activities = Array.isArray(trip.activities)
-      ? trip.activities
-      : [];
-
-    const budget = normalizeNumber(trip.budget);
-    const spent = normalizeNumber(trip.spent);
-    const budgetUsage =
-      budget > 0
-        ? Math.min(100, Math.round((spent / budget) * 100))
-        : 0;
-
-    return `
-      <div class="trip-details" data-trip-details="${escapeHTML(trip.id)}">
-        <section class="trip-details__hero">
-          <div class="trip-details__hero-main">
-            <button
-              type="button"
-              class="trip-details__back"
-              data-action="trips-back-to-list"
-            >
-              ← العودة إلى الرحلات
-            </button>
-
-            <span class="trip-details__eyebrow">
-              ${escapeHTML(TYPE_LABELS[trip.tripType] || "رحلة")}
-            </span>
-
-            <h1 class="trip-details__title">
-              ${escapeHTML(
-                trip.title ||
-                trip.destination ||
-                "تفاصيل الرحلة"
-              )}
-            </h1>
-
-            <p class="trip-details__destination">
-              ${escapeHTML(
-                trip.destination ||
-                [trip.city, trip.country].filter(Boolean).join("، ")
-              )}
-            </p>
-
-            <div class="trip-details__hero-actions">
-              ${
-                ui?.button
-                  ? ui.button({
-                      label: "تعديل الرحلة",
-                      action: "trips-edit",
-                      params: { tripId: trip.id },
-                      primary: true
-                    })
-                  : ""
-              }
-
-              ${
-                ui?.button
-                  ? ui.button({
-                      label: "تكرار الرحلة",
-                      action: "trips-duplicate",
-                      params: { tripId: trip.id }
-                    })
-                  : ""
-              }
-            </div>
-          </div>
-
-          <div class="trip-details__hero-side">
-            ${
-              ui?.status
-                ? ui.status(
-                    STATUS_LABELS[status] || status,
-                    {
-                      value: status,
-                      tone: STATUS_TONES[status]
-                    }
-                  )
-                : ""
-            }
-
-            <strong>
-              ${calculateDuration(trip)} يوم
-            </strong>
-
-            <span>
-              ${
-                trip.startDate
-                  ? escapeHTML(ui?.date ? ui.date(trip.startDate) : trip.startDate)
-                  : "—"
-              }
-              —
-              ${
-                trip.endDate
-                  ? escapeHTML(ui?.date ? ui.date(trip.endDate) : trip.endDate)
-                  : "—"
-              }
-            </span>
-          </div>
-        </section>
-
-        <section class="tic-section">
-          <header class="tic-section__header">
-            <div class="tic-section__heading">
-              <p class="tic-section__eyebrow">Trip Overview</p>
-              <h2 class="tic-section__title">ملخص الرحلة</h2>
-            </div>
-          </header>
-
-          <div class="tic-section__body">
-            <div class="tic-grid tic-grid--4 trip-details__stats">
-              ${
-                ui?.stat
-                  ? ui.stat({
-                      icon: "◷",
-                      value: calculateDuration(trip),
-                      label: "عدد الأيام"
-                    })
-                  : ""
-              }
-
-              ${
-                ui?.stat
-                  ? ui.stat({
-                      icon: "◎",
-                      value: normalizeNumber(trip.travelers, 1),
-                      label: "المسافرون"
-                    })
-                  : ""
-              }
-
-              ${
-                ui?.stat
-                  ? ui.stat({
-                      icon: "◈",
-                      value: ui.currency(budget),
-                      label: "الميزانية"
-                    })
-                  : ""
-              }
-
-              ${
-                ui?.stat
-                  ? ui.stat({
-                      icon: "✓",
-                      value: `${packed}/${packing.length}`,
-                      label: "التجهيز"
-                    })
-                  : ""
-              }
-            </div>
-          </div>
-        </section>
-
-        <section class="tic-section">
-          <header class="tic-section__header">
-            <div class="tic-section__heading">
-              <p class="tic-section__eyebrow">Journey Details</p>
-              <h2 class="tic-section__title">تفاصيل السفر</h2>
-            </div>
-          </header>
-
-          <div class="tic-section__body">
-            <div class="tic-grid tic-grid--2 trip-details__information">
-              ${ui?.info ? ui.info("الدولة", trip.country || "—") : ""}
-              ${ui?.info ? ui.info("المدينة", trip.city || "—") : ""}
-              ${ui?.info ? ui.info("مطار المغادرة", trip.departureAirport || "—") : ""}
-              ${ui?.info ? ui.info("مطار الوصول", trip.arrivalAirport || "—") : ""}
-              ${ui?.info ? ui.info("شركة الطيران", trip.airline || "—") : ""}
-              ${ui?.info ? ui.info("رقم الرحلة", trip.flightNumber || "—") : ""}
-              ${ui?.info ? ui.info("الإقامة", trip.accommodation || "—") : ""}
-              ${ui?.info ? ui.info("رقم الحجز", trip.bookingReference || "—") : ""}
-              ${ui?.info ? ui.info("التنقل", trip.transport || "—") : ""}
-              ${ui?.info ? ui.info("جهة الطوارئ", trip.emergencyContact || "—") : ""}
-            </div>
-          </div>
-        </section>
-
-        <section class="tic-section">
-          <header class="tic-section__header">
-            <div class="tic-section__heading">
-              <p class="tic-section__eyebrow">Budget</p>
-              <h2 class="tic-section__title">ميزانية الرحلة</h2>
-            </div>
-          </header>
-
-          <div class="tic-section__body">
-            <article class="trip-details__budget">
-              <div class="trip-details__budget-values">
-                <div>
-                  <span>الميزانية الإجمالية</span>
-                  <strong>${escapeHTML(ui?.currency ? ui.currency(budget) : budget)}</strong>
-                </div>
-
-                <div>
-                  <span>المصروف</span>
-                  <strong>${escapeHTML(ui?.currency ? ui.currency(spent) : spent)}</strong>
-                </div>
-
-                <div>
-                  <span>المتبقي</span>
-                  <strong>${escapeHTML(
-                    ui?.currency
-                      ? ui.currency(Math.max(0, budget - spent))
-                      : Math.max(0, budget - spent)
-                  )}</strong>
-                </div>
-              </div>
-
-              ${
-                ui?.progress
-                  ? ui.progress(budgetUsage, {
-                      label: "استخدام الميزانية",
-                      hint: `${budgetUsage}% مستخدم`
-                    })
-                  : ""
-              }
-
-              ${
-                ui?.button
-                  ? ui.button({
-                      label: "فتح مركز الميزانية",
-                      route: "budget",
-                      view: "trip",
-                      params: { tripId: trip.id }
-                    })
-                  : ""
-              }
-            </article>
-          </div>
-        </section>
-
-        <section class="tic-section">
-          <header class="tic-section__header">
-            <div class="tic-section__heading">
-              <p class="tic-section__eyebrow">Activities</p>
-              <h2 class="tic-section__title">الأنشطة</h2>
-            </div>
-          </header>
-
-          <div class="tic-section__body">
-            ${
-              activities.length
-                ? `
-                  <div class="tic-list tic-list--divided">
-                    ${activities
-                      .map(
-                        (activity, index) => `
-                          <div class="tic-list-item">
-                            <div class="tic-list-item__icon">
-                              <span>${index + 1}</span>
-                            </div>
-
-                            <div class="tic-list-item__content">
-                              <strong class="tic-list-item__title">
-                                ${escapeHTML(
-                                  isObject(activity)
-                                    ? activity.title || activity.name || ""
-                                    : activity
-                                )}
-                              </strong>
-
-                              ${
-                                isObject(activity) && activity.description
-                                  ? `
-                                    <p class="tic-list-item__subtitle">
-                                      ${escapeHTML(activity.description)}
-                                    </p>
-                                  `
-                                  : ""
-                              }
-                            </div>
-                          </div>
-                        `
-                      )
-                      .join("")}
-                  </div>
-                `
-                : ui?.empty
-                  ? ui.empty({
-                      icon: "☆",
-                      title: "لا توجد أنشطة",
-                      message: "أضف الأنشطة عند تعديل الرحلة."
-                    })
-                  : ""
-            }
-          </div>
-        </section>
-
-        <section class="tic-section">
-          <header class="tic-section__header">
-            <div class="tic-section__heading">
-              <p class="tic-section__eyebrow">Readiness</p>
-              <h2 class="tic-section__title">الوثائق والتجهيز</h2>
-            </div>
-          </header>
-
-          <div class="tic-section__body">
-            <div class="tic-grid tic-grid--2">
-              <article class="tic-card">
-                <div class="tic-card__content">
-                  <h3 class="tic-card__title">الوثائق</h3>
-                  <p class="tic-card__description">
-                    ${documents.length} وثيقة مرتبطة بالرحلة
-                  </p>
-
-                  ${
-                    ui?.button
-                      ? ui.button({
-                          label: "عرض الوثائق",
-                          route: "more",
-                          view: "documents",
-                          params: { tripId: trip.id },
-                          block: true
-                        })
-                      : ""
-                  }
-                </div>
-              </article>
-
-              <article class="tic-card">
-                <div class="tic-card__content">
-                  <h3 class="tic-card__title">قائمة التجهيز</h3>
-                  <p class="tic-card__description">
-                    تم تجهيز ${packed} من ${packing.length} عنصر
-                  </p>
-
-                  ${
-                    ui?.progress
-                      ? ui.progress(
-                          packing.length
-                            ? Math.round((packed / packing.length) * 100)
-                            : 0,
-                          {
-                            label: "اكتمال التجهيز",
-                            compact: true
-                          }
-                        )
-                      : ""
-                  }
-
-                  ${
-                    ui?.button
-                      ? ui.button({
-                          label: "فتح قائمة التجهيز",
-                          route: "more",
-                          view: "packing",
-                          params: { tripId: trip.id },
-                          block: true
-                        })
-                      : ""
-                  }
-                </div>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        ${
-          trip.notes
-            ? `
-              <section class="tic-section">
-                <header class="tic-section__header">
-                  <div class="tic-section__heading">
-                    <p class="tic-section__eyebrow">Notes</p>
-                    <h2 class="tic-section__title">ملاحظات الرحلة</h2>
-                  </div>
-                </header>
-
-                <div class="tic-section__body">
-                  <article class="tic-card">
-                    <div class="tic-card__content">
-                      <p class="tic-card__description">
-                        ${escapeHTML(trip.notes)}
-                      </p>
-                    </div>
-                  </article>
-                </div>
-              </section>
-            `
-            : ""
-        }
-
-        <section class="trip-details__danger-zone">
-          <div>
-            <h2>إدارة الرحلة</h2>
-            <p>
-              يمكنك تغيير الحالة أو حذف الرحلة نهائياً.
-            </p>
-          </div>
-
-          <div class="trip-details__danger-actions">
             <select
-              class="tic-field__control"
-              data-trip-status-update
-              data-trip-id="${escapeHTML(trip.id)}"
+              class="tic-select"
+              data-trips-filter-status
             >
+              <option
+                value="all"
+                ${selected(
+                  "all",
+                  state.filters.status
+                )}
+              >
+                كل الحالات
+              </option>
+
               ${Object.entries(STATUS_LABELS)
                 .map(
                   ([value, label]) => `
                     <option
                       value="${escapeHTML(value)}"
-                      ${value === status ? "selected" : ""}
+                      ${selected(
+                        value,
+                        state.filters.status
+                      )}
                     >
                       ${escapeHTML(label)}
                     </option>
@@ -1394,19 +711,625 @@
                 )
                 .join("")}
             </select>
+          </div>
 
-            ${
-              ui?.button
-                ? ui.button({
+          <div class="tic-field">
+            <label>النوع</label>
+
+            <select
+              class="tic-select"
+              data-trips-filter-type
+            >
+              <option
+                value="all"
+                ${selected(
+                  "all",
+                  state.filters.type
+                )}
+              >
+                كل الأنواع
+              </option>
+
+              ${Object.entries(TYPE_LABELS)
+                .map(
+                  ([value, label]) => `
+                    <option
+                      value="${escapeHTML(value)}"
+                      ${selected(
+                        value,
+                        state.filters.type
+                      )}
+                    >
+                      ${escapeHTML(label)}
+                    </option>
+                  `
+                )
+                .join("")}
+            </select>
+          </div>
+
+          <div class="tic-field">
+            <label>الترتيب</label>
+
+            <select
+              class="tic-select"
+              data-trips-sort
+            >
+              ${SORT_OPTIONS.map(
+                (option) => `
+                  <option
+                    value="${escapeHTML(
+                      option.value
+                    )}"
+                    ${selected(
+                      option.value,
+                      state.filters.sort
+                    )}
+                  >
+                    ${escapeHTML(option.label)}
+                  </option>
+                `
+              ).join("")}
+            </select>
+          </div>
+
+          <div class="tic-field">
+            <label>&nbsp;</label>
+
+            ${getUI().button({
+              label: "مسح الفلاتر",
+              action: "trips-clear-filters",
+              block: true
+            })}
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  const renderTripCard = (trip) => {
+    const ui = getUI();
+    const status = tripStatus(trip);
+    const remaining = daysUntil(trip);
+    const budget = number(trip.budget);
+    const spent = number(trip.spent);
+    const usage =
+      budget > 0
+        ? Math.min(
+            100,
+            Math.round((spent / budget) * 100)
+          )
+        : 0;
+
+    const countdown =
+      remaining === null
+        ? "الموعد غير محدد"
+        : remaining === 0
+          ? "السفر اليوم"
+          : remaining === 1
+            ? "متبقي يوم"
+            : remaining > 1
+              ? `متبقي ${remaining} يوم`
+              : status === "completed"
+                ? "رحلة مكتملة"
+                : "بدأت الرحلة";
+
+    return `
+      <article
+        class="tic-card tic-trip-card"
+        data-trip-card="${escapeHTML(trip.id)}"
+      >
+        <div class="tic-trip-cover">
+          <span class="tic-trip-cover-emoji">
+            ${escapeHTML(
+              trip.emoji ||
+              trip.icon ||
+              "✈"
+            )}
+          </span>
+        </div>
+
+        <div class="tic-trip-card-body">
+          <div class="tic-feature-row">
+            <div>
+              <span class="tic-chip">
+                ${escapeHTML(
+                  TYPE_LABELS[trip.tripType] ||
+                  "رحلة"
+                )}
+              </span>
+
+              <h3
+                class="tic-card-title"
+                style="margin-top:12px"
+              >
+                ${escapeHTML(
+                  trip.title ||
+                  trip.destination ||
+                  "رحلة بدون اسم"
+                )}
+              </h3>
+
+              <p class="tic-card-text">
+                ${escapeHTML(
+                  trip.destination ||
+                  [trip.city, trip.country]
+                    .filter(Boolean)
+                    .join("، ")
+                )}
+              </p>
+            </div>
+
+            ${ui.status(
+              STATUS_LABELS[status] || status,
+              {
+                value: status,
+                tone:
+                  STATUS_TONES[status]
+              }
+            )}
+          </div>
+
+          <div style="margin-top:14px">
+            ${ui.badge(
+              countdown,
+              remaining !== null &&
+              remaining <= 7 &&
+              remaining >= 0
+                ? "warning"
+                : "info"
+            )}
+          </div>
+
+          <div class="tic-trip-meta">
+            ${ui.info(
+              "التاريخ",
+              trip.startDate
+                ? ui.date(trip.startDate)
+                : "—"
+            )}
+
+            ${ui.info(
+              "المدة",
+              `${durationDays(trip)} يوم`
+            )}
+
+            ${ui.info(
+              "الميزانية",
+              ui.currency(budget)
+            )}
+          </div>
+
+          <div style="margin-top:15px">
+            ${ui.progress(usage, {
+              label: "استخدام الميزانية",
+              hint:
+                `${ui.currency(spent)} مصروف`
+            })}
+          </div>
+
+          <div
+            class="tic-grid tic-grid-4"
+            style="margin-top:16px"
+          >
+            ${ui.button({
+              label: "التفاصيل",
+              action: "trips-view-details",
+              params: {
+                tripId: trip.id
+              },
+              primary: true,
+              block: true
+            })}
+
+            ${ui.iconButton({
+              icon: "✎",
+              action: "trips-edit",
+              params: {
+                tripId: trip.id
+              },
+              ariaLabel: "تعديل الرحلة"
+            })}
+
+            ${ui.iconButton({
+              icon: "⧉",
+              action: "trips-duplicate",
+              params: {
+                tripId: trip.id
+              },
+              ariaLabel: "تكرار الرحلة"
+            })}
+
+            ${ui.iconButton({
+              icon: "×",
+              action: "trips-delete",
+              params: {
+                tripId: trip.id
+              },
+              ariaLabel: "حذف الرحلة"
+            })}
+          </div>
+        </div>
+      </article>
+    `;
+  };
+
+  const renderTripsList = (snapshot) => {
+    const ui = getUI();
+
+    if (!snapshot.filteredTrips.length) {
+      return ui.empty({
+        icon: "✈",
+        title:
+          snapshot.trips.length === 0
+            ? "لا توجد رحلات بعد"
+            : "لا توجد نتائج مطابقة",
+        message:
+          snapshot.trips.length === 0
+            ? "أنشئ رحلتك الأولى وسيتم عرضها هنا."
+            : "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+        action:
+          snapshot.trips.length === 0
+            ? {
+                label: "إنشاء رحلة جديدة",
+                action: "trips-new",
+                primary: true
+              }
+            : {
+                label: "مسح الفلاتر",
+                action: "trips-clear-filters"
+              }
+      });
+    }
+
+    return `
+      <p class="tic-subtitle" style="margin-bottom:12px">
+        عرض ${snapshot.filteredTrips.length}
+        من ${snapshot.trips.length} رحلة
+      </p>
+
+      <div class="tic-trips-list">
+        ${snapshot.filteredTrips
+          .map(renderTripCard)
+          .join("")}
+      </div>
+    `;
+  };
+
+  const renderTripDetails = (trip) => {
+    const ui = getUI();
+
+    if (!trip) {
+      return ui.empty({
+        icon: "!",
+        title: "تعذر العثور على الرحلة",
+        message:
+          "قد تكون الرحلة حُذفت أو لم تعد متوفرة.",
+        action: {
+          label: "العودة إلى الرحلات",
+          action: "trips-back-to-list"
+        }
+      });
+    }
+
+    const status = tripStatus(trip);
+    const documents = relatedDocuments(trip.id);
+    const packing = relatedPacking(trip.id);
+    const packed = packing.filter(
+      (item) =>
+        item.completed === true ||
+        item.packed === true ||
+        item.status === "completed"
+    ).length;
+
+    const activities =
+      Array.isArray(trip.activities)
+        ? trip.activities
+        : [];
+
+    const budget = number(trip.budget);
+    const spent = number(trip.spent);
+    const usage =
+      budget > 0
+        ? Math.min(
+            100,
+            Math.round((spent / budget) * 100)
+          )
+        : 0;
+
+    const summary = ui.grid(
+      [
+        {
+          icon: "◷",
+          value: durationDays(trip),
+          label: "عدد الأيام"
+        },
+        {
+          icon: "◎",
+          value: number(trip.travelers, 1),
+          label: "المسافرون"
+        },
+        {
+          icon: "◈",
+          value: ui.currency(budget),
+          label: "الميزانية"
+        },
+        {
+          icon: "✓",
+          value: `${packed}/${packing.length}`,
+          label: "التجهيز"
+        }
+      ]
+        .map((item) => ui.stat(item))
+        .join(""),
+      {
+        columns: 4
+      }
+    );
+
+    const information = ui.grid(
+      [
+        ["الدولة", trip.country || "—"],
+        ["المدينة", trip.city || "—"],
+        ["مطار المغادرة", trip.departureAirport || "—"],
+        ["مطار الوصول", trip.arrivalAirport || "—"],
+        ["شركة الطيران", trip.airline || "—"],
+        ["رقم الرحلة", trip.flightNumber || "—"],
+        ["الإقامة", trip.accommodation || "—"],
+        ["رقم الحجز", trip.bookingReference || "—"],
+        ["التنقل", trip.transport || "—"],
+        ["جهة الطوارئ", trip.emergencyContact || "—"]
+      ]
+        .map(([label, value]) =>
+          ui.info(label, value)
+        )
+        .join(""),
+      {
+        columns: 2
+      }
+    );
+
+    return `
+      <div data-trip-details="${escapeHTML(trip.id)}">
+        ${ui.hero({
+          badge:
+            TYPE_LABELS[trip.tripType] ||
+            "Trip Details",
+          title:
+            trip.title ||
+            trip.destination ||
+            "تفاصيل الرحلة",
+          subtitle:
+            trip.destination ||
+            [trip.city, trip.country]
+              .filter(Boolean)
+              .join("، "),
+          meta: [
+            `${durationDays(trip)} يوم`,
+            trip.startDate
+              ? ui.date(trip.startDate)
+              : "—",
+            STATUS_LABELS[status] || status
+          ],
+          actions: [
+            {
+              label: "العودة",
+              action: "trips-back-to-list"
+            },
+            {
+              label: "تعديل الرحلة",
+              action: "trips-edit",
+              params: {
+                tripId: trip.id
+              },
+              primary: true
+            }
+          ]
+        })}
+
+        ${ui.section({
+          eyebrow: "TRIP OVERVIEW",
+          title: "ملخص الرحلة",
+          content: summary
+        })}
+
+        ${ui.section({
+          eyebrow: "JOURNEY DETAILS",
+          title: "تفاصيل السفر",
+          content: information
+        })}
+
+        ${ui.section({
+          eyebrow: "BUDGET",
+          title: "ميزانية الرحلة",
+          content: `
+            <article class="tic-budget-overview">
+              <small>إجمالي الميزانية</small>
+
+              <strong>
+                ${escapeHTML(ui.currency(budget))}
+              </strong>
+
+              <div class="tic-budget-breakdown">
+                <div class="tic-budget-breakdown-item">
+                  <small>المصروف</small>
+                  <strong>
+                    ${escapeHTML(ui.currency(spent))}
+                  </strong>
+                </div>
+
+                <div class="tic-budget-breakdown-item">
+                  <small>المتبقي</small>
+                  <strong>
+                    ${escapeHTML(
+                      ui.currency(
+                        Math.max(0, budget - spent)
+                      )
+                    )}
+                  </strong>
+                </div>
+
+                <div class="tic-budget-breakdown-item">
+                  <small>الاستخدام</small>
+                  <strong>${usage}%</strong>
+                </div>
+              </div>
+
+              <div style="margin-top:16px">
+                ${ui.progress(usage, {
+                  label: "استخدام الميزانية"
+                })}
+              </div>
+            </article>
+          `
+        })}
+
+        ${ui.section({
+          eyebrow: "ACTIVITIES",
+          title: "الأنشطة",
+          content:
+            activities.length
+              ? ui.list(
+                  activities.map(
+                    (activity, index) => ({
+                      icon: index + 1,
+                      title: isObject(activity)
+                        ? activity.title ||
+                          activity.name ||
+                          ""
+                        : activity,
+                      subtitle:
+                        isObject(activity)
+                          ? activity.description || ""
+                          : ""
+                    })
+                  )
+                )
+              : ui.empty({
+                  icon: "☆",
+                  title: "لا توجد أنشطة",
+                  message:
+                    "أضف الأنشطة عند تعديل الرحلة."
+                })
+        })}
+
+        ${ui.section({
+          eyebrow: "READINESS",
+          title: "الوثائق والتجهيز",
+          content: ui.grid(
+            `
+              ${ui.card({
+                icon: "▣",
+                title: "الوثائق",
+                description:
+                  `${documents.length} وثيقة مرتبطة بالرحلة`,
+                footer: ui.button({
+                  label: "عرض الوثائق",
+                  route: "more",
+                  view: "documents",
+                  params: {
+                    tripId: trip.id
+                  },
+                  block: true
+                })
+              })}
+
+              ${ui.card({
+                icon: "✓",
+                title: "قائمة التجهيز",
+                description:
+                  `تم تجهيز ${packed} من ${packing.length} عنصر`,
+                body: ui.progress(
+                  packing.length
+                    ? Math.round(
+                        (packed / packing.length) * 100
+                      )
+                    : 0,
+                  {
+                    label: "اكتمال التجهيز"
+                  }
+                ),
+                footer: ui.button({
+                  label: "فتح قائمة التجهيز",
+                  route: "more",
+                  view: "packing",
+                  params: {
+                    tripId: trip.id
+                  },
+                  block: true
+                })
+              })}
+            `,
+            {
+              columns: 2
+            }
+          )
+        })}
+
+        ${
+          trip.notes
+            ? ui.section({
+                eyebrow: "NOTES",
+                title: "ملاحظات الرحلة",
+                content: ui.card({
+                  body: `
+                    <p class="tic-card-text">
+                      ${escapeHTML(trip.notes)}
+                    </p>
+                  `
+                })
+              })
+            : ""
+        }
+
+        ${ui.section({
+          eyebrow: "MANAGEMENT",
+          title: "إدارة الرحلة",
+          subtitle:
+            "غيّر الحالة أو نفذ إجراءات الرحلة.",
+          content: `
+            <div class="tic-card tic-card-body">
+              <div class="tic-form-grid">
+                <div class="tic-field">
+                  <label>حالة الرحلة</label>
+
+                  <select
+                    class="tic-select"
+                    data-trip-status-update
+                    data-trip-id="${escapeHTML(trip.id)}"
+                  >
+                    ${Object.entries(STATUS_LABELS)
+                      .map(
+                        ([value, label]) => `
+                          <option
+                            value="${escapeHTML(value)}"
+                            ${value === status ? "selected" : ""}
+                          >
+                            ${escapeHTML(label)}
+                          </option>
+                        `
+                      )
+                      .join("")}
+                  </select>
+                </div>
+
+                <div class="tic-field">
+                  <label>&nbsp;</label>
+
+                  ${ui.button({
                     label: "حذف الرحلة",
                     action: "trips-delete",
-                    params: { tripId: trip.id },
-                    danger: true
-                  })
-                : ""
-            }
-          </div>
-        </section>
+                    params: {
+                      tripId: trip.id
+                    },
+                    danger: true,
+                    block: true
+                  })}
+                </div>
+              </div>
+            </div>
+          `
+        })}
       </div>
     `;
   };
@@ -1417,7 +1340,7 @@
     if (state.activeView === "details") {
       return `
         <div
-          class="trips-page"
+          class="tic-module"
           data-page="trips"
           data-view="details"
           data-page-version="${PAGE_VERSION}"
@@ -1427,13 +1350,18 @@
       `;
     }
 
-    const hero = ui?.hero
-      ? ui.hero({
+    return `
+      <div
+        class="tic-module"
+        data-page="trips"
+        data-view="list"
+        data-page-version="${PAGE_VERSION}"
+      >
+        ${ui.hero({
           badge: "Trips Center",
-          eyebrow: "إدارة السفر",
           title: "رحلاتي",
           subtitle:
-            "خطط لكل رحلة، تابع ميزانيتها، وجهز تفاصيلها من مكان واحد.",
+            "خطط لكل رحلة، تابع ميزانيتها، وجهّز تفاصيلها من مكان واحد.",
           actions: [
             {
               label: "رحلة جديدة",
@@ -1442,110 +1370,116 @@
               icon: "＋"
             }
           ]
-        })
-      : "";
+        })}
 
-    const statisticsSection = ui?.section
-      ? ui.section({
-          eyebrow: "Overview",
+        ${ui.section({
+          eyebrow: "OVERVIEW",
           title: "ملخص الرحلات",
-          subtitle: "نظرة سريعة على حالة جميع رحلاتك.",
+          subtitle:
+            "نظرة سريعة على حالة جميع رحلاتك.",
           content: renderStatistics(snapshot)
-        })
-      : renderStatistics(snapshot);
+        })}
 
-    const tripsSection = ui?.section
-      ? ui.section({
-          eyebrow: "All Journeys",
+        ${ui.section({
+          eyebrow: "ALL JOURNEYS",
           title: "جميع الرحلات",
           subtitle:
-            "ابحث وفلتر ورتب الرحلات حسب احتياجك.",
+            "ابحث وفلتر ورتب الرحلات بسهولة.",
           content: `
             ${renderFilters()}
-            ${renderTripsList(snapshot)}
+            <div style="margin-top:16px">
+              ${renderTripsList(snapshot)}
+            </div>
           `
-        })
-      : `
-        ${renderFilters()}
-        ${renderTripsList(snapshot)}
-      `;
-
-    return `
-      <div
-        class="trips-page"
-        data-page="trips"
-        data-view="list"
-        data-page-version="${PAGE_VERSION}"
-      >
-        ${hero}
-
-        <div class="trips-page__content">
-          ${statisticsSection}
-          ${tripsSection}
-        </div>
+        })}
       </div>
     `;
   };
 
   const applyInputFilters = () => {
-    if (!state.container) {
-      return;
-    }
+    if (!state.container) return;
 
-    const searchInput = state.container.querySelector(
-      "[data-trips-search]"
+    const searchInput =
+      state.container.querySelector(
+        "[data-trips-search]"
+      );
+
+    const statusSelect =
+      state.container.querySelector(
+        "[data-trips-filter-status]"
+      );
+
+    const typeSelect =
+      state.container.querySelector(
+        "[data-trips-filter-type]"
+      );
+
+    const sortSelect =
+      state.container.querySelector(
+        "[data-trips-sort]"
+      );
+
+    searchInput?.addEventListener(
+      "input",
+      (event) => {
+        state.filters.search =
+          event.target.value;
+
+        refresh({
+          preserveFocus: true
+        });
+      }
     );
 
-    const statusSelect = state.container.querySelector(
-      "[data-trips-filter-status]"
-    );
+    statusSelect?.addEventListener(
+      "change",
+      (event) => {
+        state.filters.status =
+          event.target.value;
 
-    const typeSelect = state.container.querySelector(
-      "[data-trips-filter-type]"
-    );
-
-    const sortSelect = state.container.querySelector(
-      "[data-trips-sort]"
-    );
-
-    if (searchInput) {
-      searchInput.addEventListener("input", (event) => {
-        state.filters.search = event.target.value;
-        refresh({ preserveFocus: true });
-      });
-    }
-
-    if (statusSelect) {
-      statusSelect.addEventListener("change", (event) => {
-        state.filters.status = event.target.value;
         refresh();
-      });
-    }
-
-    if (typeSelect) {
-      typeSelect.addEventListener("change", (event) => {
-        state.filters.type = event.target.value;
-        refresh();
-      });
-    }
-
-    if (sortSelect) {
-      sortSelect.addEventListener("change", (event) => {
-        state.filters.sort = event.target.value;
-        refresh();
-      });
-    }
-
-    const statusUpdate = state.container.querySelector(
-      "[data-trip-status-update]"
+      }
     );
 
-    if (statusUpdate) {
-      statusUpdate.addEventListener("change", async (event) => {
-        const tripId = event.target.getAttribute("data-trip-id");
-        const status = event.target.value;
+    typeSelect?.addEventListener(
+      "change",
+      (event) => {
+        state.filters.type =
+          event.target.value;
 
-        await updateTrip(tripId, { status });
+        refresh();
+      }
+    );
+
+    sortSelect?.addEventListener(
+      "change",
+      (event) => {
+        state.filters.sort =
+          event.target.value;
+
+        refresh();
+      }
+    );
+
+    const statusUpdate =
+      state.container.querySelector(
+        "[data-trip-status-update]"
+      );
+
+    statusUpdate?.addEventListener(
+      "change",
+      async (event) => {
+        const tripId =
+          event.target.getAttribute(
+            "data-trip-id"
+          );
+
+        const status =
+          event.target.value;
+
+        await updateTrip(tripId, {
+          status
+        });
 
         getUI()?.toast?.(
           "تم تحديث حالة الرحلة.",
@@ -1558,8 +1492,8 @@
         });
 
         refresh();
-      });
-    }
+      }
+    );
   };
 
   const refresh = (options = {}) => {
@@ -1567,33 +1501,42 @@
       return false;
     }
 
-    const activeElement = document.activeElement;
-    const restoreSearchFocus =
-      options.preserveFocus === true &&
-      activeElement?.matches?.("[data-trips-search]");
+    const activeElement =
+      document.activeElement;
 
-    const cursorPosition =
-      restoreSearchFocus &&
-      typeof activeElement.selectionStart === "number"
+    const preserveSearch =
+      options.preserveFocus === true &&
+      activeElement?.matches?.(
+        "[data-trips-search]"
+      );
+
+    const cursor =
+      preserveSearch &&
+      typeof activeElement.selectionStart ===
+        "number"
         ? activeElement.selectionStart
         : null;
 
     const snapshot = buildSnapshot();
-    state.container.innerHTML = renderPage(snapshot);
+
+    state.container.innerHTML =
+      renderPage(snapshot);
+
     applyInputFilters();
 
-    if (restoreSearchFocus) {
-      const nextSearchInput = state.container.querySelector(
-        "[data-trips-search]"
-      );
+    if (preserveSearch) {
+      const input =
+        state.container.querySelector(
+          "[data-trips-search]"
+        );
 
-      if (nextSearchInput) {
-        nextSearchInput.focus();
+      if (input) {
+        input.focus();
 
-        if (cursorPosition !== null) {
-          nextSearchInput.setSelectionRange(
-            cursorPosition,
-            cursorPosition
+        if (cursor !== null) {
+          input.setSelectionRange(
+            cursor,
+            cursor
           );
         }
       }
@@ -1601,7 +1544,8 @@
 
     emit("refreshed", {
       view: state.activeView,
-      tripCount: snapshot.filteredTrips.length,
+      tripCount:
+        snapshot.filteredTrips.length,
       activeTripId: state.activeTripId
     });
 
@@ -1611,14 +1555,15 @@
   const registerActions = () => {
     const ui = getUI();
 
-    if (!ui || typeof ui.registerAction !== "function") {
+    if (
+      !ui ||
+      typeof ui.registerAction !== "function"
+    ) {
       return;
     }
 
     const register = (name, handler) => {
-      if (ui.hasAction?.(name)) {
-        return;
-      }
+      if (ui.hasAction?.(name)) return;
 
       state.actionUnsubscribers.push(
         ui.registerAction(name, handler)
@@ -1633,33 +1578,39 @@
       }
 
       return getRouter()?.go?.("trip-form", {
-        params: { mode: "create" },
+        params: {
+          mode: "create"
+        },
         source: "trips-new"
       });
     });
 
-    register("trips-view-details", ({ params }) => {
-      const tripId = params.tripId || params.id;
+    register(
+      "trips-view-details",
+      ({ params }) => {
+        const tripId =
+          params.tripId || params.id;
 
-      if (!tripId) {
-        return false;
+        if (!tripId) return false;
+
+        state.activeTripId = tripId;
+        state.activeView = "details";
+
+        refresh();
+
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth"
+        });
+
+        return true;
       }
-
-      state.activeTripId = tripId;
-      state.activeView = "details";
-      refresh();
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth"
-      });
-
-      return true;
-    });
+    );
 
     register("trips-back-to-list", () => {
       state.activeView = "list";
       state.activeTripId = null;
+
       refresh();
 
       window.scrollTo({
@@ -1671,11 +1622,10 @@
     });
 
     register("trips-edit", ({ params }) => {
-      const tripId = params.tripId || params.id;
+      const tripId =
+        params.tripId || params.id;
 
-      if (!tripId) {
-        return false;
-      }
+      if (!tripId) return false;
 
       const tripForm = getTripForm();
 
@@ -1692,123 +1642,157 @@
       });
     });
 
-    register("trips-duplicate", async ({ params }) => {
-      const tripId = params.tripId || params.id;
-      const trip = findTrip(tripId);
+    register(
+      "trips-duplicate",
+      async ({ params }) => {
+        const tripId =
+          params.tripId || params.id;
 
-      if (!trip) {
-        getUI()?.toast?.(
-          "تعذر العثور على الرحلة المطلوبة.",
-          "error"
-        );
+        const trip = findTrip(tripId);
 
-        return false;
+        if (!trip) {
+          ui.toast(
+            "تعذر العثور على الرحلة.",
+            "error"
+          );
+
+          return false;
+        }
+
+        const confirmed =
+          await ui.confirm({
+            title: "تكرار الرحلة",
+            message:
+              `سيتم إنشاء نسخة جديدة من رحلة "${
+                trip.title ||
+                trip.destination
+              }".`,
+            confirmLabel: "إنشاء نسخة",
+            cancelLabel: "إلغاء"
+          });
+
+        if (confirmed !== true) {
+          return false;
+        }
+
+        try {
+          ui.showLoader(
+            "جاري إنشاء نسخة من الرحلة..."
+          );
+
+          const duplicate =
+            await duplicateTripInStore(
+              tripId
+            );
+
+          ui.toast(
+            "تم إنشاء نسخة جديدة.",
+            "success"
+          );
+
+          state.activeView = "list";
+          state.activeTripId = null;
+
+          refresh();
+
+          emit("duplicated", {
+            sourceTripId: tripId,
+            duplicateTripId:
+              duplicate?.id || null
+          });
+
+          return duplicate;
+        } catch (error) {
+          console.error(
+            "TIC Trips duplicate error:",
+            error
+          );
+
+          ui.toast(
+            "تعذر تكرار الرحلة.",
+            "error"
+          );
+
+          return false;
+        } finally {
+          ui.hideLoader();
+        }
       }
+    );
 
-      const confirmed = await getUI()?.confirm?.({
-        title: "تكرار الرحلة",
-        message:
-          `سيتم إنشاء نسخة جديدة من رحلة "${trip.title || trip.destination}".`,
-        confirmLabel: "إنشاء نسخة",
-        cancelLabel: "إلغاء"
-      });
+    register(
+      "trips-delete",
+      async ({ params }) => {
+        const tripId =
+          params.tripId || params.id;
 
-      if (confirmed !== true) {
-        return false;
+        const trip = findTrip(tripId);
+
+        if (!trip) {
+          ui.toast(
+            "تعذر العثور على الرحلة.",
+            "error"
+          );
+
+          return false;
+        }
+
+        const confirmed =
+          await ui.confirm({
+            title: "حذف الرحلة",
+            message:
+              `سيتم حذف رحلة "${
+                trip.title ||
+                trip.destination
+              }" نهائياً.`,
+            confirmLabel: "حذف الرحلة",
+            cancelLabel: "إلغاء",
+            danger: true
+          });
+
+        if (confirmed !== true) {
+          return false;
+        }
+
+        try {
+          ui.showLoader(
+            "جاري حذف الرحلة..."
+          );
+
+          await deleteTripFromStore(tripId);
+
+          ui.toast(
+            "تم حذف الرحلة.",
+            "success"
+          );
+
+          state.activeView = "list";
+          state.activeTripId = null;
+
+          refresh();
+
+          emit("deleted", {
+            tripId
+          });
+
+          return true;
+        } catch (error) {
+          console.error(
+            "TIC Trips delete error:",
+            error
+          );
+
+          ui.toast(
+            "تعذر حذف الرحلة.",
+            "error"
+          );
+
+          return false;
+        } finally {
+          ui.hideLoader();
+        }
       }
-
-      try {
-        getUI()?.showLoader?.("جاري إنشاء نسخة من الرحلة...");
-
-        const duplicate = await duplicateTripInStore(tripId);
-
-        getUI()?.toast?.(
-          "تم إنشاء نسخة جديدة من الرحلة.",
-          "success"
-        );
-
-        emit("duplicated", {
-          sourceTripId: tripId,
-          duplicateTripId: duplicate?.id || null
-        });
-
-        state.activeView = "list";
-        state.activeTripId = null;
-        refresh();
-
-        return duplicate;
-      } catch (error) {
-        console.error("TIC Trips duplicate error:", error);
-
-        getUI()?.toast?.(
-          "تعذر تكرار الرحلة.",
-          "error"
-        );
-
-        return false;
-      } finally {
-        getUI()?.hideLoader?.();
-      }
-    });
-
-    register("trips-delete", async ({ params }) => {
-      const tripId = params.tripId || params.id;
-      const trip = findTrip(tripId);
-
-      if (!trip) {
-        getUI()?.toast?.(
-          "تعذر العثور على الرحلة المطلوبة.",
-          "error"
-        );
-
-        return false;
-      }
-
-      const confirmed = await getUI()?.confirm?.({
-        title: "حذف الرحلة",
-        message:
-          `سيتم حذف رحلة "${trip.title || trip.destination}" نهائياً.`,
-        confirmLabel: "حذف الرحلة",
-        cancelLabel: "إلغاء",
-        danger: true
-      });
-
-      if (confirmed !== true) {
-        return false;
-      }
-
-      try {
-        getUI()?.showLoader?.("جاري حذف الرحلة...");
-
-        await deleteTripFromStore(tripId);
-
-        getUI()?.toast?.(
-          "تم حذف الرحلة.",
-          "success"
-        );
-
-        emit("deleted", {
-          tripId
-        });
-
-        state.activeView = "list";
-        state.activeTripId = null;
-        refresh();
-
-        return true;
-      } catch (error) {
-        console.error("TIC Trips delete error:", error);
-
-        getUI()?.toast?.(
-          "تعذر حذف الرحلة.",
-          "error"
-        );
-
-        return false;
-      } finally {
-        getUI()?.hideLoader?.();
-      }
-    });
+    );
 
     register("trips-clear-filters", () => {
       state.filters = {
@@ -1819,6 +1803,7 @@
       };
 
       refresh();
+
       return true;
     });
   };
@@ -1834,11 +1819,12 @@
       return;
     }
 
-    state.unsubscribeStore = store.subscribe(() => {
-      if (state.mounted) {
-        refresh();
-      }
-    });
+    state.unsubscribeStore =
+      store.subscribe(() => {
+        if (state.mounted) {
+          refresh();
+        }
+      });
   };
 
   const TripsPage = {
@@ -1873,7 +1859,10 @@
         state.activeTripId = params.tripId;
       }
 
-      if (params.view === "details" && params.tripId) {
+      if (
+        params.view === "details" &&
+        params.tripId
+      ) {
         state.activeView = "details";
       } else if (params.view === "list") {
         state.activeView = "list";
@@ -1886,11 +1875,13 @@
     mount(context = {}) {
       this.init();
 
-      const container = resolveContainer(context.container);
+      const container = resolveContainer(
+        context.container
+      );
 
       if (!container) {
         throw new Error(
-          "TIC Trips Page Error: route container was not found."
+          "TIC Trips Error: route container not found."
         );
       }
 
@@ -1901,7 +1892,8 @@
       }
 
       state.activeView =
-        params.view === "details" && params.tripId
+        params.view === "details" &&
+        params.tripId
           ? "details"
           : "list";
 
@@ -1909,7 +1901,10 @@
       state.mounted = true;
 
       const snapshot = buildSnapshot();
-      container.innerHTML = renderPage(snapshot);
+
+      container.innerHTML =
+        renderPage(snapshot);
+
       applyInputFilters();
 
       emit("mounted", {
@@ -1922,7 +1917,9 @@
     },
 
     afterEnter(context = {}) {
-      const container = resolveContainer(context.container);
+      const container = resolveContainer(
+        context.container
+      );
 
       if (container) {
         state.container = container;
@@ -1930,6 +1927,7 @@
       }
 
       applyInputFilters();
+
       return true;
     },
 
@@ -1972,6 +1970,7 @@
       };
 
       refresh();
+
       return clone(state.filters);
     },
 
@@ -1980,35 +1979,43 @@
     },
 
     getSnapshot() {
-      return clone(state.lastSnapshot || buildSnapshot());
+      return clone(
+        state.lastSnapshot ||
+        buildSnapshot()
+      );
     },
 
     subscribe(listener) {
       if (typeof listener !== "function") {
         throw new TypeError(
-          "TIC Trips Page subscriber must be a function."
+          "TIC Trips subscriber must be a function."
         );
       }
 
       state.subscribers.add(listener);
 
-      return () => {
+      return () =>
         state.subscribers.delete(listener);
-      };
     },
 
     destroy() {
       this.unmount();
 
-      if (typeof state.unsubscribeStore === "function") {
+      if (
+        typeof state.unsubscribeStore === "function"
+      ) {
         state.unsubscribeStore();
       }
 
-      state.actionUnsubscribers.forEach((unsubscribe) => {
-        if (typeof unsubscribe === "function") {
-          unsubscribe();
+      state.actionUnsubscribers.forEach(
+        (unsubscribe) => {
+          if (
+            typeof unsubscribe === "function"
+          ) {
+            unsubscribe();
+          }
         }
-      });
+      );
 
       state.unsubscribeStore = null;
       state.actionUnsubscribers = [];
@@ -2035,10 +2042,16 @@
         storeAvailable: Boolean(getStore()),
         routerAvailable: Boolean(getRouter()),
         uiAvailable: Boolean(getUI()),
-        tripFormAvailable: Boolean(getTripForm()),
-        actionCount: state.actionUnsubscribers.length,
-        subscriberCount: state.subscribers.size,
-        hasSnapshot: Boolean(state.lastSnapshot)
+        tripFormAvailable: Boolean(
+          getTripForm()
+        ),
+        actionCount:
+          state.actionUnsubscribers.length,
+        subscriberCount:
+          state.subscribers.size,
+        hasSnapshot: Boolean(
+          state.lastSnapshot
+        )
       };
     }
   };
@@ -2050,7 +2063,10 @@
 
   const router = getRouter();
 
-  if (router && typeof router.register === "function") {
+  if (
+    router &&
+    typeof router.register === "function"
+  ) {
     if (!router.has?.("trips")) {
       router.register("trips", {
         id: "trips",
@@ -2062,8 +2078,13 @@
       });
     }
 
-    if (typeof router.registerPage === "function") {
-      router.registerPage("trips", TripsPage);
+    if (
+      typeof router.registerPage === "function"
+    ) {
+      router.registerPage(
+        "trips",
+        TripsPage
+      );
     }
   }
 
