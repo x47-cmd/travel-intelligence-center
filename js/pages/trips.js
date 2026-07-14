@@ -1,13 +1,13 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V3.0.1
+   Trips Page Module V3.2.0
 
    File Path:
    js/pages/trips.js
 
    Purpose:
    - Complete redesign of "رحلاتي" as a personal travel hub.
-   - Separates upcoming, ongoing, memories and visited countries.
+   - Separates operational journeys, travel journal and passport analytics.
    - Supports adding old trips without forcing full booking details.
    - Automatically includes completed future trips in travel memories.
    - Preserves current Store / Router / UI / Trip Form integrations.
@@ -29,7 +29,7 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.1.0";
+  const PAGE_VERSION = "3.2.0";
   const STYLE_ID = "tic-trips-v3-styles";
 
   const state = {
@@ -216,7 +216,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.1.0"] {
+      [data-page="trips"][data-page-version="3.2.0"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -1012,68 +1012,68 @@
          Trips V3.1.0 — Compact & Personal Refinement
       ===================================================== */
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-shell {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-shell {
         gap: 24px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-hero {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-hero {
         min-height: 0;
         padding: 22px;
         border-radius: 27px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-hero__eyebrow {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-hero__eyebrow {
         min-height: 30px;
         padding: 0 13px;
         font-size: 11px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-hero h1 {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-hero h1 {
         margin-top: 18px;
         font-size: clamp(32px, 8vw, 44px);
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-hero p {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-hero p {
         max-width: 470px;
         font-size: 14px;
         line-height: 1.75;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-hero__actions {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-hero__actions {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         margin-top: 18px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-action {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-action {
         min-height: 46px;
         padding: 0 12px;
         border-radius: 15px;
         font-size: 13px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-section h2 {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-section h2 {
         font-size: clamp(24px, 6vw, 32px);
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-section__subtitle {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-section__subtitle {
         margin-top: 4px;
         font-size: 13px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-overview {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-overview {
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 8px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-stat {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-stat {
         min-height: 104px;
         padding: 12px 9px;
         border-radius: 20px;
         text-align: center;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-stat__icon {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-stat__icon {
         width: 35px;
         height: 35px;
         margin-inline: auto;
@@ -1081,23 +1081,23 @@
         font-size: 16px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-stat strong {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-stat strong {
         margin-top: 10px;
         font-size: 23px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-stat span {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-stat span {
         margin-top: 6px;
         font-size: 10px;
         line-height: 1.35;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-tabs {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-tabs {
         padding: 4px;
         border-radius: 19px;
       }
 
-      [data-page="trips"][data-page-version="3.1.0"] .trips-tab {
+      [data-page="trips"][data-page-version="3.2.0"] .trips-tab {
         flex: 1 0 auto;
         min-height: 42px;
         padding: 0 14px;
@@ -1248,26 +1248,26 @@
       }
 
       @media (max-width: 520px) {
-        [data-page="trips"][data-page-version="3.1.0"] .trips-overview {
+        [data-page="trips"][data-page-version="3.2.0"] .trips-overview {
           grid-template-columns: repeat(4, minmax(0, 1fr));
         }
 
-        [data-page="trips"][data-page-version="3.1.0"] .trips-stat {
+        [data-page="trips"][data-page-version="3.2.0"] .trips-stat {
           min-height: 96px;
           padding: 10px 5px;
         }
 
-        [data-page="trips"][data-page-version="3.1.0"] .trips-stat__icon {
+        [data-page="trips"][data-page-version="3.2.0"] .trips-stat__icon {
           width: 31px;
           height: 31px;
           font-size: 14px;
         }
 
-        [data-page="trips"][data-page-version="3.1.0"] .trips-stat strong {
+        [data-page="trips"][data-page-version="3.2.0"] .trips-stat strong {
           font-size: 20px;
         }
 
-        [data-page="trips"][data-page-version="3.1.0"] .trips-stat span {
+        [data-page="trips"][data-page-version="3.2.0"] .trips-stat span {
           font-size: 9px;
         }
 
@@ -1278,7 +1278,7 @@
       }
 
       @media (max-width: 390px) {
-        [data-page="trips"][data-page-version="3.1.0"] .trips-hero__actions {
+        [data-page="trips"][data-page-version="3.2.0"] .trips-hero__actions {
           grid-template-columns: 1fr;
         }
 
@@ -1286,6 +1286,212 @@
           grid-template-columns: 1fr;
         }
       }
+
+      /* =====================================================
+         Trips V3.2.0 — Final Premium Pass
+      ===================================================== */
+
+      [data-page="trips"][data-page-version="3.2.0"] .trips-tabs {
+        position: relative;
+        background: rgba(255,255,255,.92);
+        box-shadow: inset 0 0 0 1px rgba(220,229,239,.75);
+      }
+
+      [data-page="trips"][data-page-version="3.2.0"] .trips-tab {
+        transition:
+          color 180ms ease,
+          background 180ms ease,
+          transform 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      [data-page="trips"][data-page-version="3.2.0"] .trips-tab.is-active {
+        transform: translateY(-1px);
+      }
+
+      [data-page="trips"][data-page-version="3.2.0"] .trips-filter-toggle {
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 1px;
+        font-size: 17px;
+      }
+
+      [data-page="trips"][data-page-version="3.2.0"] .trips-filter-toggle small {
+        color: var(--trips-muted);
+        font-size: 8px;
+        font-weight: 900;
+      }
+
+      .trips-next-brief {
+        display: grid;
+        gap: 15px;
+        padding: 19px;
+        border: 1px solid #cde6e1;
+        border-radius: 27px;
+        background:
+          radial-gradient(circle at 0% 0%, rgba(23,167,151,.13), transparent 34%),
+          linear-gradient(145deg, #ffffff, #f1faf8);
+        box-shadow: 0 14px 34px rgba(15,118,110,.08);
+      }
+
+      .trips-next-brief__head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+      }
+
+      .trips-next-brief__head span {
+        color: var(--trips-teal-dark);
+        font-size: 10px;
+        font-weight: 950;
+        letter-spacing: .09em;
+      }
+
+      .trips-next-brief__head h2 {
+        margin: 3px 0 0;
+        font-size: 23px;
+      }
+
+      .trips-next-brief__head p {
+        margin: 4px 0 0;
+        color: var(--trips-muted);
+        font-size: 13px;
+      }
+
+      .trips-next-brief__countdown {
+        flex: 0 0 auto;
+        min-width: 78px;
+        padding: 11px 10px;
+        border-radius: 18px;
+        background: var(--trips-navy);
+        color: #fff;
+        text-align: center;
+      }
+
+      .trips-next-brief__countdown strong,
+      .trips-next-brief__countdown small {
+        display: block;
+      }
+
+      .trips-next-brief__countdown strong {
+        font-size: 17px;
+      }
+
+      .trips-next-brief__countdown small {
+        margin-top: 2px;
+        color: rgba(255,255,255,.67);
+        font-size: 9px;
+      }
+
+      .trips-next-brief__facts {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 7px;
+      }
+
+      .trips-next-brief__facts > div {
+        min-width: 0;
+        padding: 10px 7px;
+        border: 1px solid rgba(220,229,239,.88);
+        border-radius: 15px;
+        background: rgba(255,255,255,.85);
+        text-align: center;
+      }
+
+      .trips-next-brief__facts small,
+      .trips-next-brief__facts strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .trips-next-brief__facts small {
+        color: var(--trips-muted);
+        font-size: 9px;
+      }
+
+      .trips-next-brief__facts strong {
+        margin-top: 4px;
+        font-size: 11px;
+      }
+
+      .trips-next-brief__action {
+        min-height: 44px;
+        border: 0;
+        border-radius: 15px;
+        background: #fff;
+        box-shadow: inset 0 0 0 1px #b9ddd6;
+        color: var(--trips-teal-dark);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 950;
+      }
+
+      .memory-card__cover {
+        background-size: cover;
+        background-position: center;
+      }
+
+      .country-magnet__count {
+        min-width: 46px;
+        height: auto;
+        min-height: 42px;
+        padding: 6px 9px;
+        line-height: 1.05;
+      }
+
+      .country-magnet__count small {
+        display: block;
+        margin-top: 2px;
+        color: rgba(255,255,255,.68);
+        font-size: 7px;
+      }
+
+      .country-magnet__stats {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 14px;
+      }
+
+      .country-magnet__stats > span {
+        min-width: 0;
+        padding: 8px 5px;
+        border-radius: 13px;
+        background: rgba(255,255,255,.72);
+        text-align: center;
+      }
+
+      .country-magnet__stats small,
+      .country-magnet__stats strong {
+        display: block;
+      }
+
+      .country-magnet__stats small {
+        color: var(--trips-muted);
+        font-size: 8px;
+      }
+
+      .country-magnet__stats strong {
+        margin-top: 3px;
+        font-size: 12px;
+      }
+
+      @media (max-width: 520px) {
+        .trips-next-brief__facts {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .trips-next-brief__facts strong {
+          font-size: 10px;
+        }
+      }
+
 
       @media (min-width: 761px) {
         .trips-modal-backdrop {
@@ -1681,6 +1887,7 @@
             cities: new Set(),
             firstVisit: null,
             lastVisit: null,
+            totalDays: 0,
             tripIds: []
           });
         }
@@ -1692,6 +1899,7 @@
           toDate(trip.createdAt);
 
         item.visits += 1;
+        item.totalDays += Math.max(0, durationDays(trip));
         item.tripIds.push(trip.id);
 
         normalizeCities(trip).forEach((city) =>
@@ -1873,6 +2081,96 @@
     return snapshot;
   };
 
+  const getNextTrip = (trips) =>
+    trips
+      .filter(isUpcomingTrip)
+      .slice()
+      .sort(
+        (a, b) =>
+          (toDate(a.startDate)?.getTime() || Number.MAX_SAFE_INTEGER) -
+          (toDate(b.startDate)?.getTime() || Number.MAX_SAFE_INTEGER)
+      )[0] || null;
+
+  const renderNextTripBrief = (snapshot) => {
+    const trip = getNextTrip(snapshot.trips);
+
+    if (!trip) return "";
+
+    const remaining = daysUntil(trip);
+    const destination =
+      trip.destination ||
+      [trip.city, trip.country].filter(Boolean).join("، ") ||
+      "وجهة غير محددة";
+
+    const readinessItems = [
+      {
+        label: "التأشيرة",
+        value: trip.visaRequired ? "مطلوبة" : "غير مطلوبة"
+      },
+      {
+        label: "التأمين",
+        value: trip.insuranceRequired ? "مطلوب" : "اختياري"
+      },
+      {
+        label: "العملة",
+        value: trip.currency || "AED"
+      },
+      {
+        label: "المطار",
+        value: trip.departureAirport || "غير محدد"
+      }
+    ];
+
+    return `
+      <section class="trips-next-brief">
+        <div class="trips-next-brief__head">
+          <div>
+            <span>NEXT JOURNEY</span>
+            <h2>رحلتك القادمة</h2>
+            <p>${escapeHTML(destination)}</p>
+          </div>
+
+          <div class="trips-next-brief__countdown">
+            <strong>
+              ${
+                remaining === null
+                  ? "—"
+                  : remaining === 0
+                    ? "اليوم"
+                    : remaining === 1
+                      ? "يوم"
+                      : `${remaining} يوم`
+              }
+            </strong>
+            <small>متبقي</small>
+          </div>
+        </div>
+
+        <div class="trips-next-brief__facts">
+          ${readinessItems
+            .map(
+              (item) => `
+                <div>
+                  <small>${escapeHTML(item.label)}</small>
+                  <strong>${escapeHTML(item.value)}</strong>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+
+        <button
+          type="button"
+          class="trips-next-brief__action"
+          data-action="trips-view-details"
+          data-trip-id="${escapeHTML(trip.id)}"
+        >
+          فتح تفاصيل الرحلة
+        </button>
+      </section>
+    `;
+  };
+
   const renderOverview = (statistics) => {
     const items = [
       {
@@ -1967,7 +2265,8 @@
           data-action="trips-toggle-filters"
           aria-label="إظهار أو إخفاء الفلاتر"
         >
-          ⚙
+          <span aria-hidden="true">⌕</span>
+          <small>فلترة</small>
         </button>
       </div>
 
@@ -2224,7 +2523,14 @@
 
     return `
       <article class="memory-card">
-        <div class="memory-card__cover">
+        <div
+          class="memory-card__cover"
+          ${
+            trip.coverImage
+              ? `style="background-image:linear-gradient(135deg,rgba(8,23,43,.18),rgba(8,23,43,.58)),url('${escapeHTML(trip.coverImage)}');background-size:cover;background-position:center"`
+              : ""
+          }
+        >
           <span class="memory-card__stamp">
             ${escapeHTML(
               trip.countryFlag ||
@@ -2325,6 +2631,7 @@
     <article class="country-magnet">
       <span class="country-magnet__count">
         ${escapeHTML(country.visits)}
+        <small>زيارة</small>
       </span>
 
       <div class="country-magnet__flag">
@@ -2339,19 +2646,32 @@
         ${
           country.cities.length
             ? escapeHTML(country.cities.join("، "))
-            : "المدن غير مسجلة"
+            : "لم تُسجل المدن بعد"
         }
       </p>
 
-      <p style="margin-top:9px;font-size:13px">
-        ${
-          country.firstVisit
-            ? `أول زيارة: ${escapeHTML(
-                country.firstVisit.getFullYear()
-              )}`
-            : "تاريخ الزيارة غير محدد"
-        }
-      </p>
+      <div class="country-magnet__stats">
+        <span>
+          <small>المدن</small>
+          <strong>${escapeHTML(country.cities.length)}</strong>
+        </span>
+
+        <span>
+          <small>الأيام</small>
+          <strong>${escapeHTML(country.totalDays || 0)}</strong>
+        </span>
+
+        <span>
+          <small>آخر زيارة</small>
+          <strong>
+            ${
+              country.lastVisit
+                ? escapeHTML(country.lastVisit.getFullYear())
+                : "—"
+            }
+          </strong>
+        </span>
+      </div>
     </article>
   `;
 
@@ -2447,8 +2767,8 @@
             <h2>مكتبة سفراتي</h2>
 
             <p>
-              مكانك الشخصي للرحلات السابقة والذكريات الجميلة
-              التي صنعتها في كل وجهة.
+              يوميات رحلاتك السابقة: الصور، التقييم، أجمل الذكريات،
+              الأشخاص والأماكن المرتبطة بكل رحلة.
             </p>
           </div>
 
@@ -2460,7 +2780,6 @@
             ? `
               <div class="trips-memory-preview">
                 ${memories
-                  .slice(0, 2)
                   .map(renderMemoryCard)
                   .join("")}
               </div>
@@ -2528,8 +2847,8 @@
               <div>
                 <strong>جواز سفرك ما زال فارغاً</strong>
                 <p>
-                  عند إضافة رحلاتك السابقة ستظهر كل دولة
-                  كمغناطيس سفر مميز داخل هذا القسم.
+                  أضف رحلة سابقة أولاً، وسيتكوّن هذا الجواز تلقائياً
+                  من الدول المسجلة داخل مكتبة سفراتك.
                 </p>
               </div>
             </div>
@@ -2592,6 +2911,8 @@
 
         ${renderOverview(snapshot.statistics)}
       </section>
+
+      ${renderNextTripBrief(snapshot)}
 
       <section class="trips-section">
         <div class="trips-section__header">
