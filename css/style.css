@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Global Premium Design System V2.0.0
+   Global Premium Design System V2.1.0
 
    File Path:
    css/style.css
@@ -11,6 +11,7 @@
    - Stable RTL spacing and typography
    - Correct safe-area handling
    - Unified cards, forms, pages, modals and navigation
+   - Calm and compact Home Page V2.1.0
 ========================================================= */
 
 /* =========================================================
@@ -727,84 +728,328 @@ p {
 }
 
 /* =========================================================
-   11. Home
+   11. Home V2.1.0
 ========================================================= */
 
-.tic-home-hero {
+.tic-home-page {
   display: grid;
-  gap: 20px;
+  gap: 26px;
 }
 
-.tic-home-greeting {
-  font-size: clamp(2rem, 9vw, 3.1rem);
-}
-
-.tic-home-summary {
-  margin-top: 24px;
-}
-
-.tic-quick-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.tic-action-card {
-  min-height: 150px;
-  padding: 17px;
-  border: 1px solid var(--tic-border);
-  border-radius: var(--tic-radius-xl);
-  background: var(--tic-surface);
-  box-shadow: var(--tic-shadow-xs);
-  color: var(--tic-text);
-  text-align: start;
-  cursor: pointer;
-}
-
-.tic-action-card-icon {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  background: var(--tic-primary-soft);
-  color: var(--tic-primary);
-  font-size: 1.12rem;
-}
-
-.tic-action-card h3 {
-  margin-top: 16px;
-  font-size: 0.96rem;
-  font-weight: 900;
-}
-
-.tic-action-card p {
-  margin-top: 6px;
-  color: var(--tic-muted);
-  font-size: 0.8rem;
-  line-height: 1.6;
-}
-
-.tic-feature-card {
-  padding: 20px;
-}
-
-.tic-feature-row {
+.tic-home-welcome {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 18px;
+  min-height: 150px;
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 26px;
+  background:
+    linear-gradient(135deg, #159587 0%, #0f766e 52%, #0c2b3f 100%);
+  box-shadow: 0 18px 40px rgba(15, 118, 110, 0.16);
+  color: #ffffff;
 }
 
-.tic-feature-icon {
+.tic-home-welcome::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 180px;
+  height: 180px;
+  top: -100px;
+  inset-inline-end: -70px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+}
+
+.tic-home-welcome-copy {
+  min-width: 0;
+}
+
+.tic-home-welcome-label {
+  display: block;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+}
+
+.tic-home-welcome h1 {
+  margin-top: 8px;
+  color: #ffffff;
+  font-size: clamp(1.75rem, 7vw, 2.35rem);
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.tic-home-welcome p {
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.tic-home-welcome-icon {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 18px;
-  background: var(--tic-primary-soft);
+  width: 58px;
+  height: 58px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 19px;
+  background: rgba(255, 255, 255, 0.1);
   font-size: 1.55rem;
+}
+
+.tic-home-section {
+  display: grid;
+  gap: 12px;
+}
+
+.tic-home-section-header {
+  padding-inline: 2px;
+}
+
+.tic-home-section-header > span {
+  display: block;
+  color: var(--tic-primary);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.tic-home-section-header h2 {
+  margin-top: 3px;
+  color: var(--tic-navy);
+  font-size: clamp(1.35rem, 5.8vw, 1.7rem);
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+
+.tic-home-section-header p {
+  margin-top: 5px;
+  color: var(--tic-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.tic-home-next-card {
+  padding: 18px;
+  border: 1px solid var(--tic-border);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--tic-shadow-xs);
+}
+
+.tic-home-next-card-empty {
+  min-height: 170px;
+}
+
+.tic-home-next-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tic-home-next-top > div:first-child {
+  min-width: 0;
+}
+
+.tic-home-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: var(--tic-radius-pill);
+  background: var(--tic-primary-soft);
+  color: var(--tic-primary);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.tic-home-next-card h3 {
+  margin-top: 10px;
+  color: var(--tic-text);
+  font-size: 1.08rem;
+  line-height: 1.35;
+  font-weight: 900;
+}
+
+.tic-home-next-card p {
+  margin-top: 5px;
+  color: var(--tic-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.tic-home-next-message {
+  max-width: 420px;
+}
+
+.tic-home-next-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 17px;
+  background: var(--tic-primary-soft);
+  color: var(--tic-primary);
+  font-size: 1.35rem;
+}
+
+.tic-home-trip-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.tic-home-trip-meta > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e8edf3;
+  border-radius: 14px;
+  background: var(--tic-surface-soft);
+}
+
+.tic-home-trip-meta span {
+  display: block;
+  color: var(--tic-muted);
+  font-size: 0.63rem;
+}
+
+.tic-home-trip-meta strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--tic-text);
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-home-next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.tic-home-next-actions .tic-btn {
+  min-height: 42px;
+  padding: 9px 14px;
+  border-radius: 14px;
+  font-size: 0.8rem;
+}
+
+.tic-home-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tic-home-stat {
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  padding: 13px 7px;
+  border: 1px solid var(--tic-border);
+  border-radius: 18px;
+  background: var(--tic-surface);
+  box-shadow: var(--tic-shadow-xs);
+  text-align: center;
+}
+
+.tic-home-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: var(--tic-primary-soft);
+  color: var(--tic-primary);
+  font-size: 0.92rem;
+}
+
+.tic-home-stat strong {
+  margin-top: 8px;
+  color: var(--tic-text);
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.tic-home-stat small {
+  margin-top: 5px;
+  overflow: hidden;
+  width: 100%;
+  color: var(--tic-muted);
+  font-size: 0.64rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-home-inspiration {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #d8eee9;
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, #f7fffd 0%, #edf9f6 100%);
+  box-shadow: var(--tic-shadow-xs);
+}
+
+.tic-home-inspiration-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.08);
+  color: var(--tic-primary);
+  font-size: 1.15rem;
+}
+
+.tic-home-inspiration-copy {
+  min-width: 0;
+}
+
+.tic-home-inspiration-copy > span {
+  display: block;
+  color: var(--tic-primary);
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+
+.tic-home-inspiration h3 {
+  margin-top: 4px;
+  color: var(--tic-text);
+  font-size: 1rem;
+  line-height: 1.4;
+  font-weight: 900;
+}
+
+.tic-home-inspiration p {
+  margin-top: 5px;
+  color: var(--tic-muted);
+  font-size: 0.8rem;
+  line-height: 1.65;
 }
 
 /* =========================================================
@@ -1279,6 +1524,23 @@ p {
   .tic-budget-breakdown {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .tic-home-page {
+    gap: 30px;
+  }
+
+  .tic-home-welcome {
+    min-height: 164px;
+    padding: 26px;
+  }
+
+  .tic-home-next-card {
+    padding: 21px;
+  }
+
+  .tic-home-stats {
+    gap: 12px;
+  }
 }
 
 @media (min-width: 760px) {
@@ -1301,6 +1563,11 @@ p {
 
   .tic-grid-4 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .tic-home-page {
+    max-width: 820px;
+    margin-inline: auto;
   }
 }
 
@@ -1344,6 +1611,62 @@ p {
   .tic-nav-item {
     min-height: 64px;
     border-radius: 18px;
+  }
+
+  .tic-home-page {
+    gap: 22px;
+  }
+
+  .tic-home-welcome {
+    min-height: 138px;
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .tic-home-welcome-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 16px;
+  }
+
+  .tic-home-next-card {
+    padding: 15px;
+    border-radius: 20px;
+  }
+
+  .tic-home-trip-meta {
+    gap: 6px;
+  }
+
+  .tic-home-trip-meta > div {
+    padding: 8px;
+  }
+
+  .tic-home-trip-meta strong {
+    font-size: 0.68rem;
+  }
+
+  .tic-home-stat {
+    padding: 11px 5px;
+    border-radius: 16px;
+  }
+
+  .tic-home-stat-icon {
+    width: 31px;
+    height: 31px;
+  }
+
+  .tic-home-stat strong {
+    font-size: 1.1rem;
+  }
+
+  .tic-home-stat small {
+    font-size: 0.58rem;
+  }
+
+  .tic-home-inspiration {
+    padding: 15px;
+    border-radius: 19px;
   }
 }
 
