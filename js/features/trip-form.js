@@ -1,18 +1,16 @@
 /* =========================================================
    Travel Intelligence Center
-   Trip Form Feature V1.0.0
+   Trip Form Feature V2.0.0
 
    File Path:
    js/features/trip-form.js
 
    Purpose:
-   - Creates and manages the complete new-trip form.
-   - Supports trip creation and trip editing.
+   - Premium iPhone-first trip creation and editing flow.
+   - Clear five-step layout with live summaries.
    - Validates required travel information.
-   - Calculates duration and preliminary budget usage.
-   - Saves data through the central TIC Store.
+   - Saves through the central TIC Store.
    - Integrates with TIC UI and TIC Router.
-   - Keeps all trip form logic isolated in one feature file.
 
    Dependencies:
    - js/config.js
@@ -29,8 +27,8 @@
   "use strict";
 
   const Config = window.TICConfig || window.TIC?.Config || {};
-  const FEATURE_VERSION = "1.0.0";
   const FEATURE_ID = "trip-form";
+  const FEATURE_VERSION = "2.0.0";
 
   const state = {
     initialized: false,
@@ -38,7 +36,6 @@
     activeTripId: null,
     activeContainer: null,
     activeForm: null,
-    listenersBound: false,
     actionUnsubscribers: [],
     subscribers: new Set()
   };
@@ -81,15 +78,13 @@
     !Array.isArray(value);
 
   const clone = (value) => {
-    if (value === undefined) {
-      return undefined;
-    }
+    if (value === undefined) return undefined;
 
     if (typeof structuredClone === "function") {
       try {
         return structuredClone(value);
       } catch (error) {
-        // Continue to JSON fallback.
+        // Continue to fallback.
       }
     }
 
@@ -108,30 +103,34 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
 
-  const normalizeText = (value) =>
+  const text = (value) =>
     String(value ?? "").trim();
 
-  const normalizeNumber = (value, fallback = 0) => {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
+  const number = (value, fallback = 0) => {
+    const result = Number(value);
+    return Number.isFinite(result) ? result : fallback;
   };
 
   const normalizeDate = (value) => {
-    if (!value) {
-      return "";
-    }
+    if (!value) return "";
 
-    const date = value instanceof Date
-      ? value
-      : new Date(value);
+    const date =
+      value instanceof Date
+        ? value
+        : new Date(value);
 
     if (Number.isNaN(date.getTime())) {
       return "";
     }
 
     const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(
+      date.getMonth() + 1
+    ).padStart(2, "0");
+
+    const day = String(
+      date.getDate()
+    ).padStart(2, "0");
 
     return `${year}-${month}-${day}`;
   };
@@ -168,10 +167,7 @@
       try {
         listener(payload);
       } catch (error) {
-        console.error(
-          "TIC Trip Form subscriber error:",
-          error
-        );
+        console.error("TIC Trip Form subscriber error:", error);
       }
     });
 
@@ -192,8 +188,11 @@
       return 0;
     }
 
-    const start = new Date(`${startDate}T00:00:00`);
-    const end = new Date(`${endDate}T00:00:00`);
+    const start =
+      new Date(`${startDate}T00:00:00`);
+
+    const end =
+      new Date(`${endDate}T00:00:00`);
 
     if (
       Number.isNaN(start.getTime()) ||
@@ -203,16 +202,18 @@
       return 0;
     }
 
-    const difference =
-      end.getTime() - start.getTime();
-
-    return Math.floor(
-      difference / 86400000
-    ) + 1;
+    return (
+      Math.floor(
+        (
+          end.getTime() -
+          start.getTime()
+        ) / 86400000
+      ) + 1
+    );
   };
 
   const splitList = (value) =>
-    normalizeText(value)
+    text(value)
       .split(/\n|,/)
       .map((item) => item.trim())
       .filter(Boolean);
@@ -220,22 +221,26 @@
   const joinList = (value) =>
     Array.isArray(value)
       ? value.join("\n")
-      : normalizeText(value);
+      : text(value);
 
   const formatCurrency = (value) => {
     const ui = getUI();
 
-    if (ui && typeof ui.currency === "function") {
+    if (
+      ui &&
+      typeof ui.currency === "function"
+    ) {
       return ui.currency(value);
     }
 
-    return `${normalizeNumber(value).toLocaleString()} ${
+    return `${number(value).toLocaleString()} ${
       Config.currency || "AED"
     }`;
   };
 
   const getDefaultTrip = () => {
     const store = getStore();
+
     const profile =
       store?.get?.("profile") ||
       store?.getState?.()?.profile ||
@@ -284,23 +289,22 @@
       visaRequired: false,
       insuranceRequired: true,
       featured: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt:
+        new Date().toISOString(),
+      updatedAt:
+        new Date().toISOString()
     };
   };
 
   const findTrip = (tripId) => {
-    if (!tripId) {
-      return null;
-    }
+    if (!tripId) return null;
 
     const store = getStore();
+    if (!store) return null;
 
-    if (!store) {
-      return null;
-    }
-
-    if (typeof store.getTripById === "function") {
+    if (
+      typeof store.getTripById === "function"
+    ) {
       return store.getTripById(tripId);
     }
 
@@ -309,24 +313,30 @@
       store.getState?.()?.trips ||
       [];
 
-    if (!Array.isArray(trips)) {
-      return null;
-    }
-
-    return trips.find(
-      (trip) => String(trip.id) === String(tripId)
-    ) || null;
+    return Array.isArray(trips)
+      ? trips.find(
+          (trip) =>
+            String(trip.id) ===
+            String(tripId)
+        ) || null
+      : null;
   };
 
   const mergeTrip = (trip) => ({
     ...getDefaultTrip(),
-    ...(isObject(trip) ? clone(trip) : {}),
+    ...(isObject(trip)
+      ? clone(trip)
+      : {}),
     activities:
       Array.isArray(trip?.activities)
         ? clone(trip.activities)
-        : splitList(trip?.activities || ""),
-    startDate: normalizeDate(trip?.startDate),
-    endDate: normalizeDate(trip?.endDate)
+        : splitList(
+            trip?.activities || ""
+          ),
+    startDate:
+      normalizeDate(trip?.startDate),
+    endDate:
+      normalizeDate(trip?.endDate)
   });
 
   const getActiveTrip = () => {
@@ -334,7 +344,9 @@
       state.activeMode === "edit" &&
       state.activeTripId
     ) {
-      return mergeTrip(findTrip(state.activeTripId));
+      return mergeTrip(
+        findTrip(state.activeTripId)
+      );
     }
 
     return getDefaultTrip();
@@ -362,12 +374,35 @@
       )
       .join("");
 
-  const renderFieldError = (name) => `
+  const renderError = (name) => `
     <small
-      class="tic-field__error"
+      class="tic-form-message"
+      data-type="error"
       data-error-for="${escapeHTML(name)}"
       hidden
     ></small>
+  `;
+
+  const renderStepHeader = (
+    step,
+    title,
+    subtitle
+  ) => `
+    <header class="tic-section-heading">
+      <div class="tic-section-heading-copy">
+        <p class="tic-eyebrow">
+          الخطوة ${step}
+        </p>
+
+        <h2 class="tic-title">
+          ${escapeHTML(title)}
+        </h2>
+
+        <p class="tic-subtitle">
+          ${escapeHTML(subtitle)}
+        </p>
+      </div>
+    </header>
   `;
 
   const renderForm = (trip) => {
@@ -381,68 +416,55 @@
     );
 
     const budgetUsage =
-      trip.budget > 0
+      number(trip.budget) > 0
         ? Math.min(
             100,
             Math.round(
-              (normalizeNumber(trip.spent) /
-                normalizeNumber(trip.budget)) *
-                100
+              (
+                number(trip.spent) /
+                number(trip.budget)
+              ) * 100
             )
           )
         : 0;
 
     const pageTitle = isEditing
       ? "تعديل الرحلة"
-      : "إنشاء رحلة جديدة";
+      : "رحلة جديدة";
 
     const pageSubtitle = isEditing
-      ? "حدّث بيانات الرحلة ثم احفظ التغييرات."
-      : "أدخل تفاصيل رحلتك خطوة بخطوة وسيتم تجهيزها داخل مركز السفر.";
-
-    const hero = ui?.hero
-      ? ui.hero({
-          badge: isEditing
-            ? "Trip Update"
-            : "New Journey",
-          title: pageTitle,
-          subtitle: pageSubtitle,
-          compact: true,
-          actions: [
-            {
-              label: "إلغاء",
-              action: "trip-form-cancel",
-              ghost: true
-            }
-          ]
-        })
-      : `
-        <section class="tic-hero tic-hero--compact">
-          <div class="tic-hero__content">
-            <span class="tic-hero__badge">
-              ${isEditing ? "Trip Update" : "New Journey"}
-            </span>
-            <h1 class="tic-hero__title">
-              ${escapeHTML(pageTitle)}
-            </h1>
-            <p class="tic-hero__subtitle">
-              ${escapeHTML(pageSubtitle)}
-            </p>
-          </div>
-        </section>
-      `;
+      ? "حدّث المعلومات ثم احفظ التغييرات."
+      : "أدخل التفاصيل خطوة بخطوة بطريقة مرتبة وواضحة.";
 
     return `
       <div
-        class="trip-form-feature"
+        class="tic-module"
         data-trip-form-feature
-        data-mode="${escapeHTML(state.activeMode)}"
-        data-trip-id="${escapeHTML(trip.id)}"
+        data-mode="${escapeHTML(
+          state.activeMode
+        )}"
+        data-trip-id="${escapeHTML(
+          trip.id
+        )}"
       >
-        ${hero}
+        ${ui.hero({
+          badge:
+            isEditing
+              ? "Trip Update"
+              : "New Journey",
+          title: pageTitle,
+          subtitle: pageSubtitle,
+          actions: [
+            {
+              label: "إلغاء",
+              action:
+                "trip-form-cancel"
+            }
+          ]
+        })}
 
         <form
-          class="tic-form trip-form"
+          class="tic-form"
           data-trip-form
           novalidate
         >
@@ -452,120 +474,99 @@
             value="${escapeHTML(trip.id)}"
           >
 
-          <section class="tic-section trip-form__section">
-            <header class="tic-section__header">
-              <div class="tic-section__heading">
-                <p class="tic-section__eyebrow">
-                  الخطوة 1
-                </p>
-                <h2 class="tic-section__title">
-                  معلومات الرحلة الأساسية
-                </h2>
-                <p class="tic-section__subtitle">
-                  سمِّ الرحلة وحدد الوجهة ونوع السفر.
-                </p>
-              </div>
-            </header>
+          <section class="tic-page-section">
+            ${renderStepHeader(
+              1,
+              "معلومات الرحلة",
+              "اسم الرحلة والوجهة ونوع السفر."
+            )}
 
-            <div class="tic-section__body">
-              <div class="trip-form__grid trip-form__grid--2">
-                <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-title"
-                  >
+            <div class="tic-card tic-card-body">
+              <div class="tic-form-grid">
+                <div class="tic-field is-full">
+                  <label for="trip-title">
                     اسم الرحلة
-                    <span class="tic-field__required">*</span>
+                    <span>*</span>
                   </label>
 
                   <input
                     id="trip-title"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="title"
-                    value="${escapeHTML(trip.title)}"
+                    value="${escapeHTML(
+                      trip.title
+                    )}"
                     placeholder="مثال: رحلة ألماتي العائلية"
-                    autocomplete="off"
                     required
                   >
 
-                  ${renderFieldError("title")}
+                  ${renderError("title")}
                 </div>
 
-                <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-destination"
-                  >
+                <div class="tic-field is-full">
+                  <label for="trip-destination">
                     الوجهة الرئيسية
-                    <span class="tic-field__required">*</span>
+                    <span>*</span>
                   </label>
 
                   <input
                     id="trip-destination"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="destination"
                     value="${escapeHTML(
                       trip.destination
                     )}"
                     placeholder="مثال: ألماتي، كازاخستان"
-                    autocomplete="off"
                     required
                   >
 
-                  ${renderFieldError("destination")}
+                  ${renderError("destination")}
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-country"
-                  >
+                  <label for="trip-country">
                     الدولة
                   </label>
 
                   <input
                     id="trip-country"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="country"
-                    value="${escapeHTML(trip.country)}"
+                    value="${escapeHTML(
+                      trip.country
+                    )}"
                     placeholder="اسم الدولة"
-                    autocomplete="country-name"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-city"
-                  >
+                  <label for="trip-city">
                     المدينة
                   </label>
 
                   <input
                     id="trip-city"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="city"
-                    value="${escapeHTML(trip.city)}"
+                    value="${escapeHTML(
+                      trip.city
+                    )}"
                     placeholder="اسم المدينة"
-                    autocomplete="address-level2"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-type"
-                  >
+                  <label for="trip-type">
                     نوع الرحلة
                   </label>
 
                   <select
                     id="trip-type"
-                    class="tic-field__control"
+                    class="tic-select"
                     name="tripType"
                   >
                     ${renderOptions(
@@ -576,16 +577,13 @@
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-style"
-                  >
+                  <label for="trip-style">
                     أسلوب السفر
                   </label>
 
                   <select
                     id="trip-style"
-                    class="tic-field__control"
+                    class="tic-select"
                     name="travelStyle"
                   >
                     ${renderOptions(
@@ -596,16 +594,13 @@
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-status"
-                  >
-                    حالة الرحلة
+                  <label for="trip-status">
+                    الحالة
                   </label>
 
                   <select
                     id="trip-status"
-                    class="tic-field__control"
+                    class="tic-select"
                     name="status"
                   >
                     ${renderOptions(
@@ -616,16 +611,13 @@
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-priority"
-                  >
+                  <label for="trip-priority">
                     الأولوية
                   </label>
 
                   <select
                     id="trip-priority"
-                    class="tic-field__control"
+                    class="tic-select"
                     name="priority"
                   >
                     ${renderOptions(
@@ -638,89 +630,81 @@
             </div>
           </section>
 
-          <section class="tic-section trip-form__section">
-            <header class="tic-section__header">
-              <div class="tic-section__heading">
-                <p class="tic-section__eyebrow">
-                  الخطوة 2
-                </p>
-                <h2 class="tic-section__title">
-                  المواعيد والمسافرون
-                </h2>
-                <p class="tic-section__subtitle">
-                  حدد تاريخ الرحلة وعدد المسافرين.
-                </p>
-              </div>
-            </header>
+          <section class="tic-page-section">
+            ${renderStepHeader(
+              2,
+              "المواعيد والمسافرون",
+              "حدد موعد السفر وعدد المسافرين."
+            )}
 
-            <div class="tic-section__body">
-              <div class="trip-form__grid trip-form__grid--2">
+            <div class="tic-card tic-card-body">
+              <div class="tic-form-grid">
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-start-date"
-                  >
+                  <label for="trip-start-date">
                     تاريخ المغادرة
-                    <span class="tic-field__required">*</span>
+                    <span>*</span>
                   </label>
 
                   <input
                     id="trip-start-date"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="date"
                     name="startDate"
-                    value="${escapeHTML(trip.startDate)}"
+                    value="${escapeHTML(
+                      trip.startDate
+                    )}"
                     required
                   >
 
-                  ${renderFieldError("startDate")}
+                  ${renderError("startDate")}
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-end-date"
-                  >
+                  <label for="trip-end-date">
                     تاريخ العودة
-                    <span class="tic-field__required">*</span>
+                    <span>*</span>
                   </label>
 
                   <input
                     id="trip-end-date"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="date"
                     name="endDate"
-                    value="${escapeHTML(trip.endDate)}"
+                    value="${escapeHTML(
+                      trip.endDate
+                    )}"
                     required
                   >
 
-                  ${renderFieldError("endDate")}
+                  ${renderError("endDate")}
                 </div>
 
-                <div class="trip-form__summary-card">
-                  <span class="trip-form__summary-label">
-                    مدة الرحلة
-                  </span>
+                <div class="tic-stat-card">
+                  <div class="tic-stat-icon">
+                    ◷
+                  </div>
+
                   <strong
-                    class="trip-form__summary-value"
+                    class="tic-stat-value"
                     data-trip-duration
                   >
-                    ${duration || 0} يوم
+                    ${duration} يوم
                   </strong>
+
+                  <span class="tic-stat-label">
+                    مدة الرحلة
+                  </span>
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-travelers"
-                  >
+                  <label for="trip-travelers">
                     إجمالي المسافرين
-                    <span class="tic-field__required">*</span>
+                    <span>*</span>
                   </label>
 
                   <input
                     id="trip-travelers"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="number"
                     name="travelers"
                     min="1"
@@ -732,537 +716,522 @@
                     required
                   >
 
-                  ${renderFieldError("travelers")}
+                  ${renderError("travelers")}
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-adults"
-                  >
+                  <label for="trip-adults">
                     البالغون
                   </label>
 
                   <input
                     id="trip-adults"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="number"
                     name="adults"
                     min="0"
                     max="99"
-                    step="1"
-                    value="${escapeHTML(trip.adults)}"
+                    value="${escapeHTML(
+                      trip.adults
+                    )}"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-children"
-                  >
+                  <label for="trip-children">
                     الأطفال
                   </label>
 
                   <input
                     id="trip-children"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="number"
                     name="children"
                     min="0"
                     max="99"
-                    step="1"
-                    value="${escapeHTML(trip.children)}"
+                    value="${escapeHTML(
+                      trip.children
+                    )}"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-infants"
-                  >
+                  <label for="trip-infants">
                     الرضع
                   </label>
 
                   <input
                     id="trip-infants"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="number"
                     name="infants"
                     min="0"
                     max="99"
-                    step="1"
-                    value="${escapeHTML(trip.infants)}"
+                    value="${escapeHTML(
+                      trip.infants
+                    )}"
                   >
                 </div>
               </div>
             </div>
           </section>
 
-          <section class="tic-section trip-form__section">
-            <header class="tic-section__header">
-              <div class="tic-section__heading">
-                <p class="tic-section__eyebrow">
-                  الخطوة 3
-                </p>
-                <h2 class="tic-section__title">
-                  الميزانية
-                </h2>
-                <p class="tic-section__subtitle">
-                  حدد الميزانية المتوقعة والمبلغ المصروف.
-                </p>
-              </div>
-            </header>
+          <section class="tic-page-section">
+            ${renderStepHeader(
+              3,
+              "الميزانية",
+              "حدد الميزانية والمبلغ المصروف."
+            )}
 
-            <div class="tic-section__body">
-              <div class="trip-form__grid trip-form__grid--2">
+            <div class="tic-card tic-card-body">
+              <div class="tic-form-grid">
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-budget"
-                  >
+                  <label for="trip-budget">
                     الميزانية الإجمالية
-                    <span class="tic-field__required">*</span>
+                    <span>*</span>
                   </label>
 
                   <input
                     id="trip-budget"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="number"
                     name="budget"
                     min="0"
                     step="0.01"
-                    value="${escapeHTML(trip.budget)}"
-                    placeholder="0"
+                    value="${escapeHTML(
+                      trip.budget
+                    )}"
                     required
                   >
 
-                  ${renderFieldError("budget")}
+                  ${renderError("budget")}
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-spent"
-                  >
+                  <label for="trip-spent">
                     المصروف حتى الآن
                   </label>
 
                   <input
                     id="trip-spent"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="number"
                     name="spent"
                     min="0"
                     step="0.01"
-                    value="${escapeHTML(trip.spent)}"
-                    placeholder="0"
+                    value="${escapeHTML(
+                      trip.spent
+                    )}"
                   >
                 </div>
 
-                <div class="trip-form__budget-card">
-                  <div class="trip-form__budget-header">
-                    <span>استخدام الميزانية</span>
+                <div class="tic-field is-full">
+                  <div class="tic-budget-overview">
+                    <small>
+                      استخدام الميزانية
+                    </small>
+
                     <strong data-budget-percentage>
                       ${budgetUsage}%
                     </strong>
-                  </div>
 
-                  <div class="tic-progress__track">
-                    <span
-                      class="tic-progress__bar"
-                      data-budget-progress
-                      style="width:${budgetUsage}%"
-                    ></span>
-                  </div>
+                    <div style="margin-top:16px">
+                      <div class="tic-progress">
+                        <span
+                          class="tic-progress-bar"
+                          data-budget-progress
+                          style="width:${budgetUsage}%"
+                        ></span>
+                      </div>
+                    </div>
 
-                  <p
-                    class="trip-form__budget-caption"
-                    data-budget-caption
-                  >
-                    ${formatCurrency(
-                      trip.spent
-                    )} من ${formatCurrency(
-                      trip.budget
-                    )}
-                  </p>
+                    <p
+                      data-budget-caption
+                      style="margin-top:12px;color:rgba(255,255,255,.72)"
+                    >
+                      ${formatCurrency(
+                        trip.spent
+                      )}
+                      من
+                      ${formatCurrency(
+                        trip.budget
+                      )}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
           </section>
 
-          <section class="tic-section trip-form__section">
-            <header class="tic-section__header">
-              <div class="tic-section__heading">
-                <p class="tic-section__eyebrow">
-                  الخطوة 4
-                </p>
-                <h2 class="tic-section__title">
-                  الطيران والإقامة
-                </h2>
-                <p class="tic-section__subtitle">
-                  أضف معلومات الحجز الأساسية إن كانت متوفرة.
-                </p>
-              </div>
-            </header>
+          <section class="tic-page-section">
+            ${renderStepHeader(
+              4,
+              "الطيران والإقامة",
+              "أضف معلومات الحجز الأساسية."
+            )}
 
-            <div class="tic-section__body">
-              <div class="trip-form__grid trip-form__grid--2">
+            <div class="tic-card tic-card-body">
+              <div class="tic-form-grid">
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-departure-airport"
-                  >
+                  <label for="trip-departure-airport">
                     مطار المغادرة
                   </label>
 
                   <input
                     id="trip-departure-airport"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="departureAirport"
                     value="${escapeHTML(
                       trip.departureAirport
                     )}"
-                    placeholder="مثال: مطار أبوظبي الدولي"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-arrival-airport"
-                  >
+                  <label for="trip-arrival-airport">
                     مطار الوصول
                   </label>
 
                   <input
                     id="trip-arrival-airport"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="arrivalAirport"
                     value="${escapeHTML(
                       trip.arrivalAirport
                     )}"
-                    placeholder="مطار الوصول"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-airline"
-                  >
+                  <label for="trip-airline">
                     شركة الطيران
                   </label>
 
                   <input
                     id="trip-airline"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="airline"
-                    value="${escapeHTML(trip.airline)}"
-                    placeholder="اسم شركة الطيران"
+                    value="${escapeHTML(
+                      trip.airline
+                    )}"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-flight-number"
-                  >
+                  <label for="trip-flight-number">
                     رقم الرحلة
                   </label>
 
                   <input
                     id="trip-flight-number"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="flightNumber"
                     value="${escapeHTML(
                       trip.flightNumber
                     )}"
-                    placeholder="مثال: EY123"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-accommodation"
-                  >
+                  <label for="trip-accommodation">
                     مكان الإقامة
                   </label>
 
                   <input
                     id="trip-accommodation"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="accommodation"
                     value="${escapeHTML(
                       trip.accommodation
                     )}"
-                    placeholder="اسم الفندق أو الشقة"
                   >
                 </div>
 
                 <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-booking-reference"
-                  >
+                  <label for="trip-booking-reference">
                     رقم الحجز
                   </label>
 
                   <input
                     id="trip-booking-reference"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="bookingReference"
                     value="${escapeHTML(
                       trip.bookingReference
                     )}"
-                    placeholder="رقم أو رمز الحجز"
                   >
                 </div>
 
-                <div class="tic-field trip-form__field--full">
-                  <label
-                    class="tic-field__label"
-                    for="trip-accommodation-address"
-                  >
+                <div class="tic-field is-full">
+                  <label for="trip-accommodation-address">
                     عنوان الإقامة
                   </label>
 
                   <input
                     id="trip-accommodation-address"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="accommodationAddress"
                     value="${escapeHTML(
                       trip.accommodationAddress
                     )}"
-                    placeholder="العنوان الكامل"
                   >
                 </div>
 
-                <div class="tic-field trip-form__field--full">
-                  <label
-                    class="tic-field__label"
-                    for="trip-transport"
-                  >
+                <div class="tic-field is-full">
+                  <label for="trip-transport">
                     التنقل داخل الوجهة
                   </label>
 
                   <input
                     id="trip-transport"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="transport"
                     value="${escapeHTML(
                       trip.transport
                     )}"
-                    placeholder="سيارة، سائق، قطار، مواصلات عامة..."
                   >
                 </div>
               </div>
             </div>
           </section>
 
-          <section class="tic-section trip-form__section">
-            <header class="tic-section__header">
-              <div class="tic-section__heading">
-                <p class="tic-section__eyebrow">
-                  الخطوة 5
-                </p>
-                <h2 class="tic-section__title">
-                  الأنشطة والملاحظات
-                </h2>
-                <p class="tic-section__subtitle">
-                  أضف الأنشطة المخطط لها وأي تفاصيل مهمة.
-                </p>
-              </div>
-            </header>
+          <section class="tic-page-section">
+            ${renderStepHeader(
+              5,
+              "الأنشطة والملاحظات",
+              "أضف الأنشطة والتفاصيل المهمة."
+            )}
 
-            <div class="tic-section__body">
-              <div class="trip-form__grid trip-form__grid--2">
-                <div class="tic-field trip-form__field--full">
-                  <label
-                    class="tic-field__label"
-                    for="trip-activities"
-                  >
+            <div class="tic-card tic-card-body">
+              <div class="tic-form-grid">
+                <div class="tic-field is-full">
+                  <label for="trip-activities">
                     الأنشطة
                   </label>
 
                   <textarea
                     id="trip-activities"
-                    class="tic-field__control"
+                    class="tic-textarea"
                     name="activities"
                     rows="6"
                     placeholder="اكتب كل نشاط في سطر منفصل"
                   >${escapeHTML(
-                    joinList(trip.activities)
+                    joinList(
+                      trip.activities
+                    )
                   )}</textarea>
                 </div>
 
-                <div class="tic-field trip-form__field--full">
-                  <label
-                    class="tic-field__label"
-                    for="trip-notes"
-                  >
+                <div class="tic-field is-full">
+                  <label for="trip-notes">
                     ملاحظات الرحلة
                   </label>
 
                   <textarea
                     id="trip-notes"
-                    class="tic-field__control"
+                    class="tic-textarea"
                     name="notes"
                     rows="5"
-                    placeholder="معلومات مهمة، تفضيلات، تنبيهات..."
-                  >${escapeHTML(trip.notes)}</textarea>
+                    placeholder="معلومات مهمة أو تفضيلات خاصة"
+                  >${escapeHTML(
+                    trip.notes
+                  )}</textarea>
                 </div>
 
-                <div class="tic-field">
-                  <label
-                    class="tic-field__label"
-                    for="trip-emergency-contact"
-                  >
+                <div class="tic-field is-full">
+                  <label for="trip-emergency-contact">
                     جهة اتصال للطوارئ
                   </label>
 
                   <input
                     id="trip-emergency-contact"
-                    class="tic-field__control"
+                    class="tic-input"
                     type="text"
                     name="emergencyContact"
                     value="${escapeHTML(
                       trip.emergencyContact
                     )}"
-                    placeholder="الاسم ورقم الهاتف"
                   >
                 </div>
 
-                <div class="trip-form__choices">
-                  <label class="tic-choice">
-                    <input
-                      class="tic-choice__input"
-                      type="checkbox"
-                      name="visaRequired"
-                      value="true"
-                      ${
-                        trip.visaRequired
-                          ? "checked"
-                          : ""
-                      }
-                    >
-                    <span class="tic-choice__control"></span>
-                    <span class="tic-choice__label">
-                      تحتاج تأشيرة
-                    </span>
-                  </label>
+                <div class="tic-field is-full">
+                  <div class="tic-settings-list">
+                    <label class="tic-settings-item">
+                      <div class="tic-settings-item-main">
+                        <div class="tic-settings-icon">
+                          ▣
+                        </div>
 
-                  <label class="tic-choice">
-                    <input
-                      class="tic-choice__input"
-                      type="checkbox"
-                      name="insuranceRequired"
-                      value="true"
-                      ${
-                        trip.insuranceRequired
-                          ? "checked"
-                          : ""
-                      }
-                    >
-                    <span class="tic-choice__control"></span>
-                    <span class="tic-choice__label">
-                      تحتاج تأمين سفر
-                    </span>
-                  </label>
+                        <div class="tic-settings-copy">
+                          <strong>
+                            تحتاج تأشيرة
+                          </strong>
 
-                  <label class="tic-choice">
-                    <input
-                      class="tic-choice__input"
-                      type="checkbox"
-                      name="featured"
-                      value="true"
-                      ${
-                        trip.featured
-                          ? "checked"
-                          : ""
-                      }
-                    >
-                    <span class="tic-choice__control"></span>
-                    <span class="tic-choice__label">
-                      عرضها كرحلة مميزة
-                    </span>
-                  </label>
+                          <small>
+                            أضفها إلى متطلبات الرحلة.
+                          </small>
+                        </div>
+                      </div>
+
+                      <input
+                        type="checkbox"
+                        name="visaRequired"
+                        value="true"
+                        ${
+                          trip.visaRequired
+                            ? "checked"
+                            : ""
+                        }
+                      >
+                    </label>
+
+                    <label class="tic-settings-item">
+                      <div class="tic-settings-item-main">
+                        <div class="tic-settings-icon">
+                          ✓
+                        </div>
+
+                        <div class="tic-settings-copy">
+                          <strong>
+                            تحتاج تأمين سفر
+                          </strong>
+
+                          <small>
+                            تذكير بالتأمين قبل السفر.
+                          </small>
+                        </div>
+                      </div>
+
+                      <input
+                        type="checkbox"
+                        name="insuranceRequired"
+                        value="true"
+                        ${
+                          trip.insuranceRequired
+                            ? "checked"
+                            : ""
+                        }
+                      >
+                    </label>
+
+                    <label class="tic-settings-item">
+                      <div class="tic-settings-item-main">
+                        <div class="tic-settings-icon">
+                          ★
+                        </div>
+
+                        <div class="tic-settings-copy">
+                          <strong>
+                            رحلة مميزة
+                          </strong>
+
+                          <small>
+                            تظهر بشكل بارز في الرئيسية.
+                          </small>
+                        </div>
+                      </div>
+
+                      <input
+                        type="checkbox"
+                        name="featured"
+                        value="true"
+                        ${
+                          trip.featured
+                            ? "checked"
+                            : ""
+                        }
+                      >
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
           </section>
 
-          <footer class="trip-form__footer">
-            <button
-              type="button"
-              class="button button--secondary"
-              data-action="trip-form-cancel"
-            >
-              إلغاء
-            </button>
+          <div
+            class="tic-card tic-card-body"
+            style="margin-top:24px"
+          >
+            <div class="tic-grid tic-grid-2">
+              ${ui.button({
+                label: "إلغاء",
+                action: "trip-form-cancel",
+                block: true
+              })}
 
-            <button
-              type="submit"
-              class="button button--primary"
-              data-trip-form-submit
-            >
-              ${
-                isEditing
-                  ? "حفظ التعديلات"
-                  : "إنشاء الرحلة"
-              }
-            </button>
-          </footer>
+              ${ui.button({
+                label:
+                  isEditing
+                    ? "حفظ التعديلات"
+                    : "إنشاء الرحلة",
+                type: "submit",
+                primary: true,
+                block: true,
+                attributes: {
+                  "data-trip-form-submit": ""
+                }
+              })}
+            </div>
+          </div>
         </form>
       </div>
     `;
   };
 
   const getFormData = (form) => {
-    const formData = new FormData(form);
+    const formData =
+      new FormData(form);
 
     const data = {
       id:
-        normalizeText(formData.get("id")) ||
+        text(formData.get("id")) ||
         createId(),
-      title: normalizeText(formData.get("title")),
-      destination: normalizeText(
-        formData.get("destination")
-      ),
-      country: normalizeText(
-        formData.get("country")
-      ),
-      city: normalizeText(formData.get("city")),
-      tripType: normalizeText(
-        formData.get("tripType")
-      ),
-      travelStyle: normalizeText(
-        formData.get("travelStyle")
-      ),
+      title:
+        text(formData.get("title")),
+      destination:
+        text(
+          formData.get(
+            "destination"
+          )
+        ),
+      country:
+        text(formData.get("country")),
+      city:
+        text(formData.get("city")),
+      tripType:
+        text(formData.get("tripType")),
+      travelStyle:
+        text(
+          formData.get(
+            "travelStyle"
+          )
+        ),
       status:
-        normalizeText(formData.get("status")) ||
+        text(formData.get("status")) ||
         "planning",
       priority:
-        normalizeText(formData.get("priority")) ||
+        text(formData.get("priority")) ||
         "normal",
-      startDate: normalizeDate(
-        formData.get("startDate")
-      ),
-      endDate: normalizeDate(
-        formData.get("endDate")
-      ),
+      startDate:
+        normalizeDate(
+          formData.get("startDate")
+        ),
+      endDate:
+        normalizeDate(
+          formData.get("endDate")
+        ),
       travelers: Math.max(
         1,
         Math.round(
-          normalizeNumber(
+          number(
             formData.get("travelers"),
             1
           )
@@ -1271,84 +1240,108 @@
       adults: Math.max(
         0,
         Math.round(
-          normalizeNumber(
-            formData.get("adults"),
-            0
+          number(
+            formData.get("adults")
           )
         )
       ),
       children: Math.max(
         0,
         Math.round(
-          normalizeNumber(
-            formData.get("children"),
-            0
+          number(
+            formData.get("children")
           )
         )
       ),
       infants: Math.max(
         0,
         Math.round(
-          normalizeNumber(
-            formData.get("infants"),
-            0
+          number(
+            formData.get("infants")
           )
         )
       ),
       budget: Math.max(
         0,
-        normalizeNumber(formData.get("budget"))
+        number(formData.get("budget"))
       ),
       spent: Math.max(
         0,
-        normalizeNumber(formData.get("spent"))
+        number(formData.get("spent"))
       ),
       currency:
-        Config.currency ||
-        "AED",
-      departureAirport: normalizeText(
-        formData.get("departureAirport")
-      ),
-      arrivalAirport: normalizeText(
-        formData.get("arrivalAirport")
-      ),
-      airline: normalizeText(
-        formData.get("airline")
-      ),
-      flightNumber: normalizeText(
-        formData.get("flightNumber")
-      ),
-      accommodation: normalizeText(
-        formData.get("accommodation")
-      ),
-      accommodationAddress: normalizeText(
-        formData.get("accommodationAddress")
-      ),
-      bookingReference: normalizeText(
-        formData.get("bookingReference")
-      ),
-      transport: normalizeText(
-        formData.get("transport")
-      ),
-      activities: splitList(
-        formData.get("activities")
-      ),
-      notes: normalizeText(formData.get("notes")),
-      emergencyContact: normalizeText(
-        formData.get("emergencyContact")
-      ),
+        Config.currency || "AED",
+      departureAirport:
+        text(
+          formData.get(
+            "departureAirport"
+          )
+        ),
+      arrivalAirport:
+        text(
+          formData.get(
+            "arrivalAirport"
+          )
+        ),
+      airline:
+        text(formData.get("airline")),
+      flightNumber:
+        text(
+          formData.get(
+            "flightNumber"
+          )
+        ),
+      accommodation:
+        text(
+          formData.get(
+            "accommodation"
+          )
+        ),
+      accommodationAddress:
+        text(
+          formData.get(
+            "accommodationAddress"
+          )
+        ),
+      bookingReference:
+        text(
+          formData.get(
+            "bookingReference"
+          )
+        ),
+      transport:
+        text(formData.get("transport")),
+      activities:
+        splitList(
+          formData.get("activities")
+        ),
+      notes:
+        text(formData.get("notes")),
+      emergencyContact:
+        text(
+          formData.get(
+            "emergencyContact"
+          )
+        ),
       visaRequired:
-        formData.get("visaRequired") === "true",
+        formData.get(
+          "visaRequired"
+        ) === "true",
       insuranceRequired:
-        formData.get("insuranceRequired") === "true",
+        formData.get(
+          "insuranceRequired"
+        ) === "true",
       featured:
-        formData.get("featured") === "true"
+        formData.get(
+          "featured"
+        ) === "true"
     };
 
-    data.durationDays = calculateDuration(
-      data.startDate,
-      data.endDate
-    );
+    data.durationDays =
+      calculateDuration(
+        data.startDate,
+        data.endDate
+      );
 
     return data;
   };
@@ -1357,25 +1350,30 @@
     const errors = {};
 
     if (!data.title) {
-      errors.title = "أدخل اسم الرحلة.";
+      errors.title =
+        "أدخل اسم الرحلة.";
     }
 
     if (!data.destination) {
-      errors.destination = "أدخل الوجهة الرئيسية.";
+      errors.destination =
+        "أدخل الوجهة الرئيسية.";
     }
 
     if (!data.startDate) {
-      errors.startDate = "حدد تاريخ المغادرة.";
+      errors.startDate =
+        "حدد تاريخ المغادرة.";
     }
 
     if (!data.endDate) {
-      errors.endDate = "حدد تاريخ العودة.";
+      errors.endDate =
+        "حدد تاريخ العودة.";
     }
 
     if (
       data.startDate &&
       data.endDate &&
-      new Date(data.endDate) < new Date(data.startDate)
+      new Date(data.endDate) <
+        new Date(data.startDate)
     ) {
       errors.endDate =
         "تاريخ العودة يجب أن يكون بعد تاريخ المغادرة.";
@@ -1383,7 +1381,7 @@
 
     if (data.travelers < 1) {
       errors.travelers =
-        "يجب أن يكون عدد المسافرين واحداً على الأقل.";
+        "عدد المسافرين يجب أن يكون واحداً على الأقل.";
     }
 
     if (data.budget < 0) {
@@ -1391,13 +1389,9 @@
         "الميزانية لا يمكن أن تكون سالبة.";
     }
 
-    if (data.spent < 0) {
-      errors.spent =
-        "المبلغ المصروف لا يمكن أن يكون سالباً.";
-    }
-
     return {
-      valid: Object.keys(errors).length === 0,
+      valid:
+        Object.keys(errors).length === 0,
       errors
     };
   };
@@ -1413,13 +1407,19 @@
     form
       .querySelectorAll(".tic-field.has-error")
       .forEach((element) => {
-        element.classList.remove("has-error");
+        element.classList.remove(
+          "has-error"
+        );
       });
 
     form
-      .querySelectorAll("[aria-invalid='true']")
+      .querySelectorAll(
+        "[aria-invalid='true']"
+      )
       .forEach((element) => {
-        element.removeAttribute("aria-invalid");
+        element.removeAttribute(
+          "aria-invalid"
+        );
       });
   };
 
@@ -1428,46 +1428,48 @@
 
     Object.entries(errors).forEach(
       ([name, message]) => {
-        const input = form.elements[name];
-        const errorElement = form.querySelector(
-          `[data-error-for="${name}"]`
-        );
+        const input =
+          form.elements[name];
+
+        const errorElement =
+          form.querySelector(
+            `[data-error-for="${name}"]`
+          );
 
         if (input) {
-          input.setAttribute("aria-invalid", "true");
+          input.setAttribute(
+            "aria-invalid",
+            "true"
+          );
 
-          const field = input.closest(".tic-field");
-
-          if (field) {
-            field.classList.add("has-error");
-          }
+          input
+            .closest(".tic-field")
+            ?.classList.add(
+              "has-error"
+            );
         }
 
         if (errorElement) {
-          errorElement.textContent = message;
+          errorElement.textContent =
+            message;
+
           errorElement.hidden = false;
         }
       }
     );
 
-    const firstErrorName =
+    const first =
       Object.keys(errors)[0];
 
-    if (firstErrorName && form.elements[firstErrorName]) {
-      form.elements[firstErrorName].focus();
-    }
+    form.elements[first]?.focus();
   };
 
   const getTrips = () => {
     const store = getStore();
 
-    if (!store) {
-      return [];
-    }
-
     const trips =
-      store.get?.("trips") ||
-      store.getState?.()?.trips ||
+      store?.get?.("trips") ||
+      store?.getState?.()?.trips ||
       [];
 
     return Array.isArray(trips)
@@ -1480,7 +1482,7 @@
 
     if (!store) {
       throw new Error(
-        "TIC Trip Form Error: store is not available."
+        "TIC Trip Form Error: store is unavailable."
       );
     }
 
@@ -1490,9 +1492,7 @@
     }
 
     if (typeof store.patch === "function") {
-      store.patch({
-        trips
-      });
+      store.patch({ trips });
       return true;
     }
 
@@ -1505,7 +1505,7 @@
     }
 
     throw new Error(
-      "TIC Trip Form Error: store does not support trip persistence."
+      "TIC Trip Form Error: persistence is unavailable."
     );
   };
 
@@ -1514,138 +1514,165 @@
 
     if (!store) {
       throw new Error(
-        "TIC Trip Form Error: store is not available."
+        "TIC Trip Form Error: store is unavailable."
       );
     }
 
-    const now = new Date().toISOString();
+    const now =
+      new Date().toISOString();
 
     if (state.activeMode === "edit") {
-      const existingTrip =
-        findTrip(state.activeTripId) || {};
+      const existing =
+        findTrip(
+          state.activeTripId
+        ) || {};
 
-      const updatedTrip = {
-        ...existingTrip,
+      const updated = {
+        ...existing,
         ...tripData,
-        id: existingTrip.id || tripData.id,
+        id:
+          existing.id ||
+          tripData.id,
         createdAt:
-          existingTrip.createdAt ||
+          existing.createdAt ||
           tripData.createdAt ||
           now,
         updatedAt: now
       };
 
-      if (typeof store.updateTrip === "function") {
+      if (
+        typeof store.updateTrip ===
+        "function"
+      ) {
         await store.updateTrip(
-          updatedTrip.id,
-          updatedTrip
+          updated.id,
+          updated
         );
 
-        return updatedTrip;
+        return updated;
       }
 
-      if (typeof store.upsertTrip === "function") {
-        await store.upsertTrip(updatedTrip);
-        return updatedTrip;
+      if (
+        typeof store.upsertTrip ===
+        "function"
+      ) {
+        await store.upsertTrip(updated);
+        return updated;
       }
 
       const trips = getTrips();
+
       const index = trips.findIndex(
         (trip) =>
           String(trip.id) ===
-          String(updatedTrip.id)
+          String(updated.id)
       );
 
       if (index >= 0) {
-        trips[index] = updatedTrip;
+        trips[index] = updated;
       } else {
-        trips.unshift(updatedTrip);
+        trips.unshift(updated);
       }
 
       saveTripsFallback(trips);
-      return updatedTrip;
+
+      return updated;
     }
 
-    const newTrip = {
+    const created = {
       ...tripData,
-      id: tripData.id || createId(),
+      id:
+        tripData.id ||
+        createId(),
       createdAt: now,
       updatedAt: now
     };
 
-    if (typeof store.addTrip === "function") {
-      const result = await store.addTrip(newTrip);
-      return result || newTrip;
+    if (
+      typeof store.addTrip === "function"
+    ) {
+      return (
+        (await store.addTrip(created)) ||
+        created
+      );
     }
 
-    if (typeof store.createTrip === "function") {
-      const result = await store.createTrip(newTrip);
-      return result || newTrip;
+    if (
+      typeof store.createTrip === "function"
+    ) {
+      return (
+        (await store.createTrip(created)) ||
+        created
+      );
     }
 
-    if (typeof store.upsertTrip === "function") {
-      await store.upsertTrip(newTrip);
-      return newTrip;
+    if (
+      typeof store.upsertTrip === "function"
+    ) {
+      await store.upsertTrip(created);
+      return created;
     }
 
     const trips = getTrips();
-    trips.unshift(newTrip);
+    trips.unshift(created);
     saveTripsFallback(trips);
 
-    return newTrip;
+    return created;
   };
 
   const updateLiveSummary = (form) => {
-    if (!form) {
-      return;
-    }
+    if (!form) return;
 
-    const startDate =
-      form.elements.startDate?.value || "";
-    const endDate =
-      form.elements.endDate?.value || "";
+    const duration =
+      calculateDuration(
+        form.elements.startDate?.value,
+        form.elements.endDate?.value
+      );
 
-    const duration = calculateDuration(
-      startDate,
-      endDate
-    );
-
-    const durationElement = form.querySelector(
-      "[data-trip-duration]"
-    );
+    const durationElement =
+      form.querySelector(
+        "[data-trip-duration]"
+      );
 
     if (durationElement) {
       durationElement.textContent =
         `${duration} يوم`;
     }
 
-    const budget = normalizeNumber(
-      form.elements.budget?.value
-    );
+    const budget =
+      number(
+        form.elements.budget?.value
+      );
 
-    const spent = normalizeNumber(
-      form.elements.spent?.value
-    );
+    const spent =
+      number(
+        form.elements.spent?.value
+      );
 
     const percentage =
       budget > 0
         ? Math.min(
             100,
-            Math.round((spent / budget) * 100)
+            Math.round(
+              (spent / budget) * 100
+            )
           )
         : 0;
 
-    const percentageElement = form.querySelector(
-      "[data-budget-percentage]"
-    );
+    const percentageElement =
+      form.querySelector(
+        "[data-budget-percentage]"
+      );
 
-    const progressElement = form.querySelector(
-      "[data-budget-progress]"
-    );
+    const progressElement =
+      form.querySelector(
+        "[data-budget-progress]"
+      );
 
-    const captionElement = form.querySelector(
-      "[data-budget-caption]"
-    );
+    const captionElement =
+      form.querySelector(
+        "[data-budget-caption]"
+      );
 
     if (percentageElement) {
       percentageElement.textContent =
@@ -1670,15 +1697,20 @@
 
     const form = event.currentTarget;
     const ui = getUI();
-    const submitButton = form.querySelector(
-      "[data-trip-form-submit]"
-    );
+
+    const submitButton =
+      form.querySelector(
+        "[data-trip-form-submit]"
+      );
 
     const data = getFormData(form);
     const validation = validate(data);
 
     if (!validation.valid) {
-      showErrors(form, validation.errors);
+      showErrors(
+        form,
+        validation.errors
+      );
 
       ui?.toast?.(
         "راجع الحقول المطلوبة قبل الحفظ.",
@@ -1686,7 +1718,8 @@
       );
 
       emit("validation-failed", {
-        errors: validation.errors
+        errors:
+          validation.errors
       });
 
       return false;
@@ -1705,11 +1738,12 @@
     try {
       ui?.showLoader?.(
         state.activeMode === "edit"
-          ? "جاري حفظ تعديلات الرحلة..."
+          ? "جاري حفظ التعديلات..."
           : "جاري إنشاء الرحلة..."
       );
 
-      const savedTrip = await saveTrip(data);
+      const savedTrip =
+        await saveTrip(data);
 
       ui?.toast?.(
         state.activeMode === "edit"
@@ -1723,20 +1757,17 @@
         trip: savedTrip
       });
 
-      const router = getRouter();
-
-      if (
-        router &&
-        typeof router.go === "function"
-      ) {
-        await router.go("trips", {
+      await getRouter()?.go?.(
+        "trips",
+        {
           params: {
             tripId: savedTrip.id,
             view: "details"
           },
-          source: "trip-form-save"
-        });
-      }
+          source:
+            "trip-form-save"
+        }
+      );
 
       return savedTrip;
     } catch (error) {
@@ -1746,18 +1777,9 @@
       );
 
       ui?.toast?.(
-        "تعذر حفظ الرحلة. حاول مرة أخرى.",
+        "تعذر حفظ الرحلة.",
         "error"
       );
-
-      emit("save-error", {
-        error: {
-          name: error?.name || "Error",
-          message:
-            error?.message ||
-            String(error)
-        }
-      });
 
       return false;
     } finally {
@@ -1777,37 +1799,39 @@
 
     updateLiveSummary(form);
 
-    const name = event.target?.name;
+    const name =
+      event.target?.name;
 
-    if (name) {
-      const errorElement = form.querySelector(
+    if (!name) return;
+
+    const errorElement =
+      form.querySelector(
         `[data-error-for="${name}"]`
       );
 
-      if (errorElement) {
-        errorElement.textContent = "";
-        errorElement.hidden = true;
-      }
-
-      event.target.removeAttribute("aria-invalid");
-
-      const field =
-        event.target.closest(".tic-field");
-
-      if (field) {
-        field.classList.remove("has-error");
-      }
+    if (errorElement) {
+      errorElement.textContent = "";
+      errorElement.hidden = true;
     }
+
+    event.target.removeAttribute(
+      "aria-invalid"
+    );
+
+    event.target
+      .closest(".tic-field")
+      ?.classList.remove(
+        "has-error"
+      );
   };
 
   const bindForm = (container) => {
-    const form = container?.querySelector(
-      "[data-trip-form]"
-    );
+    const form =
+      container?.querySelector(
+        "[data-trip-form]"
+      );
 
-    if (!form) {
-      return false;
-    }
+    if (!form) return false;
 
     if (state.activeForm) {
       state.activeForm.removeEventListener(
@@ -1880,36 +1904,44 @@
         ui &&
         typeof ui.registerAction === "function"
       ) {
-        state.actionUnsubscribers.push(
-          ui.registerAction(
-            "new-trip",
-            () => this.openCreate()
-          )
+        const register = (
+          name,
+          handler
+        ) => {
+          if (ui.hasAction?.(name)) {
+            return;
+          }
+
+          state.actionUnsubscribers.push(
+            ui.registerAction(
+              name,
+              handler
+            )
+          );
+        };
+
+        register(
+          "new-trip",
+          () => this.openCreate()
         );
 
-        state.actionUnsubscribers.push(
-          ui.registerAction(
-            "create-trip",
-            () => this.openCreate()
-          )
+        register(
+          "create-trip",
+          () => this.openCreate()
         );
 
-        state.actionUnsubscribers.push(
-          ui.registerAction(
-            "edit-trip",
-            ({ params }) =>
-              this.openEdit(
-                params.tripId ||
-                params.id
-              )
-          )
+        register(
+          "edit-trip",
+          ({ params }) =>
+            this.openEdit(
+              params.tripId ||
+              params.id
+            )
         );
 
-        state.actionUnsubscribers.push(
-          ui.registerAction(
-            "trip-form-cancel",
-            () => this.cancel()
-          )
+        register(
+          "trip-form-cancel",
+          () => this.cancel()
         );
       }
 
@@ -1927,6 +1959,7 @@
 
       state.activeMode =
         context.mode === "edit" ||
+        context.params?.mode === "edit" ||
         context.params?.tripId
           ? "edit"
           : "create";
@@ -1936,26 +1969,31 @@
         context.params?.tripId ||
         null;
 
-      const container = resolveContainer(
-        context.container
-      );
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (!container) {
         throw new Error(
-          "TIC Trip Form Error: route container was not found."
+          "TIC Trip Form Error: route container not found."
         );
       }
 
-      state.activeContainer = container;
+      state.activeContainer =
+        container;
 
-      const trip = getActiveTrip();
-      container.innerHTML = renderForm(trip);
+      container.innerHTML =
+        renderForm(
+          getActiveTrip()
+        );
 
       bindForm(container);
 
       emit("mounted", {
         mode: state.activeMode,
-        tripId: state.activeTripId
+        tripId:
+          state.activeTripId
       });
 
       return container;
@@ -1966,6 +2004,7 @@
 
       state.activeMode =
         context.mode === "edit" ||
+        context.params?.mode === "edit" ||
         context.params?.tripId
           ? "edit"
           : "create";
@@ -1975,16 +2014,21 @@
         context.params?.tripId ||
         null;
 
-      return renderForm(getActiveTrip());
+      return renderForm(
+        getActiveTrip()
+      );
     },
 
     afterEnter(context = {}) {
-      const container = resolveContainer(
-        context.container
-      );
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (container) {
-        state.activeContainer = container;
+        state.activeContainer =
+          container;
+
         bindForm(container);
       }
 
@@ -2014,7 +2058,8 @@
 
       emit("unmounted", {
         mode: state.activeMode,
-        tripId: state.activeTripId
+        tripId:
+          state.activeTripId
       });
 
       return true;
@@ -2032,19 +2077,24 @@
         router &&
         typeof router.go === "function"
       ) {
-        return router.go("trip-form", {
-          ...options,
-          params: {
-            ...(options.params || {}),
-            mode: "create"
-          },
-          source: "trip-form-open-create"
-        });
+        return router.go(
+          "trip-form",
+          {
+            ...options,
+            params: {
+              ...(options.params || {}),
+              mode: "create"
+            },
+            source:
+              "trip-form-open-create"
+          }
+        );
       }
 
-      const container = resolveContainer(
-        options.container
-      );
+      const container =
+        resolveContainer(
+          options.container
+        );
 
       if (container) {
         this.mount({
@@ -2065,7 +2115,7 @@
 
       if (!trip) {
         getUI()?.toast?.(
-          "تعذر العثور على الرحلة المطلوبة.",
+          "تعذر العثور على الرحلة.",
           "error"
         );
 
@@ -2081,20 +2131,25 @@
         router &&
         typeof router.go === "function"
       ) {
-        return router.go("trip-form", {
-          ...options,
-          params: {
-            ...(options.params || {}),
-            mode: "edit",
-            tripId
-          },
-          source: "trip-form-open-edit"
-        });
+        return router.go(
+          "trip-form",
+          {
+            ...options,
+            params: {
+              ...(options.params || {}),
+              mode: "edit",
+              tripId
+            },
+            source:
+              "trip-form-open-edit"
+          }
+        );
       }
 
-      const container = resolveContainer(
-        options.container
-      );
+      const container =
+        resolveContainer(
+          options.container
+        );
 
       if (container) {
         this.mount({
@@ -2113,16 +2168,17 @@
       const ui = getUI();
 
       if (state.activeForm) {
-        const formData = getFormData(
-          state.activeForm
-        );
+        const data =
+          getFormData(
+            state.activeForm
+          );
 
         const hasContent = Boolean(
-          formData.title ||
-          formData.destination ||
-          formData.startDate ||
-          formData.endDate ||
-          formData.notes
+          data.title ||
+          data.destination ||
+          data.startDate ||
+          data.endDate ||
+          data.notes
         );
 
         if (hasContent) {
@@ -2130,13 +2186,15 @@
             await ui?.confirm?.({
               title: "إلغاء الرحلة",
               message:
-                "سيتم تجاهل البيانات غير المحفوظة. هل تريد المتابعة؟",
-              confirmLabel: "نعم، إلغاء",
-              cancelLabel: "العودة للنموذج",
+                "سيتم تجاهل البيانات غير المحفوظة.",
+              confirmLabel:
+                "نعم، إلغاء",
+              cancelLabel:
+                "العودة للنموذج",
               danger: true
             });
 
-          if (confirmed === false) {
+          if (confirmed !== true) {
             return false;
           }
         }
@@ -2144,21 +2202,17 @@
 
       emit("cancelled", {
         mode: state.activeMode,
-        tripId: state.activeTripId
+        tripId:
+          state.activeTripId
       });
 
-      const router = getRouter();
-
-      if (
-        router &&
-        typeof router.go === "function"
-      ) {
-        return router.go("trips", {
-          source: "trip-form-cancel"
-        });
-      }
-
-      return true;
+      return getRouter()?.go?.(
+        "trips",
+        {
+          source:
+            "trip-form-cancel"
+        }
+      );
     },
 
     validate(data) {
@@ -2172,7 +2226,9 @@
     calculateDuration,
 
     getTrip(tripId) {
-      return clone(findTrip(tripId));
+      return clone(
+        findTrip(tripId)
+      );
     },
 
     getMode() {
@@ -2192,9 +2248,8 @@
 
       state.subscribers.add(listener);
 
-      return () => {
+      return () =>
         state.subscribers.delete(listener);
-      };
     },
 
     destroy() {
@@ -2202,7 +2257,9 @@
 
       state.actionUnsubscribers.forEach(
         (unsubscribe) => {
-          if (typeof unsubscribe === "function") {
+          if (
+            typeof unsubscribe === "function"
+          ) {
             unsubscribe();
           }
         }
@@ -2221,20 +2278,28 @@
       return {
         id: this.id,
         version: this.version,
-        initialized: state.initialized,
-        activeMode: state.activeMode,
-        activeTripId: state.activeTripId,
-        hasContainer: Boolean(
-          state.activeContainer
-        ),
-        hasForm: Boolean(state.activeForm),
+        initialized:
+          state.initialized,
+        activeMode:
+          state.activeMode,
+        activeTripId:
+          state.activeTripId,
+        hasContainer:
+          Boolean(
+            state.activeContainer
+          ),
+        hasForm:
+          Boolean(state.activeForm),
         registeredActions:
           state.actionUnsubscribers.length,
         subscriberCount:
           state.subscribers.size,
-        storeAvailable: Boolean(getStore()),
-        routerAvailable: Boolean(getRouter()),
-        uiAvailable: Boolean(getUI())
+        storeAvailable:
+          Boolean(getStore()),
+        routerAvailable:
+          Boolean(getRouter()),
+        uiAvailable:
+          Boolean(getUI())
       };
     }
   };
@@ -2242,7 +2307,10 @@
   window.TIC = window.TIC || {};
   window.TIC.Features =
     window.TIC.Features || {};
-  window.TIC.Features.TripForm = TripForm;
+
+  window.TIC.Features.TripForm =
+    TripForm;
+
   window.TICTripForm = TripForm;
 
   const router = getRouter();
@@ -2252,17 +2320,20 @@
     typeof router.register === "function"
   ) {
     if (!router.has?.("trip-form")) {
-      router.register("trip-form", {
-        id: "trip-form",
-        title: "رحلة جديدة",
-        module: "trip-form",
-        visible: false,
-        order: 99,
-        meta: {
-          feature: true,
-          navigation: false
+      router.register(
+        "trip-form",
+        {
+          id: "trip-form",
+          title: "رحلة جديدة",
+          module: "trip-form",
+          visible: false,
+          order: 99,
+          meta: {
+            feature: true,
+            navigation: false
+          }
         }
-      });
+      );
     }
 
     if (
