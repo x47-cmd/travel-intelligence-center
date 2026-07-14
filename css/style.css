@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Global Premium Design System V2.1.0
+   Global Premium Design System V2.2.0
 
    File Path:
    css/style.css
@@ -11,7 +11,9 @@
    - Stable RTL spacing and typography
    - Correct safe-area handling
    - Unified cards, forms, pages, modals and navigation
-   - Calm and compact Home Page V2.1.0
+   - Calm and compact Home Page V2.2.0
+   - Smart next-trip details
+   - Premium Trip Form Wizard V3.0.0
 ========================================================= */
 
 /* =========================================================
@@ -728,7 +730,7 @@ p {
 }
 
 /* =========================================================
-   11. Home V2.1.0
+   11. Home V2.2.0
 ========================================================= */
 
 .tic-home-page {
@@ -1051,6 +1053,480 @@ p {
   font-size: 0.8rem;
   line-height: 1.65;
 }
+
+
+/* =========================================================
+   11.1 Smart Next Trip Details
+========================================================= */
+
+.tic-home-next-card-smart {
+  display: grid;
+  gap: 14px;
+}
+
+.tic-home-trip-highlight {
+  padding: 13px 14px;
+  border: 1px solid #dceeea;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f7fffd, #effaf7);
+}
+
+.tic-home-trip-highlight strong {
+  display: block;
+  color: var(--tic-primary-dark);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.tic-home-trip-highlight p {
+  margin-top: 4px;
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.tic-home-trip-fact {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e8edf3;
+  border-radius: 14px;
+  background: var(--tic-surface-soft);
+}
+
+.tic-home-trip-fact span {
+  display: block;
+  color: var(--tic-muted);
+  font-size: 0.62rem;
+}
+
+.tic-home-trip-fact strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--tic-text);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-home-trip-fact.is-emphasis {
+  border-color: #bfe5dc;
+  background: var(--tic-primary-soft);
+}
+
+.tic-home-trip-fact.is-emphasis strong {
+  color: var(--tic-primary-dark);
+}
+
+.tic-home-detail-block {
+  padding: 14px;
+  border: 1px solid var(--tic-border);
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.tic-home-detail-block > header {
+  margin-bottom: 10px;
+}
+
+.tic-home-detail-block > header span {
+  display: block;
+  color: var(--tic-primary);
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.tic-home-detail-block > header strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.tic-home-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tic-home-flight-route {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--tic-navy);
+  color: #ffffff;
+}
+
+.tic-home-flight-route > div {
+  min-width: 0;
+}
+
+.tic-home-flight-route small {
+  display: block;
+  color: rgba(255,255,255,.62);
+  font-size: 0.6rem;
+}
+
+.tic-home-flight-route strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-home-flight-route > span {
+  font-size: 1rem;
+}
+
+.tic-home-add-details {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px dashed #a9d8cf;
+  border-radius: 15px;
+  background: #f7fffd;
+  color: var(--tic-primary);
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+/* =========================================================
+   11.2 Trip Form Wizard V3.0.0
+========================================================= */
+
+.tic-trip-form-page {
+  width: 100%;
+  max-width: 820px;
+  margin-inline: auto;
+}
+
+.tic-trip-form-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 24px;
+  background: linear-gradient(135deg, #159587, #0f766e 55%, #0b2b40);
+  box-shadow: 0 18px 42px rgba(15,118,110,.16);
+  color: #ffffff;
+}
+
+.tic-trip-form-intro > div {
+  min-width: 0;
+}
+
+.tic-trip-form-intro span {
+  display: block;
+  color: rgba(255,255,255,.68);
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.tic-trip-form-intro h1 {
+  margin-top: 4px;
+  color: #ffffff;
+  font-size: clamp(1.55rem, 6vw, 2rem);
+  line-height: 1.15;
+  font-weight: 900;
+}
+
+.tic-trip-form-intro p {
+  margin-top: 6px;
+  max-width: 540px;
+  color: rgba(255,255,255,.8);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.tic-trip-form-intro .tic-icon-btn {
+  width: 42px;
+  height: 42px;
+  border-color: rgba(255,255,255,.18);
+  background: rgba(255,255,255,.12);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.tic-trip-stepper {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(58px, 1fr));
+  gap: 7px;
+  margin-top: 14px;
+  overflow-x: auto;
+  padding: 2px 1px 8px;
+  scrollbar-width: none;
+}
+
+.tic-trip-stepper::-webkit-scrollbar {
+  display: none;
+}
+
+.tic-trip-step {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  min-width: 58px;
+  padding: 7px 4px;
+  border-radius: 15px;
+  background: transparent;
+  color: var(--tic-muted);
+  cursor: pointer;
+}
+
+.tic-trip-step > span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--tic-border);
+  border-radius: 10px;
+  background: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.tic-trip-step > small {
+  font-size: 0.58rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tic-trip-step.is-active {
+  background: var(--tic-primary-soft);
+  color: var(--tic-primary-dark);
+}
+
+.tic-trip-step.is-active > span {
+  border-color: var(--tic-primary);
+  background: var(--tic-primary);
+  color: #ffffff;
+}
+
+.tic-trip-step.is-complete > span {
+  border-color: #bfe8d2;
+  background: var(--tic-success-soft);
+  color: var(--tic-success);
+}
+
+.tic-trip-wizard {
+  margin-top: 12px;
+}
+
+.tic-trip-form-step {
+  display: grid;
+  gap: 12px;
+}
+
+.tic-trip-form-step-header {
+  padding-inline: 2px;
+}
+
+.tic-trip-form-step-header span {
+  display: block;
+  color: var(--tic-primary);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.tic-trip-form-step-header h2 {
+  margin-top: 3px;
+  color: var(--tic-navy);
+  font-size: 1.28rem;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.tic-trip-form-step-header p {
+  margin-top: 4px;
+  color: var(--tic-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.tic-trip-duration-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 12px 14px;
+  border: 1px solid #dcece8;
+  border-radius: 16px;
+  background: var(--tic-primary-soft);
+}
+
+.tic-trip-duration-card span {
+  color: var(--tic-primary-dark);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.tic-trip-duration-card strong {
+  color: var(--tic-primary-dark);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.tic-trip-import-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.tic-trip-import-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px dashed #a9d8cf;
+  border-radius: 19px;
+  background: linear-gradient(135deg, #f8fffd, #effaf7);
+}
+
+.tic-trip-import-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+  color: var(--tic-primary);
+  font-size: 1.15rem;
+}
+
+.tic-trip-import-copy {
+  min-width: 0;
+}
+
+.tic-trip-import-copy strong {
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.tic-trip-import-copy p {
+  margin-top: 3px;
+  color: var(--tic-muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.tic-trip-import-card .tic-btn {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 13px;
+  font-size: 0.74rem;
+}
+
+.tic-trip-import-status {
+  grid-column: 2 / -1;
+  color: var(--tic-muted);
+  font-size: 0.66rem;
+}
+
+.tic-trip-import-status[data-tone="success"] {
+  color: var(--tic-success);
+}
+
+.tic-trip-import-status[data-tone="warning"] {
+  color: var(--tic-warning);
+}
+
+.tic-trip-import-status[data-tone="info"] {
+  color: var(--tic-info);
+}
+
+.tic-trip-budget-preview strong {
+  font-size: 1.9rem;
+}
+
+.tic-trip-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tic-trip-review-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--tic-border);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+}
+
+.tic-trip-review-card > span {
+  display: block;
+  color: var(--tic-primary);
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.tic-trip-review-card > strong {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--tic-text);
+  font-size: 0.88rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-trip-review-card > small {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--tic-muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-trip-form-actions {
+  position: sticky;
+  z-index: 20;
+  bottom: calc(var(--tic-bottom-nav-height) + 8px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 9px;
+  margin-top: 16px;
+  padding: 10px;
+  border: 1px solid rgba(226,232,240,.92);
+  border-radius: 18px;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 14px 34px rgba(15,23,42,.11);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.tic-trip-form-actions .tic-btn {
+  flex: 1;
+  min-height: 44px;
+  border-radius: 14px;
+  font-size: 0.8rem;
+}
+
+.tic-field.has-error .tic-input,
+.tic-field.has-error .tic-select,
+.tic-field.has-error .tic-textarea {
+  border-color: #e7a8b1;
+  background: var(--tic-danger-soft);
+}
+
 
 /* =========================================================
    12. Trips
@@ -1667,6 +2143,44 @@ p {
   .tic-home-inspiration {
     padding: 15px;
     border-radius: 19px;
+  }
+}
+
+
+@media (max-width: 520px) {
+  .tic-home-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tic-trip-import-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .tic-trip-import-card .tic-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .tic-trip-import-status {
+    grid-column: 1 / -1;
+  }
+
+  .tic-trip-review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tic-trip-form-actions {
+    bottom: calc(var(--tic-bottom-nav-height) + 5px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 760px) {
+  .tic-trip-import-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tic-home-detail-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
