@@ -32,14 +32,16 @@
   />
 
   <!-- =====================================================
-       Travel Intelligence Center V2.0.0
+       Travel Intelligence Center V2.2.0
        Premium iPhone-first interface
-       Core architecture remains stable
+       Smart next-trip summary
+       Trip Form Wizard V3
+       Ticket and hotel document import
   ====================================================== -->
 
   <link
     rel="stylesheet"
-    href="css/style.css?v=2.0.0"
+    href="css/style.css?v=2.2.0"
   />
 
   <!-- =====================================================
@@ -75,19 +77,59 @@
   ></script>
 
   <!-- =====================================================
-       3. Shared Feature
+       3. Optional Document Reading Engines
+       Tesseract.js: OCR for ticket/hotel images
+       PDF.js: text extraction from PDF bookings
   ====================================================== -->
   <script
     defer
-    src="js/features/trip-form.js?v=2.0.0"
+    src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"
+  ></script>
+
+  <script
+    defer
+    src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+  ></script>
+
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      }
+    });
+  </script>
+
+  <!-- =====================================================
+       4. Smart Document Import Layer
+       Reader → Ticket Import → Hotel Import → Trip Form
+  ====================================================== -->
+  <script
+    defer
+    src="js/features/document-reader.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/trip-ticket-import.js?v=1.1.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/hotel-import.js?v=1.1.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/trip-form.js?v=3.0.0"
   ></script>
 
   <!-- =====================================================
-       4. Application Pages
+       5. Application Pages
   ====================================================== -->
   <script
     defer
-    src="js/pages/home.js?v=2.0.0"
+    src="js/pages/home.js?v=2.2.0"
   ></script>
 
   <script
@@ -111,7 +153,7 @@
   ></script>
 
   <!-- =====================================================
-       5. Application Bootstrap
+       6. Application Bootstrap
        Must remain the final JavaScript file.
   ====================================================== -->
   <script
