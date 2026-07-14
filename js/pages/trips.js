@@ -29,7 +29,7 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.0.1";
+  const PAGE_VERSION = "3.1.0";
   const STYLE_ID = "tic-trips-v3-styles";
 
   const state = {
@@ -82,9 +82,7 @@
   const TAB_LABELS = {
     upcoming: "القادمة",
     ongoing: "الجارية",
-    memories: "الذكريات",
-    countries: "الدول",
-    all: "الكل"
+    all: "كل الرحلات"
   };
 
   const isObject = (value) =>
@@ -218,7 +216,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.0.1"] {
+      [data-page="trips"][data-page-version="3.1.0"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -1007,6 +1005,285 @@
         .trips-section__header {
           align-items: start;
           flex-direction: column;
+        }
+      }
+
+      /* =====================================================
+         Trips V3.1.0 — Compact & Personal Refinement
+      ===================================================== */
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-shell {
+        gap: 24px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-hero {
+        min-height: 0;
+        padding: 22px;
+        border-radius: 27px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-hero__eyebrow {
+        min-height: 30px;
+        padding: 0 13px;
+        font-size: 11px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-hero h1 {
+        margin-top: 18px;
+        font-size: clamp(32px, 8vw, 44px);
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-hero p {
+        max-width: 470px;
+        font-size: 14px;
+        line-height: 1.75;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-hero__actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 18px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-action {
+        min-height: 46px;
+        padding: 0 12px;
+        border-radius: 15px;
+        font-size: 13px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-section h2 {
+        font-size: clamp(24px, 6vw, 32px);
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-section__subtitle {
+        margin-top: 4px;
+        font-size: 13px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-overview {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-stat {
+        min-height: 104px;
+        padding: 12px 9px;
+        border-radius: 20px;
+        text-align: center;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-stat__icon {
+        width: 35px;
+        height: 35px;
+        margin-inline: auto;
+        border-radius: 12px;
+        font-size: 16px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-stat strong {
+        margin-top: 10px;
+        font-size: 23px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-stat span {
+        margin-top: 6px;
+        font-size: 10px;
+        line-height: 1.35;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-tabs {
+        padding: 4px;
+        border-radius: 19px;
+      }
+
+      [data-page="trips"][data-page-version="3.1.0"] .trips-tab {
+        flex: 1 0 auto;
+        min-height: 42px;
+        padding: 0 14px;
+        border-radius: 14px;
+        font-size: 13px;
+      }
+
+      .trips-personal-section {
+        position: relative;
+        overflow: hidden;
+        display: grid;
+        gap: 16px;
+        padding: 20px;
+        border: 1px solid var(--trips-line);
+        border-radius: 29px;
+        background: #fff;
+        box-shadow: var(--trips-shadow);
+      }
+
+      .trips-personal-section--memory {
+        background:
+          radial-gradient(circle at 8% 0%, rgba(28, 167, 151, .12), transparent 31%),
+          linear-gradient(145deg, #ffffff, #f5fbfa);
+      }
+
+      .trips-personal-section--passport {
+        background:
+          radial-gradient(circle at 90% 0%, rgba(9, 39, 70, .10), transparent 30%),
+          linear-gradient(145deg, #ffffff, #f5f8fc);
+      }
+
+      .trips-personal-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 13px;
+      }
+
+      .trips-personal-copy {
+        min-width: 0;
+      }
+
+      .trips-personal-kicker {
+        display: block;
+        color: var(--trips-teal-dark);
+        font-size: 11px;
+        font-weight: 950;
+        letter-spacing: .08em;
+      }
+
+      .trips-personal-head h2 {
+        margin: 4px 0 0;
+        font-size: clamp(25px, 7vw, 34px);
+      }
+
+      .trips-personal-head p {
+        margin: 5px 0 0;
+        color: var(--trips-muted);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .trips-personal-icon {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 17px;
+        background: var(--trips-mint);
+        font-size: 23px;
+      }
+
+      .trips-personal-action {
+        width: 100%;
+        min-height: 48px;
+        border: 0;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #17a797, #0b7a72);
+        color: #fff;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 950;
+      }
+
+      .trips-memory-preview,
+      .trips-country-preview {
+        display: grid;
+        gap: 12px;
+      }
+
+      .trips-personal-empty {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 13px;
+        min-height: 105px;
+        padding: 15px;
+        border: 1px dashed #cbd8e6;
+        border-radius: 21px;
+        background: rgba(255,255,255,.72);
+      }
+
+      .trips-personal-empty__icon {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 16px;
+        background: #fff;
+        font-size: 22px;
+        box-shadow: 0 8px 20px rgba(16,40,70,.06);
+      }
+
+      .trips-personal-empty strong {
+        display: block;
+        font-size: 16px;
+      }
+
+      .trips-personal-empty p {
+        margin: 4px 0 0;
+        color: var(--trips-muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .trips-memory-preview .memory-card {
+        box-shadow: none;
+      }
+
+      .trips-country-preview .country-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .trips-country-preview .country-magnet {
+        min-height: 150px;
+        padding: 16px;
+        border-radius: 24px;
+      }
+
+      .trips-country-preview .country-magnet__flag {
+        font-size: 31px;
+      }
+
+      .trips-country-preview .country-magnet h3 {
+        margin-top: 16px;
+        font-size: 18px;
+      }
+
+      @media (max-width: 520px) {
+        [data-page="trips"][data-page-version="3.1.0"] .trips-overview {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        [data-page="trips"][data-page-version="3.1.0"] .trips-stat {
+          min-height: 96px;
+          padding: 10px 5px;
+        }
+
+        [data-page="trips"][data-page-version="3.1.0"] .trips-stat__icon {
+          width: 31px;
+          height: 31px;
+          font-size: 14px;
+        }
+
+        [data-page="trips"][data-page-version="3.1.0"] .trips-stat strong {
+          font-size: 20px;
+        }
+
+        [data-page="trips"][data-page-version="3.1.0"] .trips-stat span {
+          font-size: 9px;
+        }
+
+        .trips-personal-section {
+          padding: 17px;
+          border-radius: 25px;
+        }
+      }
+
+      @media (max-width: 390px) {
+        [data-page="trips"][data-page-version="3.1.0"] .trips-hero__actions {
+          grid-template-columns: 1fr;
+        }
+
+        .trips-country-preview .country-grid {
+          grid-template-columns: 1fr;
         }
       }
 
@@ -2110,27 +2387,6 @@
   `;
 
   const renderTabContent = (snapshot) => {
-    if (state.activeTab === "countries") {
-      if (!snapshot.countries.length) {
-        return renderEmpty({
-          icon: "🌍",
-          title: "جواز سفرك ما زال فارغاً",
-          message:
-            "أضف رحلة سابقة، وستظهر الدول التي زرتها هنا على شكل مغناطيسات سفر.",
-          actionLabel: "إضافة رحلة سابقة",
-          action: "trips-add-memory"
-        });
-      }
-
-      return `
-        <div class="country-grid">
-          ${snapshot.countries
-            .map(renderCountryCard)
-            .join("")}
-        </div>
-      `;
-    }
-
     if (!snapshot.filteredTrips.length) {
       const emptyByTab = {
         upcoming: {
@@ -2146,14 +2402,6 @@
           title: "لا توجد رحلة جارية الآن",
           message:
             "عندما يبدأ موعد إحدى رحلاتك ستنتقل إلى هذا القسم تلقائياً."
-        },
-        memories: {
-          icon: "♡",
-          title: "ابدأ مكتبة ذكرياتك",
-          message:
-            "سجّل الرحلات التي سافرتها قبل استخدام البرنامج، وستنضم الرحلات المكتملة تلقائياً.",
-          actionLabel: "إضافة رحلة سابقة",
-          action: "trips-add-memory"
         },
         all: {
           icon: "✈",
@@ -2171,26 +2419,131 @@
       );
     }
 
-    const renderer =
-      state.activeTab === "memories"
-        ? renderMemoryCard
-        : renderTripCard;
-
     return `
       <div class="trips-grid">
         ${snapshot.filteredTrips
-          .map(renderer)
+          .map(renderTripCard)
           .join("")}
       </div>
     `;
   };
+
+  const renderMemoriesShowcase = (snapshot) => {
+    const memories = snapshot.trips
+      .filter(isMemoryTrip)
+      .sort((a, b) =>
+        (toDate(b.startDate)?.getTime() || 0) -
+        (toDate(a.startDate)?.getTime() || 0)
+      );
+
+    return `
+      <section class="trips-personal-section trips-personal-section--memory">
+        <div class="trips-personal-head">
+          <div class="trips-personal-copy">
+            <span class="trips-personal-kicker">
+              MY TRAVEL LIBRARY
+            </span>
+
+            <h2>مكتبة سفراتي</h2>
+
+            <p>
+              مكانك الشخصي للرحلات السابقة والذكريات الجميلة
+              التي صنعتها في كل وجهة.
+            </p>
+          </div>
+
+          <span class="trips-personal-icon">♡</span>
+        </div>
+
+        ${
+          memories.length
+            ? `
+              <div class="trips-memory-preview">
+                ${memories
+                  .slice(0, 2)
+                  .map(renderMemoryCard)
+                  .join("")}
+              </div>
+            `
+            : `
+              <div class="trips-personal-empty">
+                <span class="trips-personal-empty__icon">♡</span>
+
+                <div>
+                  <strong>ابدأ مكتبة ذكرياتك</strong>
+                  <p>
+                    أضف الرحلات التي سافرتها قبل البرنامج،
+                    والرحلات المكتملة ستنضم تلقائياً.
+                  </p>
+                </div>
+              </div>
+            `
+        }
+
+        <button
+          type="button"
+          class="trips-personal-action"
+          data-action="trips-add-memory"
+        >
+          ＋ إضافة رحلة سابقة
+        </button>
+      </section>
+    `;
+  };
+
+  const renderCountriesShowcase = (snapshot) => `
+    <section class="trips-personal-section trips-personal-section--passport">
+      <div class="trips-personal-head">
+        <div class="trips-personal-copy">
+          <span class="trips-personal-kicker">
+            MY TRAVEL PASSPORT
+          </span>
+
+          <h2>الدول التي زرتها</h2>
+
+          <p>
+            كل دولة تزورها تصبح جزءاً من جواز سفرك الشخصي،
+            مع عدد الزيارات والمدن المرتبطة بها.
+          </p>
+        </div>
+
+        <span class="trips-personal-icon">🌍</span>
+      </div>
+
+      ${
+        snapshot.countries.length
+          ? `
+            <div class="trips-country-preview">
+              <div class="country-grid">
+                ${snapshot.countries
+                  .map(renderCountryCard)
+                  .join("")}
+              </div>
+            </div>
+          `
+          : `
+            <div class="trips-personal-empty">
+              <span class="trips-personal-empty__icon">🌍</span>
+
+              <div>
+                <strong>جواز سفرك ما زال فارغاً</strong>
+                <p>
+                  عند إضافة رحلاتك السابقة ستظهر كل دولة
+                  كمغناطيس سفر مميز داخل هذا القسم.
+                </p>
+              </div>
+            </div>
+          `
+      }
+    </section>
+  `;
 
   const renderHub = (snapshot) => `
     <div class="trips-shell">
       <section class="trips-hero">
         <div class="trips-hero__top">
           <span class="trips-hero__eyebrow">
-            TRIPS & MEMORIES
+            TRIPS CENTER
           </span>
         </div>
 
@@ -2198,8 +2551,8 @@
           <h1>رحلاتي</h1>
 
           <p>
-            نظّم رحلاتك القادمة، واحفظ ذكريات سفرك،
-            وابنِ سجلاً شخصياً للدول والمدن التي زرتها.
+            نظّم رحلاتك القادمة واحتفظ بسجل سفر شخصي
+            يجمع ذكرياتك والدول التي زرتها.
           </p>
         </div>
 
@@ -2217,7 +2570,7 @@
             class="trips-action trips-action--glass"
             data-action="trips-add-memory"
           >
-            ♡ إضافة رحلة سابقة
+            ♡ رحلة سابقة
           </button>
         </div>
       </section>
@@ -2226,13 +2579,13 @@
         <div class="trips-section__header">
           <div>
             <p class="trips-section__eyebrow">
-              TRAVEL OVERVIEW
+              QUICK OVERVIEW
             </p>
 
             <h2>ملخص سفراتك</h2>
 
             <p class="trips-section__subtitle">
-              أرقام مختصرة تعكس رحلاتك الحالية وسجل ذكرياتك.
+              أرقام سريعة بدون مساحات كبيرة أو تفاصيل زائدة.
             </p>
           </div>
         </div>
@@ -2244,7 +2597,7 @@
         <div class="trips-section__header">
           <div>
             <p class="trips-section__eyebrow">
-              YOUR JOURNEYS
+              ACTIVE JOURNEYS
             </p>
 
             <h2>
@@ -2255,21 +2608,18 @@
             </h2>
 
             <p class="trips-section__subtitle">
-              تنقل بين الرحلات القادمة والجارية والذكريات والدول التي زرتها.
+              رحلاتك القادمة والجارية في مكان واضح وسريع.
             </p>
           </div>
         </div>
 
         ${renderTabs()}
-
-        ${
-          state.activeTab !== "countries"
-            ? renderFilters()
-            : ""
-        }
-
+        ${renderFilters()}
         ${renderTabContent(snapshot)}
       </section>
+
+      ${renderMemoriesShowcase(snapshot)}
+      ${renderCountriesShowcase(snapshot)}
     </div>
   `;
 
@@ -2823,7 +3173,7 @@
 
       closeModal();
 
-      state.activeTab = "memories";
+      state.activeTab = "upcoming";
       state.activeView = "hub";
       state.memoryDraft = null;
 
@@ -3649,11 +3999,37 @@
     },
 
     openMemories() {
-      return this.openHub("memories");
+      state.activeView = "hub";
+      state.activeTab = "upcoming";
+      const result = refresh();
+
+      window.requestAnimationFrame(() => {
+        state.container
+          ?.querySelector(".trips-personal-section--memory")
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+          });
+      });
+
+      return result;
     },
 
     openCountries() {
-      return this.openHub("countries");
+      state.activeView = "hub";
+      state.activeTab = "upcoming";
+      const result = refresh();
+
+      window.requestAnimationFrame(() => {
+        state.container
+          ?.querySelector(".trips-personal-section--passport")
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+          });
+      });
+
+      return result;
     },
 
     addPastTrip() {
