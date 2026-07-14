@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V3.2.0
+   Trips Page Module V3.3.0
 
    File Path:
    js/pages/trips.js
@@ -10,6 +10,7 @@
    - Separates operational journeys, travel journal and passport analytics.
    - Supports adding old trips without forcing full booking details.
    - Automatically includes completed future trips in travel memories.
+   - Final compact card, search, countdown and passport refinements.
    - Preserves current Store / Router / UI / Trip Form integrations.
    - Injects scoped styles so the page is complete from one file.
 
@@ -29,7 +30,7 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.2.0";
+  const PAGE_VERSION = "3.3.0";
   const STYLE_ID = "tic-trips-v3-styles";
 
   const state = {
@@ -216,7 +217,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.2.0"] {
+      [data-page="trips"][data-page-version="3.3.0"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -1012,68 +1013,68 @@
          Trips V3.1.0 — Compact & Personal Refinement
       ===================================================== */
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-shell {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-shell {
         gap: 24px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-hero {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-hero {
         min-height: 0;
         padding: 22px;
         border-radius: 27px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-hero__eyebrow {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-hero__eyebrow {
         min-height: 30px;
         padding: 0 13px;
         font-size: 11px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-hero h1 {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-hero h1 {
         margin-top: 18px;
         font-size: clamp(32px, 8vw, 44px);
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-hero p {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-hero p {
         max-width: 470px;
         font-size: 14px;
         line-height: 1.75;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-hero__actions {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-hero__actions {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         margin-top: 18px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-action {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-action {
         min-height: 46px;
         padding: 0 12px;
         border-radius: 15px;
         font-size: 13px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-section h2 {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-section h2 {
         font-size: clamp(24px, 6vw, 32px);
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-section__subtitle {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-section__subtitle {
         margin-top: 4px;
         font-size: 13px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-overview {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-overview {
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 8px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-stat {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat {
         min-height: 104px;
         padding: 12px 9px;
         border-radius: 20px;
         text-align: center;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-stat__icon {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat__icon {
         width: 35px;
         height: 35px;
         margin-inline: auto;
@@ -1081,23 +1082,23 @@
         font-size: 16px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-stat strong {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat strong {
         margin-top: 10px;
         font-size: 23px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-stat span {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat span {
         margin-top: 6px;
         font-size: 10px;
         line-height: 1.35;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-tabs {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-tabs {
         padding: 4px;
         border-radius: 19px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-tab {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-tab {
         flex: 1 0 auto;
         min-height: 42px;
         padding: 0 14px;
@@ -1248,26 +1249,26 @@
       }
 
       @media (max-width: 520px) {
-        [data-page="trips"][data-page-version="3.2.0"] .trips-overview {
+        [data-page="trips"][data-page-version="3.3.0"] .trips-overview {
           grid-template-columns: repeat(4, minmax(0, 1fr));
         }
 
-        [data-page="trips"][data-page-version="3.2.0"] .trips-stat {
+        [data-page="trips"][data-page-version="3.3.0"] .trips-stat {
           min-height: 96px;
           padding: 10px 5px;
         }
 
-        [data-page="trips"][data-page-version="3.2.0"] .trips-stat__icon {
+        [data-page="trips"][data-page-version="3.3.0"] .trips-stat__icon {
           width: 31px;
           height: 31px;
           font-size: 14px;
         }
 
-        [data-page="trips"][data-page-version="3.2.0"] .trips-stat strong {
+        [data-page="trips"][data-page-version="3.3.0"] .trips-stat strong {
           font-size: 20px;
         }
 
-        [data-page="trips"][data-page-version="3.2.0"] .trips-stat span {
+        [data-page="trips"][data-page-version="3.3.0"] .trips-stat span {
           font-size: 9px;
         }
 
@@ -1278,7 +1279,7 @@
       }
 
       @media (max-width: 390px) {
-        [data-page="trips"][data-page-version="3.2.0"] .trips-hero__actions {
+        [data-page="trips"][data-page-version="3.3.0"] .trips-hero__actions {
           grid-template-columns: 1fr;
         }
 
@@ -1291,13 +1292,13 @@
          Trips V3.2.0 — Final Premium Pass
       ===================================================== */
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-tabs {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-tabs {
         position: relative;
         background: rgba(255,255,255,.92);
         box-shadow: inset 0 0 0 1px rgba(220,229,239,.75);
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-tab {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-tab {
         transition:
           color 180ms ease,
           background 180ms ease,
@@ -1305,11 +1306,11 @@
           box-shadow 180ms ease;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-tab.is-active {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-tab.is-active {
         transform: translateY(-1px);
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-filter-toggle {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-filter-toggle {
         display: grid;
         place-items: center;
         align-content: center;
@@ -1317,7 +1318,7 @@
         font-size: 17px;
       }
 
-      [data-page="trips"][data-page-version="3.2.0"] .trips-filter-toggle small {
+      [data-page="trips"][data-page-version="3.3.0"] .trips-filter-toggle small {
         color: var(--trips-muted);
         font-size: 8px;
         font-weight: 900;
@@ -1489,6 +1490,184 @@
 
         .trips-next-brief__facts strong {
           font-size: 10px;
+        }
+      }
+
+
+      /* =====================================================
+         Trips V3.3.0 — Visual Polish & Compactness
+      ===================================================== */
+
+      [data-page="trips"][data-page-version="3.3.0"] {
+        --trips-radius-card: 25px;
+        --trips-radius-inner: 16px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat {
+        min-height: 88px;
+        padding: 9px 5px;
+        border-radius: 18px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat__icon {
+        width: 29px;
+        height: 29px;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat strong {
+        margin-top: 8px;
+        font-size: 19px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-stat span {
+        margin-top: 4px;
+        font-size: 8.5px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3,
+      [data-page="trips"][data-page-version="3.3.0"] .memory-card,
+      [data-page="trips"][data-page-version="3.3.0"] .country-magnet,
+      [data-page="trips"][data-page-version="3.3.0"] .trips-personal-section,
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief {
+        border-radius: var(--trips-radius-card);
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__cover {
+        min-height: 112px;
+        padding: 16px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__emoji {
+        inset-inline-start: 18px;
+        top: 16px;
+        font-size: 38px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__badge {
+        min-height: 29px;
+        padding: 0 10px;
+        font-size: 11px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__body {
+        padding: 17px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__meta-item {
+        min-height: 68px;
+        border-radius: var(--trips-radius-inner);
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__menu {
+        min-width: 44px;
+        width: 44px;
+        min-height: 44px;
+        height: 44px;
+        align-self: center;
+        border-radius: 50%;
+        font-size: 17px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__open {
+        min-height: 48px;
+        border-radius: var(--trips-radius-inner);
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief {
+        gap: 13px;
+        padding: 17px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__countdown {
+        min-width: 72px;
+        padding: 10px 8px;
+        border-radius: 999px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        flex: 1 1 calc(50% - 7px);
+        min-width: 125px;
+        padding: 9px 10px;
+        border-radius: 999px;
+        text-align: start;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div > span {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 27px;
+        height: 27px;
+        border-radius: 9px;
+        background: var(--trips-mint);
+        font-size: 12px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div > div {
+        min-width: 0;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts small,
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts strong {
+        text-align: start;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts small {
+        font-size: 8px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts strong {
+        margin-top: 2px;
+        font-size: 10px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-search-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 0;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-search-wrap > span {
+        position: absolute;
+        inset-inline-start: 16px;
+        z-index: 1;
+        color: var(--trips-muted);
+        font-size: 17px;
+        pointer-events: none;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-search {
+        padding-inline-start: 44px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .memory-card__cover {
+        min-height: 108px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .country-magnet {
+        min-height: 165px;
+      }
+
+      [data-page="trips"][data-page-version="3.3.0"] .trips-personal-empty {
+        border-radius: 18px;
+      }
+
+      @media (max-width: 390px) {
+        [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div {
+          flex-basis: 100%;
         }
       }
 
@@ -2104,18 +2283,22 @@
 
     const readinessItems = [
       {
+        icon: "▣",
         label: "التأشيرة",
         value: trip.visaRequired ? "مطلوبة" : "غير مطلوبة"
       },
       {
+        icon: "✓",
         label: "التأمين",
         value: trip.insuranceRequired ? "مطلوب" : "اختياري"
       },
       {
+        icon: "◈",
         label: "العملة",
         value: trip.currency || "AED"
       },
       {
+        icon: "✈",
         label: "المطار",
         value: trip.departureAirport || "غير محدد"
       }
@@ -2151,8 +2334,11 @@
             .map(
               (item) => `
                 <div>
-                  <small>${escapeHTML(item.label)}</small>
-                  <strong>${escapeHTML(item.value)}</strong>
+                  <span aria-hidden="true">${escapeHTML(item.icon)}</span>
+                  <div>
+                    <small>${escapeHTML(item.label)}</small>
+                    <strong>${escapeHTML(item.value)}</strong>
+                  </div>
                 </div>
               `
             )
@@ -2248,16 +2434,20 @@
 
     return `
       <div class="trips-tools">
-        <input
-          type="search"
-          class="trips-search"
-          data-trips-search
-          value="${escapeHTML(
-            state.filters.search
-          )}"
-          placeholder="ابحث باسم الرحلة أو الدولة أو المدينة..."
-          aria-label="البحث في الرحلات"
-        >
+        <label class="trips-search-wrap">
+          <span aria-hidden="true">⌕</span>
+
+          <input
+            type="search"
+            class="trips-search"
+            data-trips-search
+            value="${escapeHTML(
+              state.filters.search
+            )}"
+            placeholder="ابحث باسم الرحلة أو الدولة أو المدينة..."
+            aria-label="البحث في الرحلات"
+          >
+        </label>
 
         <button
           type="button"
