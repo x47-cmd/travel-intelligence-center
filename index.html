@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  />
+
+  <title>مركز السفر الذكي | Travel Intelligence Center</title>
+
+  <meta
+    name="description"
+    content="منصة شخصية ذكية لتنظيم الرحلات، الوجهات، الميزانيات، التجهيز، المستندات، الذكريات، وقائمة الأمنيات في مكان واحد."
+  />
+
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="color-scheme" content="light" />
+  <meta name="application-name" content="Travel Intelligence Center" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Travel Center" />
+
+  <!-- =====================================================
+       Travel Intelligence Center V1.0.0
+       Core build: 14-file clean architecture
+       PWA, Service Worker, AI, and cloud services are
+       intentionally excluded until the core is stable.
+  ====================================================== -->
+
+  <link rel="stylesheet" href="css/style.css?v=1.0.0" />
+
+  <!-- =====================================================
+       1. Configuration and Static Data
+  ====================================================== -->
+  <script defer src="js/config.js?v=1.0.0"></script>
+  <script defer src="js/data.js?v=1.0.0"></script>
+
+  <!-- =====================================================
+       2. Core Services
+       Store → UI → Router
+  ====================================================== -->
+  <script defer src="js/store.js?v=1.0.0"></script>
+  <script defer src="js/ui.js?v=1.0.0"></script>
+  <script defer src="js/router.js?v=1.0.0"></script>
+
+  <!-- =====================================================
+       3. Shared Feature
+  ====================================================== -->
+  <script defer src="js/features/trip-form.js?v=1.0.0"></script>
+
+  <!-- =====================================================
+       4. Application Pages
+  ====================================================== -->
+  <script defer src="js/pages/home.js?v=1.0.0"></script>
+  <script defer src="js/pages/trips.js?v=1.0.0"></script>
+  <script defer src="js/pages/guide.js?v=1.0.0"></script>
+  <script defer src="js/pages/budget.js?v=1.0.0"></script>
+  <script defer src="js/pages/more.js?v=1.0.0"></script>
+
+  <!-- =====================================================
+       5. Application Bootstrap
+       Must remain the final JavaScript file.
+  ====================================================== -->
+  <script defer src="js/app.js?v=1.0.0"></script>
+</head>
+
+<body>
+  <div id="app" class="app-shell">
+
+    <header class="topbar" role="banner">
+      <div class="topbar__brand">
+        <p class="topbar__eyebrow">Travel Intelligence Center</p>
+        <h1 class="topbar__title">مركز السفر الذكي</h1>
+      </div>
+
+      <button
+        class="icon-button"
+        type="button"
+        data-route="more"
+        aria-label="فتح صفحة المزيد"
+        title="المزيد"
+      >
+        ⚙️
+      </button>
+    </header>
+
+    <main
+      id="app-view"
+      class="app-view"
+      data-router-view
+      aria-live="polite"
+      aria-busy="true"
+      tabindex="-1"
+    >
+      <section class="startup-card" aria-labelledby="startup-title">
+        <span class="startup-card__badge">Loading</span>
+
+        <h2 id="startup-title" class="startup-card__title">
+          جاري تشغيل مركز السفر الذكي...
+        </h2>
+
+        <p class="startup-card__text">
+          يتم تجهيز الرحلات، الوجهات، الميزانيات، المستندات،
+          التجهيز، الذكريات، وقائمة الأمنيات.
+        </p>
+      </section>
+    </main>
+
+    <nav
+      class="bottom-nav"
+      data-bottom-nav
+      aria-label="التنقل الرئيسي"
+      role="navigation"
+    >
+      <button
+        class="bottom-nav__item is-active"
+        type="button"
+        data-route="home"
+        aria-label="الرئيسية"
+        aria-current="page"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">🏠</span>
+        <span class="bottom-nav__label">الرئيسية</span>
+      </button>
+
+      <button
+        class="bottom-nav__item"
+        type="button"
+        data-route="trips"
+        aria-label="رحلاتي"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">✈️</span>
+        <span class="bottom-nav__label">رحلاتي</span>
+      </button>
+
+      <button
+        class="bottom-nav__item"
+        type="button"
+        data-route="guide"
+        aria-label="الدليل"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">🌍</span>
+        <span class="bottom-nav__label">الدليل</span>
+      </button>
+
+      <button
+        class="bottom-nav__item"
+        type="button"
+        data-route="budget"
+        aria-label="الميزانية"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">💰</span>
+        <span class="bottom-nav__label">الميزانية</span>
+      </button>
+
+      <button
+        class="bottom-nav__item"
+        type="button"
+        data-route="more"
+        aria-label="المزيد"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">☰</span>
+        <span class="bottom-nav__label">المزيد</span>
+      </button>
+    </nav>
+
+    <div
+      id="app-toast-region"
+      class="toast-region"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+
+    <div
+      id="app-modal-root"
+      class="modal-root"
+      aria-live="assertive"
+    ></div>
+
+  </div>
+
+  <noscript>
+    <section class="noscript-message">
+      <h2>JavaScript مطلوب</h2>
+      <p>هذا التطبيق يحتاج إلى JavaScript للعمل.</p>
+    </section>
+  </noscript>
+</body>
+</html>
