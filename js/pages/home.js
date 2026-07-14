@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Home Page Module V2.2.0
+   Home Page Module V2.3.0
 
    File Path:
    js/pages/home.js
@@ -8,16 +8,11 @@
    Purpose:
    - Calm, premium and compact iPhone-first home page.
    - Keeps the current empty-state appearance when no trip exists.
-   - Shows a smarter next-trip summary when an upcoming trip exists.
-   - Supports flexible flight, airport, hotel and booking field names.
+   - Shows a smarter and shorter next-trip summary.
+   - Fixes full travel-date display without truncating the year.
+   - Fixes departure, arrival and airport-arrival time calculations.
+   - Uses a compact flight timeline and adaptive hotel card.
    - Preserves Store, Router, Trip Form and cross-page integration.
-   - Keeps ticket/hotel scan entry points ready for Trip Form integration.
-
-   Important:
-   - Image/ticket/hotel reading is handled by Trip Form or a future
-     document-reading service, not by the Home Page itself.
-   - This page automatically displays extracted data once saved
-     inside the trip record.
 
    Dependencies:
    - js/config.js
@@ -36,7 +31,7 @@
 
   const Config = window.TICConfig || window.TIC?.Config || {};
   const PAGE_ID = "home";
-  const PAGE_VERSION = "2.2.0";
+  const PAGE_VERSION = "2.3.0";
   const DEFAULT_AIRPORT_LEAD_MINUTES = 120;
 
   const state = {
@@ -204,7 +199,7 @@
     return {};
   };
 
-  const toDate = (value) => {
+  const parseDateOnly = (value) => {
     if (!value) return null;
 
     if (value instanceof Date) {
@@ -213,57 +208,189 @@
         : new Date(value);
     }
 
-    if (typeof value === "number") {
-      const numericDate = new Date(value);
+    const raw = text(value);
 
-      return Number.isNaN(numericDate.getTime())
+    const match = raw.match(
+      /^(\d{4})-(\d{1,2})-(\d{1,2})$/
+    );
+
+    if (match) {
+      const date = new Date(
+        number(match[1]),
+        number(match[2]) - 1,
+        number(match[3]),
+        12,
+        0,
+        0,
+        0
+      );
+
+      return Number.isNaN(date.getTime())
         ? null
-        : numericDate;
+        : date;
     }
 
-    const raw = text(value);
+    const parsed = new Date(raw);
+
+    return Number.isNaN(parsed.getTime())
+      ? null
+      : parsed;
+  };
+
+  const parseTimeParts = (value) => {
+    if (!value) return null;
+
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) {
+        return null;
+      }
+
+      return {
+        hours: value.getHours(),
+        minutes: value.getMinutes()
+      };
+    }
+
+    const raw = text(value)
+      .replace(/\s+/g, " ")
+      .trim();
 
     if (!raw) return null;
 
-    const direct = new Date(raw);
+    const direct = raw.match(
+      /^(\d{1,2}):(\d{2})(?::\d{2})?$/
+    );
 
-    if (!Number.isNaN(direct.getTime())) {
-      return direct;
+    if (direct) {
+      return {
+        hours: Math.min(23, number(direct[1])),
+        minutes: Math.min(59, number(direct[2]))
+      };
+    }
+
+    const arabicPeriod = raw.match(
+      /^(\d{1,2})(?::(\d{2}))?\s*(ص|م)$/
+    );
+
+    if (arabicPeriod) {
+      let hours = number(arabicPeriod[1]) % 12;
+
+      if (arabicPeriod[3] === "م") {
+        hours += 12;
+      }
+
+      return {
+        hours,
+        minutes: Math.min(
+          59,
+          number(arabicPeriod[2])
+        )
+      };
+    }
+
+    const englishPeriod = raw.match(
+      /^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i
+    );
+
+    if (englishPeriod) {
+      let hours = number(englishPeriod[1]) % 12;
+
+      if (
+        englishPeriod[3].toUpperCase() === "PM"
+      ) {
+        hours += 12;
+      }
+
+      return {
+        hours,
+        minutes: Math.min(
+          59,
+          number(englishPeriod[2])
+        )
+      };
+    }
+
+    const parsed = new Date(raw);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return {
+        hours: parsed.getHours(),
+        minutes: parsed.getMinutes()
+      };
     }
 
     return null;
   };
 
-  const startOfDay = (value) => {
-    const result = new Date(value);
-    result.setHours(0, 0, 0, 0);
+  const combineDateAndTime = (
+    dateValue,
+    timeValue
+  ) => {
+    const date = parseDateOnly(dateValue);
+
+    if (!date) return null;
+
+    const time = parseTimeParts(timeValue);
+
+    if (!time) {
+      return date;
+    }
+
+    const result = new Date(date);
+    result.setHours(
+      time.hours,
+      time.minutes,
+      0,
+      0
+    );
+
     return result;
   };
 
-  const daysUntil = (value) => {
-    const date = toDate(value);
+  const startOfDay = (value) => {
+    const date = parseDateOnly(value);
+
     if (!date) return null;
 
+    date.setHours(0, 0, 0, 0);
+    return date;
+  };
+
+  const daysUntil = (value) => {
+    const date = parseDateOnly(value);
+    const today = startOfDay(new Date());
+
+    if (!date || !today) return null;
+
+    date.setHours(0, 0, 0, 0);
+
     return Math.ceil(
-      (
-        startOfDay(date).getTime() -
-        startOfDay(new Date()).getTime()
-      ) / 86400000
+      (date.getTime() - today.getTime()) /
+      86400000
     );
   };
 
   const minutesUntil = (value) => {
-    const date = toDate(value);
-    if (!date) return null;
+    if (!(value instanceof Date)) {
+      return null;
+    }
+
+    if (Number.isNaN(value.getTime())) {
+      return null;
+    }
 
     return Math.round(
-      (date.getTime() - Date.now()) / 60000
+      (value.getTime() - Date.now()) /
+      60000
     );
   };
 
-  const durationDays = (startDate, endDate) => {
-    const start = toDate(startDate);
-    const end = toDate(endDate);
+  const durationDays = (
+    startDate,
+    endDate
+  ) => {
+    const start = startOfDay(startDate);
+    const end = startOfDay(endDate);
 
     if (!start || !end || end < start) {
       return 0;
@@ -271,106 +398,122 @@
 
     return (
       Math.floor(
-        (
-          startOfDay(end).getTime() -
-          startOfDay(start).getTime()
-        ) / 86400000
+        (end.getTime() - start.getTime()) /
+        86400000
       ) + 1
     );
   };
 
-  const combineDateAndTime = (dateValue, timeValue) => {
-    if (!dateValue && !timeValue) return null;
-
-    const date = toDate(dateValue);
-
-    if (!date) {
-      return toDate(timeValue);
+  const subtractMinutes = (
+    dateValue,
+    minutes
+  ) => {
+    if (!(dateValue instanceof Date)) {
+      return null;
     }
 
-    const time = text(timeValue);
-
-    if (!time) {
-      return date;
+    if (Number.isNaN(dateValue.getTime())) {
+      return null;
     }
-
-    const match = time.match(
-      /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/
-    );
-
-    if (!match) {
-      const combined = toDate(
-        `${date.toISOString().slice(0, 10)}T${time}`
-      );
-
-      return combined || date;
-    }
-
-    const result = new Date(date);
-    result.setHours(
-      number(match[1]),
-      number(match[2]),
-      number(match[3]),
-      0
-    );
-
-    return result;
-  };
-
-  const subtractMinutes = (dateValue, minutes) => {
-    const date = toDate(dateValue);
-
-    if (!date) return null;
 
     return new Date(
-      date.getTime() - number(minutes) * 60000
+      dateValue.getTime() -
+      number(minutes) * 60000
     );
   };
 
   const formatTime = (value) => {
-    const date = toDate(value);
+    if (!(value instanceof Date)) {
+      const parts = parseTimeParts(value);
 
-    if (!date) {
-      const raw = text(value);
-      return raw || "";
+      if (!parts) {
+        return text(value);
+      }
+
+      const base = new Date();
+      base.setHours(
+        parts.hours,
+        parts.minutes,
+        0,
+        0
+      );
+
+      value = base;
+    }
+
+    if (Number.isNaN(value.getTime())) {
+      return "";
     }
 
     try {
-      return new Intl.DateTimeFormat("ar-AE", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true
-      }).format(date);
+      return new Intl.DateTimeFormat(
+        "ar-AE",
+        {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        }
+      ).format(value);
     } catch (error) {
-      return date.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit"
-      });
+      return value.toLocaleTimeString(
+        "ar-AE",
+        {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        }
+      );
     }
   };
 
-  const formatShortDate = (value) => {
-    const date = toDate(value);
+  const formatFullDate = (value) => {
+    const date = parseDateOnly(value);
 
     if (!date) return "";
 
     try {
-      return new Intl.DateTimeFormat("ar-AE", {
-        day: "numeric",
-        month: "short",
-        year: "numeric"
-      }).format(date);
+      return new Intl.DateTimeFormat(
+        "ar-AE-u-nu-latn",
+        {
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        }
+      ).format(date);
     } catch (error) {
-      return date.toLocaleDateString();
+      return date.toLocaleDateString(
+        "ar-AE",
+        {
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        }
+      );
     }
   };
 
-  const formatDateTime = (value) => {
-    const date = toDate(value);
+  const formatCompactDate = (value) => {
+    const date = parseDateOnly(value);
 
     if (!date) return "";
 
-    return `${formatShortDate(date)} • ${formatTime(date)}`;
+    try {
+      return new Intl.DateTimeFormat(
+        "ar-AE-u-nu-latn",
+        {
+          day: "numeric",
+          month: "short"
+        }
+      ).format(date);
+    } catch (error) {
+      return date.toLocaleDateString(
+        "ar-AE",
+        {
+          day: "numeric",
+          month: "short"
+        }
+      );
+    }
   };
 
   const tripsFrom = (snapshot) =>
@@ -381,11 +524,13 @@
       ? trip.flight
       : {};
 
-    const outbound = isObject(trip?.outboundFlight)
+    const outbound = isObject(
+      trip?.outboundFlight
+    )
       ? trip.outboundFlight
       : {};
 
-    const directDateTime = firstValue(
+    const direct = firstValue(
       trip?.departureDateTime,
       trip?.flightDateTime,
       trip?.flightDepartureDateTime,
@@ -393,29 +538,29 @@
       flight.departureDateTime
     );
 
-    if (directDateTime) {
-      return toDate(directDateTime);
+    if (direct) {
+      const directDate = new Date(direct);
+
+      if (!Number.isNaN(directDate.getTime())) {
+        return directDate;
+      }
     }
 
-    const dateValue = firstValue(
-      trip?.departureDate,
-      trip?.flightDate,
-      outbound.departureDate,
-      flight.departureDate,
-      trip?.startDate
-    );
-
-    const timeValue = firstValue(
-      trip?.departureTime,
-      trip?.flightTime,
-      trip?.flightDepartureTime,
-      outbound.departureTime,
-      flight.departureTime
-    );
-
     return combineDateAndTime(
-      dateValue,
-      timeValue
+      firstValue(
+        trip?.departureDate,
+        trip?.flightDate,
+        outbound.departureDate,
+        flight.departureDate,
+        trip?.startDate
+      ),
+      firstValue(
+        trip?.departureTime,
+        trip?.flightTime,
+        trip?.flightDepartureTime,
+        outbound.departureTime,
+        flight.departureTime
+      )
     );
   };
 
@@ -424,19 +569,25 @@
       ? trip.flight
       : {};
 
-    const outbound = isObject(trip?.outboundFlight)
+    const outbound = isObject(
+      trip?.outboundFlight
+    )
       ? trip.outboundFlight
       : {};
 
-    const directDateTime = firstValue(
+    const direct = firstValue(
       trip?.arrivalDateTime,
       trip?.flightArrivalDateTime,
       outbound.arrivalDateTime,
       flight.arrivalDateTime
     );
 
-    if (directDateTime) {
-      return toDate(directDateTime);
+    if (direct) {
+      const directDate = new Date(direct);
+
+      if (!Number.isNaN(directDate.getTime())) {
+        return directDate;
+      }
     }
 
     return combineDateAndTime(
@@ -460,7 +611,9 @@
       ? trip.flight
       : {};
 
-    const outbound = isObject(trip?.outboundFlight)
+    const outbound = isObject(
+      trip?.outboundFlight
+    )
       ? trip.outboundFlight
       : {};
 
@@ -532,6 +685,14 @@
         flight.gate,
         flight.departureGate
       ),
+      seat: firstText(
+        trip?.seatNumber,
+        trip?.seat,
+        outbound.seatNumber,
+        outbound.seat,
+        flight.seatNumber,
+        flight.seat
+      ),
       bookingReference: firstText(
         trip?.bookingReference,
         trip?.pnr,
@@ -575,6 +736,7 @@
       ),
       address: firstText(
         trip?.hotelAddress,
+        trip?.accommodationAddress,
         accommodation.address,
         hotel.address
       ),
@@ -602,17 +764,19 @@
   };
 
   const upcomingTripsFrom = (snapshot) => {
-    const now = new Date();
-    const today = startOfDay(now);
+    const today = startOfDay(new Date());
 
     return tripsFrom(snapshot)
       .filter((trip) => {
-        const departureDateTime =
+        const departure =
           getTripDepartureDateTime(trip);
 
         const startDate =
-          departureDateTime ||
-          toDate(trip.startDate);
+          departure ||
+          parseDateOnly(trip.startDate);
+
+        const endDate =
+          parseDateOnly(trip.endDate);
 
         const status = text(
           trip.status
@@ -620,39 +784,52 @@
 
         return (
           startDate &&
+          today &&
           (
-            startOfDay(startDate) >= today ||
+            startDate >= today ||
             (
-              toDate(trip.endDate) &&
-              toDate(trip.endDate) >= now
+              endDate &&
+              endDate >= today
             )
           ) &&
-          !["completed", "cancelled"].includes(status)
+          !["completed", "cancelled"].includes(
+            status
+          )
         );
       })
       .sort((a, b) => {
         const aDate =
           getTripDepartureDateTime(a) ||
-          toDate(a.startDate);
+          parseDateOnly(a.startDate);
 
         const bDate =
           getTripDepartureDateTime(b) ||
-          toDate(b.startDate);
+          parseDateOnly(b.startDate);
 
-        return aDate - bDate;
+        return (
+          (aDate?.getTime() || 0) -
+          (bDate?.getTime() || 0)
+        );
       });
   };
 
   const completedTripsFrom = (snapshot) =>
     tripsFrom(snapshot).filter((trip) => {
-      const status = text(trip.status).toLowerCase();
-      const endDate = toDate(trip.endDate);
+      const status = text(
+        trip.status
+      ).toLowerCase();
+
+      const endDate =
+        parseDateOnly(trip.endDate);
+
+      const today = startOfDay(new Date());
 
       return (
         status === "completed" ||
         (
           endDate &&
-          endDate < startOfDay(new Date())
+          today &&
+          endDate < today
         )
       );
     });
@@ -669,17 +846,25 @@
           ?.trim();
 
       if (country) {
-        countries.add(country.toLowerCase());
+        countries.add(
+          country.toLowerCase()
+        );
       }
     });
 
-    list(snapshot.destinations).forEach((destination) => {
-      const country = text(destination.country);
+    list(snapshot.destinations).forEach(
+      (destination) => {
+        const country = text(
+          destination.country
+        );
 
-      if (country) {
-        countries.add(country.toLowerCase());
+        if (country) {
+          countries.add(
+            country.toLowerCase()
+          );
+        }
       }
-    });
+    );
 
     return countries.size;
   };
@@ -692,9 +877,14 @@
       : {};
 
     const trips = tripsFrom(raw);
-    const upcomingTrips = upcomingTripsFrom(raw);
-    const completedTrips = completedTripsFrom(raw);
-    const nextTrip = upcomingTrips[0] || null;
+    const upcomingTrips =
+      upcomingTripsFrom(raw);
+
+    const completedTrips =
+      completedTripsFrom(raw);
+
+    const nextTrip =
+      upcomingTrips[0] || null;
 
     return {
       raw,
@@ -711,11 +901,16 @@
         : null,
       statistics: {
         totalTrips: trips.length,
-        upcomingTrips: upcomingTrips.length,
-        completedTrips: completedTrips.length,
-        countries: countriesCountFrom(raw),
-        wishlist: list(raw.wishlist).length,
-        memories: list(raw.memories).length
+        upcomingTrips:
+          upcomingTrips.length,
+        completedTrips:
+          completedTrips.length,
+        countries:
+          countriesCountFrom(raw),
+        wishlist:
+          list(raw.wishlist).length,
+        memories:
+          list(raw.memories).length
       }
     };
   };
@@ -723,12 +918,9 @@
   const formatCountdown = (trip) => {
     if (!trip) return "";
 
-    const departureDateTime =
-      getTripDepartureDateTime(trip);
-
     const target =
-      departureDateTime ||
-      toDate(trip.startDate);
+      getTripDepartureDateTime(trip) ||
+      parseDateOnly(trip.startDate);
 
     if (!target) {
       return "موعد الرحلة غير محدد";
@@ -760,7 +952,8 @@
       return `متبقي ${hours} ساعة و${minutes} دقيقة`;
     }
 
-    const remainingDays = daysUntil(target);
+    const remainingDays =
+      daysUntil(target);
 
     if (remainingDays === null) {
       return "موعد الرحلة غير محدد";
@@ -794,7 +987,7 @@
 
     const departure =
       getTripDepartureDateTime(trip) ||
-      toDate(trip.startDate);
+      parseDateOnly(trip.startDate);
 
     const remainingMinutes =
       minutesUntil(departure);
@@ -900,7 +1093,10 @@
       "يوسف";
 
     return `
-      <section class="tic-home-welcome" aria-labelledby="tic-home-welcome-title">
+      <section
+        class="tic-home-welcome"
+        aria-labelledby="tic-home-welcome-title"
+      >
         <div class="tic-home-welcome-copy">
           <span class="tic-home-welcome-label">
             TRAVEL INTELLIGENCE CENTER
@@ -915,7 +1111,10 @@
           </p>
         </div>
 
-        <div class="tic-home-welcome-icon" aria-hidden="true">
+        <div
+          class="tic-home-welcome-icon"
+          aria-hidden="true"
+        >
           ✈
         </div>
       </section>
@@ -926,7 +1125,9 @@
     const ui = getUI();
 
     return `
-      <article class="tic-home-next-card tic-home-next-card-empty">
+      <article
+        class="tic-home-next-card tic-home-next-card-empty"
+      >
         <div class="tic-home-next-top">
           <div>
             <span class="tic-home-kicker">
@@ -938,7 +1139,10 @@
             </h3>
           </div>
 
-          <div class="tic-home-next-icon" aria-hidden="true">
+          <div
+            class="tic-home-next-icon"
+            aria-hidden="true"
+          >
             ✈
           </div>
         </div>
@@ -970,6 +1174,10 @@
         options.emphasis
           ? " is-emphasis"
           : ""
+      }${
+        options.full
+          ? " is-full"
+          : ""
       }">
         <span>
           ${escapeHTML(label)}
@@ -982,38 +1190,260 @@
     `;
   };
 
-  const renderFlightRoute = (flight) => {
+  const renderFlightTimeline = (flight) => {
+    const rows = [];
+
     if (
-      !flight?.departureAirport &&
-      !flight?.arrivalAirport
+      flight.departureDateTime ||
+      flight.departureAirport
     ) {
-      return "";
+      rows.push({
+        type: "departure",
+        label: "الإقلاع",
+        time: flight.departureDateTime
+          ? formatTime(
+              flight.departureDateTime
+            )
+          : "",
+        place:
+          flight.departureAirport,
+        meta: [
+          flight.terminal
+            ? `المبنى ${flight.terminal}`
+            : "",
+          flight.gate
+            ? `البوابة ${flight.gate}`
+            : ""
+        ]
+          .filter(Boolean)
+          .join(" • ")
+      });
     }
 
+    if (
+      flight.arrivalDateTime ||
+      flight.arrivalAirport
+    ) {
+      rows.push({
+        type: "arrival",
+        label: "الوصول",
+        time: flight.arrivalDateTime
+          ? formatTime(
+              flight.arrivalDateTime
+            )
+          : "",
+        place:
+          flight.arrivalAirport,
+        meta: ""
+      });
+    }
+
+    if (!rows.length) return "";
+
     return `
-      <div class="tic-home-flight-route">
-        <div>
-          <small>من</small>
-          <strong>
-            ${escapeHTML(
-              flight.departureAirport ||
-              "غير محدد"
-            )}
-          </strong>
-        </div>
+      <div class="tic-home-flight-timeline">
+        ${rows
+          .map(
+            (row) => `
+              <div
+                class="tic-home-flight-stop"
+                data-flight-stop="${escapeHTML(
+                  row.type
+                )}"
+              >
+                <span
+                  class="tic-home-flight-dot"
+                  aria-hidden="true"
+                ></span>
 
-        <span aria-hidden="true">✈</span>
+                <div class="tic-home-flight-stop-copy">
+                  <small>
+                    ${escapeHTML(row.label)}
+                  </small>
 
-        <div>
-          <small>إلى</small>
-          <strong>
-            ${escapeHTML(
-              flight.arrivalAirport ||
-              "غير محدد"
-            )}
-          </strong>
-        </div>
+                  <strong>
+                    ${escapeHTML(
+                      row.time ||
+                      "الوقت غير محدد"
+                    )}
+                  </strong>
+
+                  ${
+                    row.place
+                      ? `
+                        <p>
+                          ${escapeHTML(row.place)}
+                        </p>
+                      `
+                      : ""
+                  }
+
+                  ${
+                    row.meta
+                      ? `
+                        <em>
+                          ${escapeHTML(row.meta)}
+                        </em>
+                      `
+                      : ""
+                  }
+                </div>
+              </div>
+            `
+          )
+          .join("")}
       </div>
+    `;
+  };
+
+  const renderFlightDetails = (flight) => {
+    const airlineFlight = [
+      flight.airline,
+      flight.flightNumber
+    ]
+      .filter(Boolean)
+      .join(" • ");
+
+    const secondaryFacts = [
+      airlineFlight
+        ? renderTripFact(
+            "شركة ورقم الرحلة",
+            airlineFlight
+          )
+        : "",
+      flight.bookingReference
+        ? renderTripFact(
+            "رقم الحجز",
+            flight.bookingReference
+          )
+        : "",
+      flight.seat
+        ? renderTripFact(
+            "المقعد",
+            flight.seat
+          )
+        : ""
+    ]
+      .filter(Boolean)
+      .join("");
+
+    return `
+      <section
+        class="tic-home-detail-block tic-home-flight-block"
+      >
+        <header>
+          <span>تفاصيل الطيران</span>
+          <strong>رحلتك الجوية</strong>
+        </header>
+
+        ${renderFlightTimeline(flight)}
+
+        ${
+          flight.airportArrivalDateTime
+            ? `
+              <div class="tic-home-airport-time">
+                <div>
+                  <small>
+                    كن في المطار
+                  </small>
+
+                  <strong>
+                    ${escapeHTML(
+                      formatTime(
+                        flight.airportArrivalDateTime
+                      )
+                    )}
+                  </strong>
+                </div>
+
+                <span>
+                  قبل الإقلاع بـ
+                  ${Math.round(
+                    flight.airportLeadMinutes /
+                    60
+                  )}
+                  ساعة
+                </span>
+              </div>
+            `
+            : ""
+        }
+
+        ${
+          secondaryFacts
+            ? `
+              <div class="tic-home-detail-grid tic-home-flight-facts">
+                ${secondaryFacts}
+              </div>
+            `
+            : ""
+        }
+      </section>
+    `;
+  };
+
+  const renderHotelDetails = (hotel) => {
+    if (!hotel?.name) return "";
+
+    const facts = [
+      hotel.checkIn
+        ? renderTripFact(
+            "تسجيل الدخول",
+            formatCompactDate(
+              hotel.checkIn
+            )
+          )
+        : "",
+      hotel.checkOut
+        ? renderTripFact(
+            "تسجيل الخروج",
+            formatCompactDate(
+              hotel.checkOut
+            )
+          )
+        : "",
+      hotel.confirmationNumber
+        ? renderTripFact(
+            "رقم الحجز",
+            hotel.confirmationNumber
+          )
+        : ""
+    ]
+      .filter(Boolean)
+      .join("");
+
+    return `
+      <section
+        class="tic-home-detail-block tic-home-hotel-block"
+      >
+        <header>
+          <span>الإقامة</span>
+
+          <strong>
+            ${escapeHTML(hotel.name)}
+          </strong>
+
+          ${
+            hotel.address
+              ? `
+                <p>
+                  ${escapeHTML(hotel.address)}
+                </p>
+              `
+              : ""
+          }
+        </header>
+
+        ${
+          facts
+            ? `
+              <div class="tic-home-detail-grid">
+                ${facts}
+              </div>
+            `
+            : ""
+        }
+      </section>
     `;
   };
 
@@ -1038,42 +1468,24 @@
         hotel
       );
 
-    const airlineFlight = [
-      flight.airline,
-      flight.flightNumber
-    ]
-      .filter(Boolean)
-      .join(" • ");
-
-    const terminalGate = [
-      flight.terminal
-        ? `مبنى ${flight.terminal}`
-        : "",
-      flight.gate
-        ? `بوابة ${flight.gate}`
-        : ""
-    ]
-      .filter(Boolean)
-      .join(" • ");
-
-    const tripDate = flight.departureDateTime
-      ? formatDateTime(
-          flight.departureDateTime
-        )
-      : formatShortDate(trip.startDate);
+    const travelDate =
+      formatFullDate(
+        flight?.departureDateTime ||
+        trip.startDate
+      );
 
     const hasFlightDetails = Boolean(
-      airlineFlight ||
-      flight.departureDateTime ||
-      terminalGate ||
-      flight.departureAirport ||
-      flight.arrivalAirport
-    );
-
-    const hasHotelDetails = Boolean(
-      hotel.name ||
-      hotel.confirmationNumber ||
-      hotel.checkIn
+      flight &&
+      (
+        flight.airline ||
+        flight.flightNumber ||
+        flight.departureDateTime ||
+        flight.arrivalDateTime ||
+        flight.departureAirport ||
+        flight.arrivalAirport ||
+        flight.terminal ||
+        flight.gate
+      )
     );
 
     return `
@@ -1086,7 +1498,9 @@
         <div class="tic-home-next-top">
           <div>
             <span class="tic-home-kicker">
-              ${escapeHTML(formatCountdown(trip))}
+              ${escapeHTML(
+                formatCountdown(trip)
+              )}
             </span>
 
             <h3>
@@ -1097,29 +1511,41 @@
             </h3>
 
             <p>
-              ${escapeHTML(getTripDestination(trip))}
+              ${escapeHTML(
+                getTripDestination(trip)
+              )}
             </p>
           </div>
 
-          <div class="tic-home-next-icon" aria-hidden="true">
+          <div
+            class="tic-home-next-icon"
+            aria-hidden="true"
+          >
             ✈
           </div>
         </div>
 
         <div class="tic-home-trip-highlight">
           <strong>
-            ${escapeHTML(smartMessage.title)}
+            ${escapeHTML(
+              smartMessage.title
+            )}
           </strong>
 
           <p>
-            ${escapeHTML(smartMessage.message)}
+            ${escapeHTML(
+              smartMessage.message
+            )}
           </p>
         </div>
 
         <div class="tic-home-trip-meta">
           ${renderTripFact(
             "موعد السفر",
-            tripDate
+            travelDate,
+            {
+              full: true
+            }
           )}
 
           ${renderTripFact(
@@ -1137,101 +1563,23 @@
 
         ${
           hasFlightDetails
-            ? `
-              <section class="tic-home-detail-block">
-                <header>
-                  <span>تفاصيل الطيران</span>
-                  <strong>رحلتك الجوية</strong>
-                </header>
-
-                ${renderFlightRoute(flight)}
-
-                <div class="tic-home-detail-grid">
-                  ${renderTripFact(
-                    "شركة ورقم الرحلة",
-                    airlineFlight
-                  )}
-
-                  ${renderTripFact(
-                    "الإقلاع",
-                    flight.departureDateTime
-                      ? formatTime(
-                          flight.departureDateTime
-                        )
-                      : ""
-                  )}
-
-                  ${renderTripFact(
-                    "الوصول",
-                    flight.arrivalDateTime
-                      ? formatTime(
-                          flight.arrivalDateTime
-                        )
-                      : ""
-                  )}
-
-                  ${renderTripFact(
-                    "المبنى والبوابة",
-                    terminalGate
-                  )}
-
-                  ${renderTripFact(
-                    "كن في المطار",
-                    flight.airportArrivalDateTime
-                      ? formatTime(
-                          flight.airportArrivalDateTime
-                        )
-                      : "",
-                    {
-                      emphasis: true
-                    }
-                  )}
-                </div>
-              </section>
-            `
+            ? renderFlightDetails(flight)
             : `
               <button
                 type="button"
                 class="tic-home-add-details"
                 data-tic-action="home-edit-next-trip"
               >
-                <span aria-hidden="true">＋</span>
+                <span aria-hidden="true">
+                  ＋
+                </span>
+
                 أضف بيانات التذكرة والطيران
               </button>
             `
         }
 
-        ${
-          hasHotelDetails
-            ? `
-              <section class="tic-home-detail-block tic-home-hotel-block">
-                <header>
-                  <span>الإقامة</span>
-                  <strong>
-                    ${escapeHTML(
-                      hotel.name ||
-                      "حجز الفندق"
-                    )}
-                  </strong>
-                </header>
-
-                <div class="tic-home-detail-grid">
-                  ${renderTripFact(
-                    "تسجيل الدخول",
-                    hotel.checkIn
-                      ? formatDateTime(hotel.checkIn)
-                      : ""
-                  )}
-
-                  ${renderTripFact(
-                    "رقم الحجز",
-                    hotel.confirmationNumber
-                  )}
-                </div>
-              </section>
-            `
-            : ""
-        }
+        ${renderHotelDetails(hotel)}
 
         <div class="tic-home-next-actions">
           ${ui.button({
@@ -1262,22 +1610,26 @@
     const stats = [
       {
         icon: "✈",
-        value: snapshot.statistics.totalTrips,
+        value:
+          snapshot.statistics.totalTrips,
         label: "الرحلات"
       },
       {
         icon: "◎",
-        value: snapshot.statistics.countries,
+        value:
+          snapshot.statistics.countries,
         label: "الدول"
       },
       {
         icon: "☆",
-        value: snapshot.statistics.wishlist,
+        value:
+          snapshot.statistics.wishlist,
         label: "الأمنيات"
       },
       {
         icon: "◈",
-        value: snapshot.statistics.memories,
+        value:
+          snapshot.statistics.memories,
         label: "الذكريات"
       }
     ];
@@ -1288,7 +1640,10 @@
           .map(
             (item) => `
               <article class="tic-home-stat">
-                <span class="tic-home-stat-icon" aria-hidden="true">
+                <span
+                  class="tic-home-stat-icon"
+                  aria-hidden="true"
+                >
                   ${item.icon}
                 </span>
 
@@ -1297,7 +1652,9 @@
                 </strong>
 
                 <small>
-                  ${escapeHTML(item.label)}
+                  ${escapeHTML(
+                    item.label
+                  )}
                 </small>
               </article>
             `
@@ -1309,6 +1666,7 @@
 
   const renderInspiration = (snapshot) => {
     const trip = snapshot.nextTrip;
+
     const remainingDays = trip
       ? daysUntil(
           getTripDepartureDateTime(trip) ||
@@ -1316,27 +1674,40 @@
         )
       : null;
 
-    let title = "رحلتك تبدأ بفكرة جميلة";
+    let title =
+      "رحلتك تبدأ بفكرة جميلة";
+
     let message =
       "اختر وجهة تحبها، وخطط لها على راحتك، وخلك مستمتع من أول خطوة.";
 
-    if (trip && remainingDays !== null) {
+    if (
+      trip &&
+      remainingDays !== null
+    ) {
       if (
         remainingDays <= 7 &&
         remainingDays >= 0
       ) {
-        title = "قرب موعد المغامرة";
+        title =
+          "قرب موعد المغامرة";
+
         message =
           "رتب أمورك بهدوء واستمتع بحماس الأيام الأخيرة قبل السفر.";
       } else if (
         remainingDays <= 30 &&
         remainingDays > 7
       ) {
-        title = "كل يوم يقربك من رحلتك";
+        title =
+          "كل يوم يقربك من رحلتك";
+
         message =
           "استمتع بالتخطيط؛ أجمل الرحلات تبدأ قبل الوصول.";
-      } else if (remainingDays > 30) {
-        title = "عندك وقت تخلي الرحلة أجمل";
+      } else if (
+        remainingDays > 30
+      ) {
+        title =
+          "عندك وقت تخلي الرحلة أجمل";
+
         message =
           "اكتشف تفاصيل أكثر عن وجهتك واختر التجارب اللي تناسبك.";
       }
@@ -1344,7 +1715,10 @@
 
     return `
       <article class="tic-home-inspiration">
-        <div class="tic-home-inspiration-icon" aria-hidden="true">
+        <div
+          class="tic-home-inspiration-icon"
+          aria-hidden="true"
+        >
           ✦
         </div>
 
@@ -1381,7 +1755,11 @@
 
       ${
         subtitle
-          ? `<p>${escapeHTML(subtitle)}</p>`
+          ? `
+            <p>
+              ${escapeHTML(subtitle)}
+            </p>
+          `
           : ""
       }
     </header>
@@ -1393,12 +1771,16 @@
       data-page="home"
       data-page-version="${PAGE_VERSION}"
       data-has-next-trip="${
-        snapshot.nextTrip ? "true" : "false"
+        snapshot.nextTrip
+          ? "true"
+          : "false"
       }"
     >
       ${renderWelcome(snapshot)}
 
-      <section class="tic-home-section tic-home-next-section">
+      <section
+        class="tic-home-section tic-home-next-section"
+      >
         ${renderSectionHeader({
           eyebrow: "NEXT JOURNEY",
           title: "الرحلة القادمة",
@@ -1410,24 +1792,32 @@
         ${renderNextTrip(snapshot)}
       </section>
 
-      <section class="tic-home-section tic-home-snapshot-section">
+      <section
+        class="tic-home-section tic-home-snapshot-section"
+      >
         ${renderSectionHeader({
           eyebrow: "YOUR TRAVEL",
           title: "سفراتك",
-          subtitle: "أرقام خفيفة من سجل سفرك."
+          subtitle:
+            "أرقام خفيفة من سجل سفرك."
         })}
 
         ${renderStatistics(snapshot)}
       </section>
 
-      <section class="tic-home-section tic-home-inspiration-section">
+      <section
+        class="tic-home-section tic-home-inspiration-section"
+      >
         ${renderInspiration(snapshot)}
       </section>
     </div>
   `;
 
   const refresh = () => {
-    if (!state.container || !state.mounted) {
+    if (
+      !state.container ||
+      !state.mounted
+    ) {
       return false;
     }
 
@@ -1438,9 +1828,11 @@
       renderPage(snapshot);
 
     emit("refreshed", {
-      statistics: snapshot.statistics,
+      statistics:
+        snapshot.statistics,
       nextTripId:
-        snapshot.nextTrip?.id || null
+        snapshot.nextTrip?.id ||
+        null
     });
 
     return true;
@@ -1451,7 +1843,8 @@
 
     if (
       tripForm &&
-      typeof tripForm.openCreate === "function"
+      typeof tripForm.openCreate ===
+        "function"
     ) {
       return tripForm.openCreate({
         source: "home",
@@ -1460,13 +1853,16 @@
       });
     }
 
-    return getRouter()?.go?.("trip-form", {
-      params: {
-        mode: "create",
-        smartImport: true
-      },
-      source: "home-new-trip"
-    });
+    return getRouter()?.go?.(
+      "trip-form",
+      {
+        params: {
+          mode: "create",
+          smartImport: true
+        },
+        source: "home-new-trip"
+      }
+    );
   };
 
   const openEditTrip = (tripId) => {
@@ -1474,22 +1870,30 @@
 
     if (
       tripForm &&
-      typeof tripForm.openEdit === "function"
+      typeof tripForm.openEdit ===
+        "function"
     ) {
-      return tripForm.openEdit(tripId, {
-        source: "home",
-        smartImport: true
-      });
+      return tripForm.openEdit(
+        tripId,
+        {
+          source: "home",
+          smartImport: true
+        }
+      );
     }
 
-    return getRouter()?.go?.("trip-form", {
-      params: {
-        mode: "edit",
-        tripId,
-        smartImport: true
-      },
-      source: "home-edit-next-trip"
-    });
+    return getRouter()?.go?.(
+      "trip-form",
+      {
+        params: {
+          mode: "edit",
+          tripId,
+          smartImport: true
+        },
+        source:
+          "home-edit-next-trip"
+      }
+    );
   };
 
   const registerActions = () => {
@@ -1497,16 +1901,25 @@
 
     if (
       !ui ||
-      typeof ui.registerAction !== "function"
+      typeof ui.registerAction !==
+        "function"
     ) {
       return;
     }
 
-    const register = (name, handler) => {
-      if (ui.hasAction?.(name)) return;
+    const register = (
+      name,
+      handler
+    ) => {
+      if (ui.hasAction?.(name)) {
+        return;
+      }
 
       state.actionUnsubscribers.push(
-        ui.registerAction(name, handler)
+        ui.registerAction(
+          name,
+          handler
+        )
       );
     };
 
@@ -1515,21 +1928,25 @@
       openCreateTrip
     );
 
-    register("home-edit-next-trip", () => {
-      const tripId =
-        state.lastSnapshot?.nextTrip?.id;
+    register(
+      "home-edit-next-trip",
+      () => {
+        const tripId =
+          state.lastSnapshot
+            ?.nextTrip?.id;
 
-      if (!tripId) {
-        getUI()?.toast?.(
-          "لا توجد رحلة قادمة للتعديل.",
-          "warning"
-        );
+        if (!tripId) {
+          getUI()?.toast?.(
+            "لا توجد رحلة قادمة للتعديل.",
+            "warning"
+          );
 
-        return false;
+          return false;
+        }
+
+        return openEditTrip(tripId);
       }
-
-      return openEditTrip(tripId);
-    });
+    );
   };
 
   const subscribeToStore = () => {
@@ -1537,17 +1954,19 @@
 
     if (
       !store ||
-      typeof store.subscribe !== "function" ||
+      typeof store.subscribe !==
+        "function" ||
       state.unsubscribeStore
     ) {
       return;
     }
 
-    state.unsubscribeStore = store.subscribe(() => {
-      if (state.mounted) {
-        refresh();
-      }
-    });
+    state.unsubscribeStore =
+      store.subscribe(() => {
+        if (state.mounted) {
+          refresh();
+        }
+      });
   };
 
   const HomePage = {
@@ -1576,8 +1995,11 @@
     render() {
       this.init();
 
-      const snapshot = buildSnapshot();
-      state.lastSnapshot = snapshot;
+      const snapshot =
+        buildSnapshot();
+
+      state.lastSnapshot =
+        snapshot;
 
       return renderPage(snapshot);
     },
@@ -1585,9 +2007,10 @@
     mount(context = {}) {
       this.init();
 
-      const container = resolveContainer(
-        context.container
-      );
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (!container) {
         throw new Error(
@@ -1595,31 +2018,41 @@
         );
       }
 
-      state.container = container;
+      state.container =
+        container;
+
       state.mounted = true;
 
-      const snapshot = buildSnapshot();
-      state.lastSnapshot = snapshot;
+      const snapshot =
+        buildSnapshot();
+
+      state.lastSnapshot =
+        snapshot;
 
       container.innerHTML =
         renderPage(snapshot);
 
       emit("mounted", {
         nextTripId:
-          snapshot.nextTrip?.id || null,
-        statistics: snapshot.statistics
+          snapshot.nextTrip?.id ||
+          null,
+        statistics:
+          snapshot.statistics
       });
 
       return container;
     },
 
     afterEnter(context = {}) {
-      const container = resolveContainer(
-        context.container
-      );
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (container) {
-        state.container = container;
+        state.container =
+          container;
+
         state.mounted = true;
       }
 
@@ -1647,30 +2080,41 @@
     },
 
     subscribe(listener) {
-      if (typeof listener !== "function") {
+      if (
+        typeof listener !==
+        "function"
+      ) {
         throw new TypeError(
           "TIC Home subscriber must be a function."
         );
       }
 
-      state.subscribers.add(listener);
+      state.subscribers.add(
+        listener
+      );
 
       return () =>
-        state.subscribers.delete(listener);
+        state.subscribers.delete(
+          listener
+        );
     },
 
     destroy() {
       this.unmount();
 
       if (
-        typeof state.unsubscribeStore === "function"
+        typeof state.unsubscribeStore ===
+        "function"
       ) {
         state.unsubscribeStore();
       }
 
       state.actionUnsubscribers.forEach(
         (unsubscribe) => {
-          if (typeof unsubscribe === "function") {
+          if (
+            typeof unsubscribe ===
+            "function"
+          ) {
             unsubscribe();
           }
         }
@@ -1694,56 +2138,77 @@
         id: this.id,
         title: this.title,
         version: this.version,
-        initialized: state.initialized,
-        mounted: state.mounted,
-        hasContainer: Boolean(state.container),
-        storeAvailable: Boolean(getStore()),
-        routerAvailable: Boolean(getRouter()),
-        uiAvailable: Boolean(getUI()),
-        tripFormAvailable: Boolean(
-          getTripForm()
-        ),
+        initialized:
+          state.initialized,
+        mounted:
+          state.mounted,
+        hasContainer:
+          Boolean(state.container),
+        storeAvailable:
+          Boolean(getStore()),
+        routerAvailable:
+          Boolean(getRouter()),
+        uiAvailable:
+          Boolean(getUI()),
+        tripFormAvailable:
+          Boolean(getTripForm()),
         actionCount:
-          state.actionUnsubscribers.length,
+          state.actionUnsubscribers
+            .length,
         subscriberCount:
           state.subscribers.size,
-        hasSnapshot: Boolean(
-          state.lastSnapshot
-        ),
-        hasNextTrip: Boolean(
-          snapshot.nextTrip
-        ),
+        hasSnapshot:
+          Boolean(
+            state.lastSnapshot
+          ),
+        hasNextTrip:
+          Boolean(
+            snapshot.nextTrip
+          ),
         nextTripId:
-          snapshot.nextTrip?.id || null,
+          snapshot.nextTrip?.id ||
+          null,
         smartImportRequested: true
       };
     }
   };
 
-  window.TIC = window.TIC || {};
-  window.TIC.Pages = window.TIC.Pages || {};
-  window.TIC.Pages.home = HomePage;
-  window.TICHomePage = HomePage;
+  window.TIC =
+    window.TIC || {};
+
+  window.TIC.Pages =
+    window.TIC.Pages || {};
+
+  window.TIC.Pages.home =
+    HomePage;
+
+  window.TICHomePage =
+    HomePage;
 
   const router = getRouter();
 
   if (
     router &&
-    typeof router.register === "function"
+    typeof router.register ===
+      "function"
   ) {
     if (!router.has?.("home")) {
-      router.register("home", {
-        id: "home",
-        title: "الرئيسية",
-        module: "home",
-        icon: "⌂",
-        visible: true,
-        order: 1
-      });
+      router.register(
+        "home",
+        {
+          id: "home",
+          title: "الرئيسية",
+          module: "home",
+          icon: "⌂",
+          visible: true,
+          order: 1
+        }
+      );
     }
 
     if (
-      typeof router.registerPage === "function"
+      typeof router.registerPage ===
+      "function"
     ) {
       router.registerPage(
         "home",
