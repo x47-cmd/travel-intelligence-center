@@ -1,7 +1,7 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V3.5.0
-   Visual Section Separation Edition
+   Trips Page Module V3.5.1
+   Unified Color Harmony Edition
 
    File Path:
    js/pages/trips.js
@@ -33,8 +33,8 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.5.0";
-  const STYLE_ID = "tic-trips-v35-styles";
+  const PAGE_VERSION = "3.5.1";
+  const STYLE_ID = "tic-trips-v351-styles";
 
   const state = {
     initialized: false,
@@ -232,7 +232,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.5.0"] {
+      [data-page="trips"][data-page-version="3.5.1"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -1479,27 +1479,29 @@
       }
 
       /* =====================================================
-         Trips V3.5.0 — Visual Section Separation
+         Trips V3.5.1 — Unified Color Harmony
+         Visual separation with one consistent Teal / Navy identity.
          Presentation only; no data or persistence changes.
       ===================================================== */
 
-      [data-page="trips"][data-page-version="3.5.0"] {
-        --trips-journey-accent: #256d8f;
-        --trips-journey-soft: #edf7fb;
-        --trips-passport-accent: #8a641d;
-        --trips-passport-soft: #fff9eb;
+      [data-page="trips"][data-page-version="3.5.1"] {
+        --trips-journey-accent: #176f86;
+        --trips-journey-soft: #eef8fa;
+        --trips-passport-accent: #0f766e;
+        --trips-passport-soft: #f0faf7;
+        --trips-passport-line: #cfe7e1;
         --trips-section-divider: rgba(6, 27, 56, .10);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-shell {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-shell {
         gap: 0;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-hero {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-hero {
         margin-bottom: 26px;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone {
         position: relative;
         display: grid;
         gap: 18px;
@@ -1509,32 +1511,32 @@
         border-radius: 30px;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone + .trips-zone {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone + .trips-zone {
         margin-top: 30px;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--overview {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--overview {
         margin-bottom: 24px;
         padding: 0;
         border: 0;
         background: transparent;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys {
-        border-color: #d6e7ef;
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys {
+        border-color: #d5e7ec;
         background:
-          radial-gradient(circle at 100% 0%, rgba(37,109,143,.10), transparent 31%),
-          linear-gradient(160deg, #f8fcfe 0%, var(--trips-journey-soft) 100%);
-        box-shadow: 0 18px 42px rgba(37, 109, 143, .07);
+          radial-gradient(circle at 100% 0%, rgba(23,111,134,.09), transparent 31%),
+          linear-gradient(160deg, #fbfdfe 0%, var(--trips-journey-soft) 100%);
+        box-shadow: 0 18px 42px rgba(23, 111, 134, .065);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--passport {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--passport {
         padding: 0;
         border: 0;
         background: transparent;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone__marker {
         display: flex;
         align-items: center;
         gap: 11px;
@@ -1543,7 +1545,7 @@
         border-bottom: 1px solid var(--trips-section-divider);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-icon {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone__marker-icon {
         flex: 0 0 auto;
         display: grid;
         place-items: center;
@@ -1553,18 +1555,18 @@
         font-size: 20px;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone__marker-copy {
         min-width: 0;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy small {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone__marker-copy small {
         display: block;
         font-size: 9px;
         font-weight: 950;
         letter-spacing: .09em;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy strong {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone__marker-copy strong {
         display: block;
         margin-top: 2px;
         color: var(--trips-navy);
@@ -1572,42 +1574,43 @@
         line-height: 1.35;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy p {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone__marker-copy p {
         margin: 3px 0 0;
         color: var(--trips-muted);
         font-size: 11px;
         line-height: 1.55;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-zone__marker-icon {
-        background: #dceff7;
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys .trips-zone__marker-icon {
+        background: #dff1f4;
         color: var(--trips-journey-accent);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-zone__marker-copy small,
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-section__eyebrow {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys .trips-zone__marker-copy small,
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys .trips-section__eyebrow {
         color: var(--trips-journey-accent);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-tabs {
-        border-color: #cddfe8;
-        background: rgba(255,255,255,.84);
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys .trips-tabs {
+        border-color: #cfdee5;
+        background: rgba(255,255,255,.86);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-tab.is-active {
-        background: #123b5a;
-        box-shadow: 0 10px 20px rgba(18, 59, 90, .18);
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys .trips-tab.is-active {
+        background: var(--trips-navy);
+        box-shadow: 0 10px 20px rgba(6, 27, 56, .18);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trip-card-v3__cover {
-        background: linear-gradient(135deg, #d9f4f0 0%, #7db8c5 53%, #173f60 100%);
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys .trip-card-v3__cover {
+        background:
+          linear-gradient(135deg, #d7f3ee 0%, #73b9bd 53%, #123f59 100%);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trip-card-v3__open {
-        background: linear-gradient(135deg, #2c88a9, #175b7b);
+      [data-page="trips"][data-page-version="3.5.1"] .trips-zone--journeys .trip-card-v3__open {
+        background: linear-gradient(135deg, #159c90, #0c6f70);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-passport-divider {
         position: relative;
         display: flex;
         align-items: center;
@@ -1616,79 +1619,89 @@
         color: var(--trips-passport-accent);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider::before,
-      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider::after {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-passport-divider::before,
+      [data-page="trips"][data-page-version="3.5.1"] .trips-passport-divider::after {
         content: "";
         flex: 1;
         height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(138,100,29,.28), transparent);
+        background:
+          linear-gradient(
+            90deg,
+            transparent,
+            rgba(15,118,110,.24),
+            transparent
+          );
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider span {
+      [data-page="trips"][data-page-version="3.5.1"] .trips-passport-divider span {
         flex: 0 0 auto;
         display: inline-flex;
         align-items: center;
         gap: 7px;
         min-height: 34px;
         padding: 0 13px;
-        border: 1px solid #ead9ae;
+        border: 1px solid var(--trips-passport-line);
         border-radius: 999px;
-        background: var(--trips-passport-soft);
+        background: #f8fcfb;
         font-size: 10px;
         font-weight: 950;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .passport-section {
-        border-color: #e6d8b4;
+      [data-page="trips"][data-page-version="3.5.1"] .passport-section {
+        border-color: var(--trips-passport-line);
         background:
-          radial-gradient(circle at 92% 0%, rgba(197,145,38,.15), transparent 31%),
-          linear-gradient(155deg, #fffdf8 0%, #f8f1df 100%);
-        box-shadow: 0 20px 48px rgba(112, 81, 22, .09);
+          radial-gradient(circle at 92% 0%, rgba(15,118,110,.10), transparent 31%),
+          linear-gradient(155deg, #ffffff 0%, var(--trips-passport-soft) 100%);
+        box-shadow: 0 20px 48px rgba(15, 82, 78, .075);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .passport-kicker {
+      [data-page="trips"][data-page-version="3.5.1"] .passport-kicker {
         color: var(--trips-passport-accent);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .passport-icon {
-        border: 1px solid #ead9ae;
-        background: #fff6dc;
+      [data-page="trips"][data-page-version="3.5.1"] .passport-icon {
+        border: 1px solid var(--trips-passport-line);
+        background: #eaf8f5;
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .passport-add {
-        background: linear-gradient(135deg, #b8872b, #7d5a1a);
-        box-shadow: 0 11px 25px rgba(125, 90, 26, .18);
+      [data-page="trips"][data-page-version="3.5.1"] .passport-add {
+        background: linear-gradient(135deg, #17a797, #0b756e);
+        box-shadow: 0 11px 25px rgba(15, 118, 110, .17);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .passport-count {
-        border-color: #ead9ae;
-        background: #fffdf7;
-        color: #7d642e;
+      [data-page="trips"][data-page-version="3.5.1"] .passport-count {
+        border-color: var(--trips-passport-line);
+        background: #ffffff;
+        color: var(--trips-muted);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .country-magnet {
-        border-color: #e7d9b8;
+      [data-page="trips"][data-page-version="3.5.1"] .country-magnet {
+        border-color: #d8e8e5;
         background:
-          radial-gradient(circle at 85% 10%, rgba(255,255,255,.72), transparent 28%),
-          linear-gradient(145deg, #fffdf7, #eee3c8);
-        box-shadow: 0 13px 30px rgba(112, 81, 22, .07);
+          radial-gradient(circle at 85% 10%, rgba(255,255,255,.70), transparent 28%),
+          linear-gradient(145deg, #fbfefd, #dff3ee);
+        box-shadow: 0 13px 30px rgba(15, 82, 78, .06);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .country-magnet::after {
-        border-color: rgba(157,112,24,.10);
+      [data-page="trips"][data-page-version="3.5.1"] .country-magnet::after {
+        border-color: rgba(15,143,131,.09);
       }
 
-      [data-page="trips"][data-page-version="3.5.0"] .country-magnet__open {
-        color: #7a5719;
+      [data-page="trips"][data-page-version="3.5.1"] .country-magnet__open {
+        color: var(--trips-teal-dark);
+      }
+
+      [data-page="trips"][data-page-version="3.5.1"] .passport-section .country-magnet__stats > span {
+        background: rgba(255,255,255,.76);
       }
 
       @media (max-width: 520px) {
-        [data-page="trips"][data-page-version="3.5.0"] .trips-zone {
+        [data-page="trips"][data-page-version="3.5.1"] .trips-zone {
           padding: 18px 14px;
           border-radius: 25px;
         }
 
-        [data-page="trips"][data-page-version="3.5.0"] .trips-zone + .trips-zone {
+        [data-page="trips"][data-page-version="3.5.1"] .trips-zone + .trips-zone {
           margin-top: 25px;
         }
       }
