@@ -1,41 +1,37 @@
 /* =========================================================
    Travel Intelligence Center
-   Central Store V2.1.0
-   Travel Passport Lifecycle Ready
+   Central Store V2.2.0
+   Guide Intelligence Integration Ready
 
    File Path:
    js/store.js
 
    Purpose:
    - Single source of truth for the entire application.
-   - Preserves all rich trip, flight, hotel and import fields.
-   - Preserves every existing upcoming, active and previous trip.
-   - Automatically classifies trips by their dates without copying data.
-   - Makes completed trips available to the Travel Passport directly.
-   - Keeps upcoming, active and completed trip views synchronized.
-   - Preserves the complete Budget Intelligence persistence architecture.
-   - Supports expenses, savings, payments, alerts,
-     recommendations, notifications and integration metadata.
-   - Handles localStorage persistence, migration, backup,
-     restore, import, export and subscriptions.
-   - Maintains compatibility with all previous Store APIs.
+   - Preserves rich trip, flight, hotel, passport and finance data.
+   - Automatically classifies trips by local calendar dates.
+   - Keeps Trips, Passport, Guide, Wishlist and Annual Planner synced.
+   - Adds complete persistence APIs required by GuideEngine,
+     TravelAI and PlannerEngine.
+   - Preserves Budget Intelligence persistence architecture.
+   - Supports localStorage, migration, backup, restore,
+     import, export, subscriptions and legacy Store aliases.
 
-   V2.1.0:
-   - Adds safe automatic trip lifecycle classification:
-     upcoming -> active -> completed.
-   - Completed trips remain in the same trips collection and become
-     available to the Travel Passport without duplication.
-   - Cancelled and archived trips are never changed automatically.
-   - Existing completed trips and old travel-library data are preserved.
-   - Adds getTrips(), getUpcomingTrips(), getActiveTrips(),
-     getCompletedTrips(), getPassportTrips() and syncTripStatuses().
-   - Uses local calendar dates to avoid UTC date-shift issues on iPhone.
-   - Preserves all V2.0.0 finance, backup and compatibility APIs.
+   V2.2.0:
+   - Adds annualPlans and guideIntelligence state branches.
+   - Adds normalized wishlist and annual-plan records.
+   - Adds countryCode, planningStatus and checklist support to trips.
+   - Adds Wishlist CRUD APIs.
+   - Adds Annual Planner CRUD and conversion-link persistence.
+   - Adds generic dispatch() compatibility for the new engines.
+   - Adds Guide/Passport statistics synchronized from completed trips.
+   - Preserves every V2.1.0 trip, finance and backup API.
 
    Global APIs:
    - window.TIC.Store
    - window.TICStore
    - window.Store
+   - window.TravelStore
 ========================================================= */
 
 (function centralStoreFactory(window) {
@@ -49,7 +45,7 @@
     );
   }
 
-  const STORE_VERSION = "2.1.0";
+  const STORE_VERSION = "2.2.0";
   const STORAGE_KEY = Config.storage.stateKey;
   const BACKUP_KEY = Config.storage.backupKey;
   const SCHEMA_VERSION = Config.storage.schemaVersion;
@@ -67,6 +63,26 @@
 
   const ACTIVE_STATUSES = ["ongoing", "active"];
   const LOCKED_STATUSES = ["cancelled", "archived"];
+
+  const PLAN_STATUSES = [
+    "idea",
+    "considering",
+    "shortlisted",
+    "planned",
+    "ready",
+    "converted",
+    "cancelled"
+  ];
+
+  const TRIP_PLANNING_STATUSES = [
+    "draft",
+    "planned",
+    "booking",
+    "ready",
+    "active",
+    "completed",
+    "cancelled"
+  ];
 
   const listeners = new Set();
 
@@ -87,14 +103,14 @@
     if (typeof structuredClone === "function") {
       try {
         return structuredClone(value);
-      } catch (error) {
+      } catch (_) {
         // Continue to JSON fallback.
       }
     }
 
     try {
       return JSON.parse(JSON.stringify(value));
-    } catch (error) {
+    } catch (_) {
       return value;
     }
   };
@@ -149,13 +165,16 @@
       (value) => value !== undefined && value !== null && value !== ""
     );
 
+  const normalizeCountryCode = (value) => {
+    const code = toText(value).toUpperCase();
+    return code.length >= 2 && code.length <= 3 ? code : "";
+  };
+
   const normalizeDateValue = (value) => {
     const raw = toText(value);
     if (!raw) return "";
 
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-      return raw;
-    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
 
     const date = new Date(raw);
     if (Number.isNaN(date.getTime())) return raw;
@@ -304,7 +323,8 @@
       updatedAt: nowISO(),
       lastBackupAt: null,
       lastMigrationAt: null,
-      lastTripLifecycleSyncAt: null
+      lastTripLifecycleSyncAt: null,
+      lastGuideSyncAt: null
     },
 
     profile: {
@@ -319,6 +339,12 @@
       annualTravelBudget: 30000,
       monthlyTravelSaving: 1500,
       monthlySaving: 1500,
+      familyTravel: true,
+      halalPreference: true,
+      shattafRequired: true,
+      quietPreference: true,
+      preferredTripDays: 7,
+      preferredClimate: "mild",
       avatar: "",
       createdAt: nowISO(),
       updatedAt: nowISO()
@@ -332,6 +358,8 @@
       visitedCountries: 0,
       visitedCities: 0,
       wishlistCount: 0,
+      annualPlanCount: 0,
+      readyAnnualPlans: 0,
       totalTravelSpend: 0,
       totalTravelBudget: 0,
       savedForTravel: 0,
@@ -345,6 +373,25 @@
     trips: [],
     destinations: [],
     wishlist: [],
+    annualPlans: [],
+
+    passport: {
+      countries: [],
+      visitedCountries: [],
+      history: [],
+      stamps: [],
+      updatedAt: nowISO()
+    },
+
+    guideIntelligence: {
+      selectedCountryCode: null,
+      travelDNA: {},
+      recommendations: [],
+      recentSearches: [],
+      countryViews: {},
+      lastGeneratedAt: null,
+      updatedAt: nowISO()
+    },
 
     guides: {
       savedPlaces: [],
@@ -446,7 +493,7 @@
   });
 
   /* =========================================================
-     Trip lifecycle and normalizers
+     Normalizers
   ========================================================= */
 
   const resolveTripStatus = (status) => {
@@ -486,25 +533,19 @@
   }) => {
     const currentStatus = resolveTripStatus(status);
 
-    if (LOCKED_STATUSES.includes(currentStatus)) {
-      return currentStatus;
-    }
+    if (LOCKED_STATUSES.includes(currentStatus)) return currentStatus;
 
     const normalizedStart = normalizeDateValue(startDate);
-    const normalizedEnd = normalizeDateValue(endDate) ||
+    const normalizedEnd =
+      normalizeDateValue(endDate) ||
       deriveEndDateFromDuration(normalizedStart, durationDays);
 
     const today = dateToUtcNumber(todayISO());
     const start = dateToUtcNumber(normalizedStart);
     const end = dateToUtcNumber(normalizedEnd);
 
-    if (start === null && end === null) {
-      return currentStatus;
-    }
-
-    if (end !== null && today > end) {
-      return "completed";
-    }
+    if (start === null && end === null) return currentStatus;
+    if (end !== null && today > end) return "completed";
 
     if (start !== null && today < start) {
       return UPCOMING_STATUSES.includes(currentStatus)
@@ -529,6 +570,15 @@
     return currentStatus;
   };
 
+  const normalizeTripChecklist = (checklist = {}) => ({
+    flightBooked: toBoolean(checklist.flightBooked, false),
+    hotelBooked: toBoolean(checklist.hotelBooked, false),
+    documentsReady: toBoolean(checklist.documentsReady, false),
+    insuranceReady: toBoolean(checklist.insuranceReady, false),
+    transportPlanned: toBoolean(checklist.transportPlanned, false),
+    itineraryReady: toBoolean(checklist.itineraryReady, false)
+  });
+
   const normalizeTrip = (trip = {}) => {
     const source = isObject(trip) ? clone(trip) : {};
 
@@ -543,15 +593,21 @@
     );
 
     const startDate = normalizeDateValue(source.startDate);
-    const sourceDuration = Math.max(0, toNumber(source.durationDays, 0));
+    const sourceDuration = Math.max(
+      0,
+      toNumber(firstDefined(source.durationDays, source.days), 0)
+    );
+
     const endDate =
       normalizeDateValue(source.endDate) ||
       deriveEndDateFromDuration(startDate, sourceDuration);
+
     const durationDays = calculateDurationDays(
       startDate,
       endDate,
       sourceDuration
     );
+
     const previousStatus = resolveTripStatus(source.status);
     const status = resolveLifecycleStatus({
       status: previousStatus,
@@ -565,14 +621,45 @@
         ? nowISO()
         : source.lifecycleChangedAt || null;
 
+    const planningStatus = TRIP_PLANNING_STATUSES.includes(
+      toText(source.planningStatus)
+    )
+      ? toText(source.planningStatus)
+      : status === "completed"
+        ? "completed"
+        : status === "active"
+          ? "active"
+          : status === "ready"
+            ? "ready"
+            : "planned";
+
     return {
       ...source,
 
       id: source.id || createId("trip"),
       title: toText(source.title),
-      destination: toText(source.destination),
-      country: toText(source.country),
-      city: toText(source.city),
+      destination: toText(
+        firstDefined(source.destination, source.destinationCountry)
+      ),
+      country: toText(
+        firstDefined(source.country, source.destinationCountry)
+      ),
+      countryCode: normalizeCountryCode(
+        firstDefined(
+          source.countryCode,
+          source.destinationCountryCode,
+          source.guideCountryCode,
+          source.destination?.countryCode
+        )
+      ),
+      guideCountryCode: normalizeCountryCode(
+        firstDefined(
+          source.guideCountryCode,
+          source.countryCode,
+          source.destinationCountryCode
+        )
+      ),
+      city: toText(firstDefined(source.city, source.destinationCity)),
 
       purpose: toText(source.purpose, "leisure") || "leisure",
       tripType: toText(source.tripType, "family") || "family",
@@ -581,6 +668,7 @@
       priority: toText(source.priority, "normal") || "normal",
 
       status,
+      planningStatus,
       lifecycleStatus: status,
       lifecycleChangedAt,
       completedAt:
@@ -591,6 +679,7 @@
       startDate,
       endDate,
       durationDays,
+      days: durationDays,
 
       travelers: Math.max(
         1,
@@ -663,9 +752,7 @@
       hotelBookingReference: toText(
         source.hotelBookingReference || source.hotelConfirmationNumber
       ),
-      hotelCheckIn: normalizeDateValue(
-        source.hotelCheckIn || source.checkIn
-      ),
+      hotelCheckIn: normalizeDateValue(source.hotelCheckIn || source.checkIn),
       hotelCheckOut: normalizeDateValue(
         source.hotelCheckOut || source.checkOut
       ),
@@ -677,6 +764,10 @@
       visaRequired: toBoolean(source.visaRequired, false),
       insuranceRequired: toBoolean(source.insuranceRequired, true),
       featured: toBoolean(source.featured, false),
+
+      annualPlanId: source.annualPlanId || null,
+      source: toText(source.source, "manual") || "manual",
+      checklist: normalizeTripChecklist(source.checklist),
 
       ticketImport: source.ticketImport ? clone(source.ticketImport) : null,
       hotelImport: source.hotelImport ? clone(source.hotelImport) : null,
@@ -691,7 +782,11 @@
 
       flights: toArray(source.flights),
       bookings: toArray(source.bookings),
-      itinerary: toArray(source.itinerary),
+      itinerary: Array.isArray(source.itinerary)
+        ? clone(source.itinerary)
+        : source.itinerary
+          ? clone(source.itinerary)
+          : [],
       expenses: toArray(source.expenses),
       documents: toArray(source.documents),
       packing: toArray(source.packing),
@@ -699,6 +794,96 @@
 
       coverImage: toText(source.coverImage),
       archivedAt: source.archivedAt || null,
+      createdAt: source.createdAt || nowISO(),
+      updatedAt: nowISO()
+    };
+  };
+
+  const normalizeWishlistItem = (item = {}) => {
+    const source = isObject(item) ? clone(item) : { countryCode: item };
+
+    return {
+      ...source,
+      id: source.id || createId("wishlist"),
+      countryCode: normalizeCountryCode(
+        firstDefined(
+          source.countryCode,
+          source.code,
+          source.iso2,
+          source.country?.code
+        )
+      ),
+      countryName: toText(
+        firstDefined(
+          source.countryName,
+          source.country?.nameAr,
+          typeof source.country === "string" ? source.country : ""
+        )
+      ),
+      addedAt: source.addedAt || source.createdAt || nowISO(),
+      source: toText(source.source, "guide") || "guide",
+      priority: Math.max(1, Math.min(5, toNumber(source.priority, 3))),
+      preferredMonth: source.preferredMonth
+        ? Math.max(1, Math.min(12, toNumber(source.preferredMonth, 1)))
+        : null,
+      preferredYear: toNumber(source.preferredYear, 0) || null,
+      notes: toText(source.notes),
+      metadata: isObject(source.metadata) ? clone(source.metadata) : {},
+      createdAt: source.createdAt || nowISO(),
+      updatedAt: nowISO()
+    };
+  };
+
+  const normalizeAnnualPlan = (plan = {}) => {
+    const source = isObject(plan) ? clone(plan) : {};
+
+    const status = PLAN_STATUSES.includes(toText(source.status))
+      ? toText(source.status)
+      : "idea";
+
+    return {
+      ...source,
+      id: source.id || createId("annual_plan"),
+      countryCode: normalizeCountryCode(
+        firstDefined(
+          source.countryCode,
+          source.code,
+          source.destination?.countryCode
+        )
+      ),
+      countryName: toText(
+        firstDefined(
+          source.countryName,
+          source.destination?.countryName,
+          source.country
+        )
+      ),
+      year: Math.max(
+        new Date().getFullYear(),
+        toNumber(source.year, new Date().getFullYear())
+      ),
+      month: source.month
+        ? Math.max(1, Math.min(12, toNumber(source.month, 1)))
+        : null,
+      days: Math.max(1, toNumber(source.days, 7)),
+      travelers: Math.max(1, toNumber(source.travelers, 1)),
+      budgetAED: toNonNegative(
+        firstDefined(source.budgetAED, source.budget, 0)
+      ),
+      status,
+      source: toText(source.source, "guide") || "guide",
+      convertedTripId: source.convertedTripId || source.tripId || null,
+      checklist: {
+        destinationSelected:
+          source.checklist?.destinationSelected !== false,
+        budgetReviewed: toBoolean(source.checklist?.budgetReviewed, false),
+        datesSelected: toBoolean(source.checklist?.datesSelected, false),
+        flightBooked: toBoolean(source.checklist?.flightBooked, false),
+        hotelBooked: toBoolean(source.checklist?.hotelBooked, false),
+        documentsReady: toBoolean(source.checklist?.documentsReady, false)
+      },
+      tags: toArray(source.tags),
+      notes: toText(source.notes),
       createdAt: source.createdAt || nowISO(),
       updatedAt: nowISO()
     };
@@ -854,9 +1039,7 @@
       calculatedBalance
     );
 
-    if (savingEntries.length) {
-      currentState.savings.balance = calculatedBalance;
-    }
+    if (savingEntries.length) currentState.savings.balance = calculatedBalance;
 
     currentState.savings.currentBalance = toNumber(
       currentState.savings.balance,
@@ -1005,13 +1188,17 @@
     merged.meta.schemaVersion = SCHEMA_VERSION;
     merged.meta.updatedAt = nowISO();
 
-    merged.trips = Array.isArray(merged.trips)
-      ? uniqueById(merged.trips.map(normalizeTrip))
-      : [];
+    merged.trips = uniqueById(toArray(merged.trips).map(normalizeTrip));
+    merged.wishlist = uniqueById(
+      toArray(merged.wishlist).map(normalizeWishlistItem)
+    ).filter((item) => item.countryCode);
+
+    merged.annualPlans = uniqueById(
+      toArray(merged.annualPlans).map(normalizeAnnualPlan)
+    ).filter((plan) => plan.countryCode);
 
     [
       "destinations",
-      "wishlist",
       "documents",
       "reviews",
       "memories",
@@ -1020,10 +1207,42 @@
       if (!Array.isArray(merged[key])) merged[key] = [];
     });
 
+    merged.passport = isObject(merged.passport)
+      ? merged.passport
+      : clone(defaults.passport);
+
+    merged.guideIntelligence = isObject(merged.guideIntelligence)
+      ? merged.guideIntelligence
+      : clone(defaults.guideIntelligence);
+
     syncFinanceAliases(merged);
     recalculateTripSpending(merged);
 
     return merged;
+  };
+
+  const calculatePlanReadiness = (plan) => {
+    const checklist = isObject(plan?.checklist) ? plan.checklist : {};
+
+    const steps = [
+      checklist.destinationSelected !== false,
+      checklist.budgetReviewed === true,
+      checklist.datesSelected === true,
+      checklist.flightBooked === true,
+      checklist.hotelBooked === true,
+      checklist.documentsReady === true
+    ];
+
+    const completed = steps.filter(Boolean).length;
+
+    return {
+      completed,
+      total: steps.length,
+      percent: Math.round((completed / steps.length) * 100),
+      readyForTrip:
+        checklist.flightBooked === true &&
+        checklist.hotelBooked === true
+    };
   };
 
   const calculateStatistics = (currentState) => {
@@ -1034,23 +1253,29 @@
         expense.isDeleted !== true &&
         expense.status !== "cancelled"
     );
+
     const wishlist = toArray(currentState.wishlist);
+    const annualPlans = toArray(currentState.annualPlans);
     const visibleTrips = trips.filter((trip) => trip.status !== "archived");
     const completedTrips = visibleTrips.filter(
       (trip) => trip.status === "completed"
     );
 
     const countries = new Set(
-      completedTrips.map((trip) => toText(trip.country)).filter(Boolean)
+      completedTrips
+        .map((trip) => trip.countryCode || toText(trip.country).toLowerCase())
+        .filter(Boolean)
     );
+
     const cities = new Set(
-      completedTrips.map((trip) => toText(trip.city)).filter(Boolean)
+      completedTrips.map((trip) => toText(trip.city).toLowerCase()).filter(Boolean)
     );
 
     const totalTravelSpend = expenses.reduce(
       (total, expense) => total + toNonNegative(expense.amount),
       0
     );
+
     const totalTravelBudget = visibleTrips.reduce(
       (total, trip) => total + toNonNegative(trip.budget),
       0
@@ -1059,9 +1284,11 @@
     const overduePayments = currentState.payments.filter(
       (payment) => payment.status === "overdue"
     ).length;
+
     const activeBudgetAlerts = currentState.budgetAlerts.items.filter(
       (alert) => !["resolved", "dismissed"].includes(alert.status)
     ).length;
+
     const unreadBudgetNotifications =
       currentState.budgetNotifications.items.filter(
         (notification) =>
@@ -1080,6 +1307,10 @@
       visitedCountries: countries.size,
       visitedCities: cities.size,
       wishlistCount: wishlist.length,
+      annualPlanCount: annualPlans.length,
+      readyAnnualPlans: annualPlans.filter(
+        (plan) => calculatePlanReadiness(plan).readyForTrip
+      ).length,
       totalTravelSpend,
       totalTravelBudget,
       savedForTravel: toNumber(currentState.savings.balance, 0),
@@ -1114,8 +1345,8 @@
      Persistence and subscriptions
   ========================================================= */
 
-  const dispatchStoreEvents = (event, snapshot) => {
-    const detail = { state: snapshot, event };
+  const dispatchStoreEvents = (event, snapshotValue) => {
+    const detail = { state: snapshotValue, event };
 
     ["tic:store-change", "store:changed"].forEach((name) => {
       window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -1123,17 +1354,17 @@
   };
 
   const notifyListeners = (event = {}) => {
-    const snapshot = clone(state);
+    const snapshotValue = clone(state);
 
     listeners.forEach((listener) => {
       try {
-        listener(snapshot, event);
+        listener(snapshotValue, event);
       } catch (error) {
         console.error("TIC Store subscriber error:", error);
       }
     });
 
-    dispatchStoreEvents(event, snapshot);
+    dispatchStoreEvents(event, snapshotValue);
   };
 
   const persistImmediately = (event = { type: "persist" }) => {
@@ -1226,13 +1457,30 @@
 
   const findTripIndex = (tripId) =>
     state.trips.findIndex((trip) => String(trip.id) === String(tripId));
+
   const findExpenseIndex = (expenseId) =>
     state.expenses.findIndex(
       (expense) => String(expense.id) === String(expenseId)
     );
+
   const findPaymentIndex = (paymentId) =>
     state.payments.findIndex(
       (payment) => String(payment.id) === String(paymentId)
+    );
+
+  const findWishlistIndex = (identifier) => {
+    const code = normalizeCountryCode(identifier);
+
+    return state.wishlist.findIndex(
+      (item) =>
+        String(item.id) === String(identifier) ||
+        (code && item.countryCode === code)
+    );
+  };
+
+  const findAnnualPlanIndex = (planId) =>
+    state.annualPlans.findIndex(
+      (plan) => String(plan.id) === String(planId)
     );
 
   /* =========================================================
@@ -1350,7 +1598,81 @@
     },
 
     /* =======================================================
-       Trip APIs and automatic lifecycle
+       Generic action dispatcher
+    ======================================================= */
+
+    dispatch(actionOrObject, payload) {
+      const action =
+        typeof actionOrObject === "string"
+          ? actionOrObject
+          : actionOrObject?.type;
+
+      const data =
+        typeof actionOrObject === "string"
+          ? payload
+          : actionOrObject?.payload;
+
+      const handlers = {
+        "trips/add": () => this.createTrip(data),
+        ADD_TRIP: () => this.createTrip(data),
+        "trip/add": () => this.createTrip(data),
+
+        "trips/update": () => this.updateTrip(data?.id, data),
+        UPDATE_TRIP: () => this.updateTrip(data?.id, data),
+        "trip/update": () => this.updateTrip(data?.id, data),
+
+        "wishlist/add": () => this.addWishlistItem(data),
+        ADD_WISHLIST_ITEM: () => this.addWishlistItem(data),
+        "guide/addWishlist": () => this.addWishlistItem(data),
+
+        "wishlist/update": () => this.updateWishlistItem(data?.id, data),
+        UPDATE_WISHLIST_ITEM: () => this.updateWishlistItem(data?.id, data),
+        "guide/updateWishlist": () =>
+          this.updateWishlistItem(data?.id, data),
+
+        "wishlist/remove": () =>
+          this.removeWishlistItem(data?.id || data?.countryCode),
+        REMOVE_WISHLIST_ITEM: () =>
+          this.removeWishlistItem(data?.id || data?.countryCode),
+        "guide/removeWishlist": () =>
+          this.removeWishlistItem(data?.id || data?.countryCode),
+
+        "annualPlans/add": () => this.addAnnualPlan(data),
+        ADD_ANNUAL_PLAN: () => this.addAnnualPlan(data),
+        "guide/addAnnualPlan": () => this.addAnnualPlan(data),
+
+        "annualPlans/update": () =>
+          this.updateAnnualPlan(data?.id, data),
+        UPDATE_ANNUAL_PLAN: () =>
+          this.updateAnnualPlan(data?.id, data),
+        "guide/updateAnnualPlan": () =>
+          this.updateAnnualPlan(data?.id, data),
+
+        "annualPlans/remove": () =>
+          this.removeAnnualPlan(data?.id),
+        REMOVE_ANNUAL_PLAN: () =>
+          this.removeAnnualPlan(data?.id),
+        "guide/removeAnnualPlan": () =>
+          this.removeAnnualPlan(data?.id)
+      };
+
+      if (!handlers[action]) {
+        throw new Error(`TIC Store: unsupported action "${action}".`);
+      }
+
+      return handlers[action]();
+    },
+
+    commit(actionOrObject, payload) {
+      return this.dispatch(actionOrObject, payload);
+    },
+
+    execute(actionOrObject, payload) {
+      return this.dispatch(actionOrObject, payload);
+    },
+
+    /* =======================================================
+       Trip APIs and lifecycle
     ======================================================= */
 
     syncTripStatuses(options = {}) {
@@ -1396,7 +1718,19 @@
         const statuses = Array.isArray(options.status)
           ? options.status
           : [options.status];
+
         items = items.filter((trip) => statuses.includes(trip.status));
+      }
+
+      if (options.planningStatus) {
+        items = items.filter(
+          (trip) => trip.planningStatus === options.planningStatus
+        );
+      }
+
+      if (options.countryCode) {
+        const code = normalizeCountryCode(options.countryCode);
+        items = items.filter((trip) => trip.countryCode === code);
       }
 
       if (options.country) {
@@ -1446,10 +1780,12 @@
 
     createTrip(tripData) {
       const trip = normalizeTrip(tripData);
+
       const titleMinLength = toNumber(
         Config.validation?.trip?.titleMinLength,
         1
       );
+
       const titleMaxLength = toNumber(
         Config.validation?.trip?.titleMaxLength,
         200
@@ -1517,20 +1853,43 @@
       return this.getTrip(tripId);
     },
 
+    updateTripChecklist(tripId, changes = {}) {
+      const trip = this.getTrip(tripId);
+      if (!trip) return null;
+
+      const checklist = normalizeTripChecklist({
+        ...trip.checklist,
+        ...clone(changes)
+      });
+
+      const planningStatus =
+        checklist.flightBooked && checklist.hotelBooked
+          ? "ready"
+          : trip.planningStatus;
+
+      return this.updateTrip(tripId, {
+        checklist,
+        planningStatus
+      });
+    },
+
     deleteTrip(tripId) {
       const index = findTripIndex(tripId);
       if (index === -1) return false;
 
       state.trips.splice(index, 1);
+
       state.expenses = state.expenses.filter(
         (expense) => String(expense.tripId) !== String(tripId)
       );
+
       state.payments = state.payments.filter(
         (payment) => String(payment.tripId) !== String(tripId)
       );
 
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "trip-deleted", tripId });
+
       return true;
     },
 
@@ -1553,6 +1912,280 @@
           durationDays: trip.durationDays
         }),
         archivedAt: null
+      });
+    },
+
+    /* =======================================================
+       Wishlist APIs
+    ======================================================= */
+
+    getWishlist(options = {}) {
+      let items = clone(state.wishlist);
+
+      if (options.countryCode) {
+        const code = normalizeCountryCode(options.countryCode);
+        items = items.filter((item) => item.countryCode === code);
+      }
+
+      return items;
+    },
+
+    getWishlistItem(identifier) {
+      const index = findWishlistIndex(identifier);
+      return index === -1 ? null : clone(state.wishlist[index]);
+    },
+
+    isWishlisted(identifier) {
+      return findWishlistIndex(identifier) !== -1;
+    },
+
+    addWishlistItem(itemData) {
+      const item = normalizeWishlistItem(itemData);
+
+      if (!item.countryCode) {
+        throw new Error("رمز الدولة مطلوب لإضافة الأمنية.");
+      }
+
+      const existingIndex = findWishlistIndex(item.countryCode);
+
+      if (existingIndex !== -1) {
+        return clone(state.wishlist[existingIndex]);
+      }
+
+      state.wishlist.unshift(item);
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "wishlist-item-created",
+        wishlistId: item.id,
+        countryCode: item.countryCode
+      });
+
+      return this.getWishlistItem(item.id);
+    },
+
+    addWishlist(itemData) {
+      return this.addWishlistItem(itemData);
+    },
+
+    updateWishlistItem(identifier, changes = {}) {
+      const index = findWishlistIndex(identifier);
+      if (index === -1) return null;
+
+      const current = state.wishlist[index];
+
+      state.wishlist[index] = normalizeWishlistItem({
+        ...current,
+        ...clone(changes),
+        id: current.id,
+        countryCode: current.countryCode,
+        createdAt: current.createdAt
+      });
+
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "wishlist-item-updated",
+        wishlistId: current.id
+      });
+
+      return this.getWishlistItem(current.id);
+    },
+
+    removeWishlistItem(identifier) {
+      const index = findWishlistIndex(identifier);
+      if (index === -1) return false;
+
+      const [removed] = state.wishlist.splice(index, 1);
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "wishlist-item-deleted",
+        wishlistId: removed.id,
+        countryCode: removed.countryCode
+      });
+
+      return true;
+    },
+
+    removeWishlist(identifier) {
+      return this.removeWishlistItem(identifier);
+    },
+
+    toggleWishlist(itemData) {
+      const identifier =
+        itemData?.id ||
+        itemData?.countryCode ||
+        itemData;
+
+      if (this.isWishlisted(identifier)) {
+        this.removeWishlistItem(identifier);
+        return null;
+      }
+
+      return this.addWishlistItem(itemData);
+    },
+
+    /* =======================================================
+       Annual Planner APIs
+    ======================================================= */
+
+    getAnnualPlans(options = {}) {
+      let items = clone(state.annualPlans);
+
+      if (options.year) {
+        items = items.filter(
+          (plan) => plan.year === Number(options.year)
+        );
+      }
+
+      if (options.status) {
+        items = items.filter(
+          (plan) => plan.status === options.status
+        );
+      }
+
+      if (options.countryCode) {
+        const code = normalizeCountryCode(options.countryCode);
+        items = items.filter((plan) => plan.countryCode === code);
+      }
+
+      items.sort((a, b) => {
+        if (a.year !== b.year) return a.year - b.year;
+        return (a.month || 13) - (b.month || 13);
+      });
+
+      return items;
+    },
+
+    getAnnualPlan(planId) {
+      const index = findAnnualPlanIndex(planId);
+      return index === -1 ? null : clone(state.annualPlans[index]);
+    },
+
+    addAnnualPlan(planData) {
+      const plan = normalizeAnnualPlan(planData);
+
+      if (!plan.countryCode) {
+        throw new Error("الدولة مطلوبة لإنشاء الخطة السنوية.");
+      }
+
+      const duplicate = state.annualPlans.find(
+        (item) =>
+          item.countryCode === plan.countryCode &&
+          item.year === plan.year &&
+          item.month === plan.month &&
+          item.status !== "cancelled"
+      );
+
+      if (duplicate) return clone(duplicate);
+
+      state.annualPlans.push(plan);
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "annual-plan-created",
+        planId: plan.id
+      });
+
+      return this.getAnnualPlan(plan.id);
+    },
+
+    createAnnualPlan(planData) {
+      return this.addAnnualPlan(planData);
+    },
+
+    updateAnnualPlan(planId, changes = {}) {
+      const index = findAnnualPlanIndex(planId);
+      if (index === -1) return null;
+
+      const current = state.annualPlans[index];
+
+      state.annualPlans[index] = normalizeAnnualPlan({
+        ...current,
+        ...clone(changes),
+        id: current.id,
+        countryCode: current.countryCode,
+        createdAt: current.createdAt
+      });
+
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "annual-plan-updated",
+        planId
+      });
+
+      return this.getAnnualPlan(planId);
+    },
+
+    removeAnnualPlan(planId) {
+      const index = findAnnualPlanIndex(planId);
+      if (index === -1) return false;
+
+      state.annualPlans.splice(index, 1);
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "annual-plan-deleted",
+        planId
+      });
+
+      return true;
+    },
+
+    deleteAnnualPlan(planId) {
+      return this.removeAnnualPlan(planId);
+    },
+
+    linkAnnualPlanToTrip(planId, tripId) {
+      return this.updateAnnualPlan(planId, {
+        status: "converted",
+        convertedTripId: tripId
+      });
+    },
+
+    /* =======================================================
+       Guide Intelligence APIs
+    ======================================================= */
+
+    getGuideIntelligence() {
+      return clone(state.guideIntelligence);
+    },
+
+    setGuideIntelligence(payload = {}) {
+      state.guideIntelligence = deepMerge(
+        state.guideIntelligence,
+        payload
+      );
+
+      state.guideIntelligence.updatedAt = nowISO();
+      state.meta.lastGuideSyncAt = nowISO();
+
+      schedulePersist({
+        type: "guide-intelligence-updated"
+      });
+
+      return this.getGuideIntelligence();
+    },
+
+    setTravelDNA(payload = {}) {
+      return this.setGuideIntelligence({
+        travelDNA: clone(payload),
+        lastGeneratedAt: nowISO()
+      });
+    },
+
+    setGuideRecommendations(items = []) {
+      return this.setGuideIntelligence({
+        recommendations: toArray(items),
+        lastGeneratedAt: nowISO()
+      });
+    },
+
+    setSelectedGuideCountry(countryCode) {
+      return this.setGuideIntelligence({
+        selectedCountryCode: normalizeCountryCode(countryCode) || null
       });
     },
 
@@ -1590,6 +2223,7 @@
       const item = state.expenses.find(
         (expense) => String(expense.id) === String(expenseId)
       );
+
       return item ? clone(item) : null;
     },
 
@@ -1601,12 +2235,14 @@
       const expense = normalizeExpense(expenseData);
 
       if (!expense.title) throw new Error("اسم المصروف مطلوب.");
+
       if (expense.amount <= 0) {
         throw new Error("قيمة المصروف يجب أن تكون أكبر من صفر.");
       }
 
       state.expenses.unshift(expense);
       state = calculateStatistics(normalizeState(state));
+
       persistImmediately({
         type: "expense-created",
         expenseId: expense.id,
@@ -1621,6 +2257,7 @@
       if (index === -1) return null;
 
       const current = state.expenses[index];
+
       state.expenses[index] = normalizeExpense({
         ...current,
         ...clone(changes),
@@ -1630,6 +2267,7 @@
 
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "expense-updated", expenseId });
+
       return this.getExpense(expenseId);
     },
 
@@ -1649,6 +2287,7 @@
 
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "expense-deleted", expenseId });
+
       return true;
     },
 
@@ -1669,6 +2308,7 @@
 
       state.savings.entries.unshift(entry);
       state = calculateStatistics(normalizeState(state));
+
       persistImmediately({
         type:
           entry.type === "withdrawal"
@@ -1699,7 +2339,12 @@
 
       state.savings.monthlySaving = monthlySaving;
       state = calculateStatistics(normalizeState(state));
-      persistImmediately({ type: "savings-plan-updated", monthlySaving });
+
+      persistImmediately({
+        type: "savings-plan-updated",
+        monthlySaving
+      });
+
       return this.getSavings();
     },
 
@@ -1707,6 +2352,7 @@
       state.savings = { ...state.savings, ...clone(plan) };
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "savings-plan-updated" });
+
       return this.getSavings();
     },
 
@@ -1740,6 +2386,7 @@
       const item = state.payments.find(
         (payment) => String(payment.id) === String(paymentId)
       );
+
       return item ? clone(item) : null;
     },
 
@@ -1747,13 +2394,19 @@
       const payment = normalizePayment(paymentData);
 
       if (!payment.title) throw new Error("اسم الدفعة مطلوب.");
+
       if (payment.amount <= 0) {
         throw new Error("قيمة الدفعة يجب أن تكون أكبر من صفر.");
       }
 
       state.payments.unshift(payment);
       state = calculateStatistics(normalizeState(state));
-      persistImmediately({ type: "payment-created", paymentId: payment.id });
+
+      persistImmediately({
+        type: "payment-created",
+        paymentId: payment.id
+      });
+
       return this.getPayment(payment.id);
     },
 
@@ -1762,6 +2415,7 @@
       if (index === -1) return null;
 
       const current = state.payments[index];
+
       state.payments[index] = normalizePayment({
         ...current,
         ...clone(changes),
@@ -1771,6 +2425,7 @@
 
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "payment-updated", paymentId });
+
       return this.getPayment(paymentId);
     },
 
@@ -1781,6 +2436,7 @@
       const amount = toNonNegative(
         firstDefined(paymentData.amount, current.remainingAmount, 0)
       );
+
       const nextPaidAmount = Math.min(
         current.amount,
         current.paidAmount + amount
@@ -1807,7 +2463,12 @@
         this.updatePayment(paymentId, { expenseId: expense.id });
       }
 
-      persistImmediately({ type: "payment-paid", paymentId, amount });
+      persistImmediately({
+        type: "payment-paid",
+        paymentId,
+        amount
+      });
+
       return this.getPayment(paymentId);
     },
 
@@ -1830,6 +2491,7 @@
 
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "payment-deleted", paymentId });
+
       return true;
     },
 
@@ -1841,6 +2503,7 @@
       state.budgetAlerts = deepMerge(state.budgetAlerts, payload);
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "budget-alerts-updated" });
+
       return clone(state.budgetAlerts);
     },
 
@@ -1849,8 +2512,10 @@
         state.budgetRecommendations,
         payload
       );
+
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "budget-recommendations-updated" });
+
       return clone(state.budgetRecommendations);
     },
 
@@ -1859,8 +2524,10 @@
         state.budgetNotifications,
         payload
       );
+
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "budget-notifications-updated" });
+
       return clone(state.budgetNotifications);
     },
 
@@ -1869,9 +2536,14 @@
         state.budgetIntelligence,
         payload
       );
+
       state.budgetIntelligence.updatedAt = nowISO();
       state = calculateStatistics(normalizeState(state));
-      schedulePersist({ type: "budget-intelligence-updated" });
+
+      schedulePersist({
+        type: "budget-intelligence-updated"
+      });
+
       return clone(state.budgetIntelligence);
     },
 
@@ -1881,6 +2553,7 @@
 
     createBackup() {
       const backups = this.getBackups();
+
       const backup = {
         id: createId("backup"),
         createdAt: nowISO(),
@@ -1891,12 +2564,20 @@
       };
 
       backups.unshift(backup);
-      const limitedBackups = backups.slice(0, MAX_BACKUPS);
 
       try {
-        localStorage.setItem(BACKUP_KEY, JSON.stringify(limitedBackups));
+        localStorage.setItem(
+          BACKUP_KEY,
+          JSON.stringify(backups.slice(0, MAX_BACKUPS))
+        );
+
         state.meta.lastBackupAt = backup.createdAt;
-        persistImmediately({ type: "backup-created", backupId: backup.id });
+
+        persistImmediately({
+          type: "backup-created",
+          backupId: backup.id
+        });
+
         return clone(backup);
       } catch (error) {
         console.error("TIC Store: failed to create backup.", error);
@@ -1908,6 +2589,7 @@
       try {
         const raw = localStorage.getItem(BACKUP_KEY);
         const backups = raw ? JSON.parse(raw) : [];
+
         return Array.isArray(backups) ? backups : [];
       } catch (error) {
         console.error("TIC Store: failed to read backups.", error);
@@ -1916,7 +2598,9 @@
     },
 
     restoreBackup(backupId) {
-      const backup = this.getBackups().find((item) => item.id === backupId);
+      const backup = this.getBackups().find(
+        (item) => item.id === backupId
+      );
 
       if (!backup || !backup.state) return false;
 
@@ -1958,6 +2642,7 @@
 
       this.createBackup();
       replaceStateInternal(importedState, { type: "data-imported" });
+
       return clone(state);
     },
 
@@ -1968,6 +2653,7 @@
 
       state = calculateStatistics(normalizeState(getDefaultState()));
       persistImmediately({ type: "store-reset" });
+
       return clone(state);
     },
 
@@ -1983,12 +2669,16 @@
         activeTripCount: state.statistics.activeTrips,
         completedTripCount: state.statistics.completedTrips,
         passportTripCount: state.statistics.completedTrips,
+        visitedCountryCount: state.statistics.visitedCountries,
+        wishlistCount: state.wishlist.length,
+        annualPlanCount: state.annualPlans.length,
         expenseCount: state.expenses.length,
         paymentCount: state.payments.length,
         savingEntryCount: state.savings.entries.length,
         budgetAlertCount: state.budgetAlerts.items.length,
         budgetNotificationCount: state.budgetNotifications.items.length,
         lastTripLifecycleSyncAt: state.meta.lastTripLifecycleSyncAt,
+        lastGuideSyncAt: state.meta.lastGuideSyncAt,
         lastUpdatedAt: state.meta.updatedAt,
         lastBackupAt: state.meta.lastBackupAt
       };
@@ -2003,15 +2693,24 @@
 
   if (!storedState) {
     state.meta.lastTripLifecycleSyncAt = nowISO();
-    persistImmediately({ type: "store-initialized-v2.1.0" });
+    state.meta.lastGuideSyncAt = nowISO();
+
+    persistImmediately({
+      type: "store-initialized-v2.2.0"
+    });
   } else {
     state.meta.lastMigrationAt = nowISO();
     state.meta.lastTripLifecycleSyncAt = nowISO();
-    persistImmediately({ type: "store-migrated-v2.1.0" });
+    state.meta.lastGuideSyncAt = nowISO();
+
+    persistImmediately({
+      type: "store-migrated-v2.2.0"
+    });
   }
 
   window.TIC = window.TIC || {};
   window.TIC.Store = Store;
   window.TICStore = Store;
   window.Store = Store;
+  window.TravelStore = Store;
 })(window);
