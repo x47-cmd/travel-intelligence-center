@@ -1,18 +1,16 @@
 /* =========================================================
    Travel Intelligence Center
-   Guide Intelligence Platform Page V3.0.0
+   Guide Intelligence Platform Page V3.1.0
 
    File Path:
    js/pages/guide.js
 
    Purpose:
-   - Production-ready Guide Intelligence Platform page.
-   - Preserves the stable page lifecycle, Store subscription,
-     Router registration, UI actions and wishlist persistence.
-   - Connects the page with the new Guide Intelligence engines.
-   - Supports country discovery, professional country selection,
-     search, intelligent recommendations, Travel DNA insights,
-     complete country guides, AI trip planning and year planning.
+   - Final premium iPhone-first Guide Intelligence experience.
+   - Preserves Store, Router, UI actions, lifecycle and persistence.
+   - Improves the country picker, Travel DNA presentation,
+     recommendations, spacing and country-guide navigation.
+   - Keeps all existing intelligence engines fully connected.
 
    Dependencies:
    - js/config.js
@@ -37,7 +35,7 @@
   "use strict";
 
   const PAGE_ID = "guide";
-  const PAGE_VERSION = "3.0.0";
+  const PAGE_VERSION = "3.1.0";
 
   const MONTHS_AR = [
     "",
@@ -53,6 +51,15 @@
     "أكتوبر",
     "نوفمبر",
     "ديسمبر"
+  ];
+
+  const GUIDE_SECTIONS = [
+    { id: "overview", label: "نظرة عامة", icon: "◎" },
+    { id: "stay", label: "الإقامة", icon: "⌂" },
+    { id: "explore", label: "الاستكشاف", icon: "✦" },
+    { id: "essentials", label: "الأساسيات", icon: "◈" },
+    { id: "planning", label: "التخطيط", icon: "▣" },
+    { id: "audiences", label: "يناسب من؟", icon: "♡" }
   ];
 
   const state = {
@@ -181,21 +188,20 @@
   const safeToast = (message, tone = "success") => {
     const ui = getUI();
 
-    if (typeof ui?.toast === "function") {
+    if (typeof ui?.toast !== "function") return false;
+
+    try {
+      ui.toast(message, tone);
+      return true;
+    } catch (error) {
       try {
-        ui.toast(message, tone);
+        ui.toast(message, { tone });
         return true;
-      } catch (error) {
-        try {
-          ui.toast(message, { tone });
-          return true;
-        } catch (nestedError) {
-          console.error("TIC Guide toast error:", nestedError);
-        }
+      } catch (nestedError) {
+        console.error("TIC Guide toast error:", nestedError);
+        return false;
       }
     }
-
-    return false;
   };
 
   const getStoreState = () => {
@@ -230,9 +236,7 @@
       context.route?.query?.country ||
       context.route?.params?.country;
 
-    if (direct) {
-      return text(direct).toUpperCase();
-    }
+    if (direct) return text(direct).toUpperCase();
 
     try {
       const params = new URLSearchParams(window.location.search);
@@ -282,9 +286,7 @@
     let searchResult = {
       items: [],
       total: 0,
-      filters: {
-        query: state.search
-      }
+      filters: { query: state.search }
     };
 
     let dashboard = null;
@@ -310,8 +312,7 @@
       try {
         dashboard =
           intelligence.getDashboardData?.({
-            recommendationsLimit:
-              state.recommendationLimit
+            recommendationsLimit: state.recommendationLimit
           }) ||
           null;
       } catch (error) {
@@ -412,7 +413,6 @@
     };
 
     state.lastSnapshot = snapshot;
-
     return snapshot;
   };
 
@@ -447,9 +447,9 @@
     return `
       <button
         type="button"
-        class="tic-button ${
-          primary ? "is-primary" : ""
-        } ${block ? "is-block" : ""}"
+        class="tic-button ${primary ? "is-primary" : ""} ${
+          block ? "is-block" : ""
+        }"
         data-action="${escapeHTML(action)}"
         ${attributes}
       >
@@ -459,51 +459,40 @@
     `;
   };
 
-  const renderHero = (snapshot) => {
-    const ui = getUI();
+  const renderHero = () => `
+    <section class="tic-hero" style="padding-bottom:24px">
+      <span class="tic-chip">Guide Intelligence Platform</span>
 
-    const actions = [
-      {
-        label: "استكشف الدول",
-        action: "guide-show-discover",
-        primary: true,
-        icon: "🌍"
-      },
-      {
-        label: "خطتي السنوية",
-        action: "guide-open-year-planner",
-        icon: "🗓️"
-      }
-    ];
+      <h1 style="margin-bottom:10px">
+        دليل السفر الذكي
+      </h1>
 
-    if (typeof ui?.hero === "function") {
-      return ui.hero({
-        badge: "Guide Intelligence Platform",
-        title: "دليل السفر الذكي",
-        subtitle:
-          "اختر أي دولة في العالم واحصل على دليل متكامل واقتراحات مبنية على Travel DNA الخاص بك.",
-        actions
-      });
-    }
+      <p style="max-width:640px">
+        اختر دولة واحدة، وخلال لحظات تحصل على دليل كامل،
+        اقتراحات شخصية، وتخطيط ذكي يناسب Travel DNA الخاص بك.
+      </p>
 
-    return `
-      <section class="tic-hero">
-        <span class="tic-chip">
-          Guide Intelligence Platform
-        </span>
-        <h1>دليل السفر الذكي</h1>
-        <p>
-          اختر أي دولة في العالم واحصل على دليل متكامل
-          واقتراحات مبنية على Travel DNA الخاص بك.
-        </p>
-        <div class="tic-action-row">
-          ${actions
-            .map((action) => renderButton(action))
-            .join("")}
-        </div>
-      </section>
-    `;
-  };
+      <div
+        class="tic-action-row"
+        style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px"
+      >
+        ${renderButton({
+          label: "اختر دولة",
+          action: "guide-focus-country-picker",
+          primary: true,
+          block: true,
+          icon: "🌍"
+        })}
+
+        ${renderButton({
+          label: "خطتي السنوية",
+          action: "guide-open-year-planner",
+          block: true,
+          icon: "🗓️"
+        })}
+      </div>
+    </section>
+  `;
 
   const renderStatistics = (snapshot) => {
     const ui = getUI();
@@ -524,14 +513,14 @@
       {
         icon: "☆",
         value: snapshot.statistics.wishlistCountries,
-        label: "قائمة الأمنيات",
+        label: "أمنيات",
         subtitle: "وجهات محفوظة"
       },
       {
         icon: "🗓️",
         value: snapshot.statistics.yearPlans,
         label: "خطط سنوية",
-        subtitle: "محفوظة في حسابك"
+        subtitle: "محفوظة"
       }
     ];
 
@@ -540,9 +529,7 @@
       typeof ui?.stat === "function"
     ) {
       return ui.grid(
-        stats
-          .map((item) => ui.stat(item))
-          .join(""),
+        stats.map((item) => ui.stat(item)).join(""),
         { columns: 4 }
       );
     }
@@ -553,13 +540,66 @@
           .map(
             (item) => `
               <article class="tic-card">
-                <div class="tic-stat-icon">
-                  ${escapeHTML(item.icon)}
-                </div>
+                <div class="tic-stat-icon">${escapeHTML(item.icon)}</div>
                 <strong>${escapeHTML(item.value)}</strong>
                 <span>${escapeHTML(item.label)}</span>
                 <small>${escapeHTML(item.subtitle)}</small>
               </article>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+  };
+
+  const renderCountryQuickResults = (snapshot) => {
+    if (!state.search) return "";
+
+    const results = snapshot.countries.slice(0, 8);
+
+    if (!results.length) {
+      return `
+        <div class="tic-empty" style="padding:20px 12px">
+          <span>⌕</span>
+          <h3>لا توجد دولة بهذا الاسم</h3>
+          <p>جرب كتابة الاسم بالعربي أو الإنجليزي.</p>
+        </div>
+      `;
+    }
+
+    return `
+      <div
+        class="tic-settings-list"
+        style="margin-top:12px"
+      >
+        ${results
+          .map(
+            (country) => `
+              <button
+                type="button"
+                class="tic-settings-item"
+                data-action="guide-open-country"
+                data-param-country-code="${escapeHTML(country.countryCode)}"
+                style="width:100%;text-align:right"
+              >
+                <div class="tic-settings-item-main">
+                  <div class="tic-settings-icon">
+                    ${escapeHTML(country.flag || "🌍")}
+                  </div>
+
+                  <div class="tic-settings-copy">
+                    <strong>${escapeHTML(country.nameAr)}</strong>
+                    <small>
+                      ${escapeHTML(
+                        country.nameEn ||
+                        country.countryCode
+                      )}
+                    </small>
+                  </div>
+                </div>
+
+                <span aria-hidden="true">‹</span>
+              </button>
             `
           )
           .join("")}
@@ -574,8 +614,7 @@
           <option
             value="${escapeHTML(country.countryCode)}"
             ${
-              state.selectedCountryCode ===
-              country.countryCode
+              state.selectedCountryCode === country.countryCode
                 ? "selected"
                 : ""
             }
@@ -589,69 +628,174 @@
       .join("");
 
     return `
-      <div class="tic-toolbar tic-guide-picker">
-        <label class="tic-field">
-          <span class="tic-field-label">
-            ابحث عن دولة
-          </span>
+      <div
+        class="tic-card tic-guide-picker"
+        data-guide-country-picker
+      >
+        <div class="tic-card-body">
+          <label class="tic-field">
+            <span class="tic-field-label">
+              ابحث عن دولة
+            </span>
 
-          <input
-            type="search"
-            class="tic-input"
-            data-guide-search
-            value="${escapeHTML(state.search)}"
-            placeholder="اكتب اسم الدولة بالعربي أو الإنجليزي..."
-            aria-label="البحث عن دولة"
-            autocomplete="off"
-          >
-        </label>
+            <input
+              type="search"
+              class="tic-input"
+              data-guide-search
+              value="${escapeHTML(state.search)}"
+              placeholder="مثال: النرويج، اليابان، إسبانيا..."
+              aria-label="البحث عن دولة"
+              autocomplete="off"
+            >
+          </label>
 
-        <label class="tic-field">
-          <span class="tic-field-label">
-            اختر الدولة
-          </span>
+          ${renderCountryQuickResults(snapshot)}
 
-          <select
-            class="tic-input"
-            data-guide-country-select
-            aria-label="اختيار الدولة"
-          >
-            <option value="">
-              اختر دولة لعرض الدليل الكامل
-            </option>
-            ${options}
-          </select>
-        </label>
+          <label class="tic-field" style="margin-top:14px">
+            <span class="tic-field-label">
+              أو اختر من القائمة
+            </span>
 
-        <div class="tic-action-row">
-          ${renderButton({
-            label: "مسح البحث",
-            action: "guide-clear-search",
-            block: true
-          })}
+            <select
+              class="tic-input"
+              data-guide-country-select
+              aria-label="اختيار الدولة"
+            >
+              <option value="">
+                اختر دولة لعرض الدليل الكامل
+              </option>
+              ${options}
+            </select>
+          </label>
+
+          ${
+            state.search
+              ? `
+                <div style="margin-top:12px">
+                  ${renderButton({
+                    label: "مسح البحث",
+                    action: "guide-clear-search",
+                    block: true
+                  })}
+                </div>
+              `
+              : ""
+          }
         </div>
       </div>
     `;
   };
 
-  const renderRecommendationCard = (
-    item,
-    snapshot
-  ) => {
+  const getDNAScores = (snapshot) => {
+    const dna = snapshot.travelDNA;
+    const scores =
+      dna?.scores ||
+      dna?.profile?.scores ||
+      {};
+
+    return [
+      ["العائلة", scores.family],
+      ["الطبيعة", scores.nature],
+      ["البحر", scores.beach],
+      ["الفخامة", scores.luxury],
+      ["التسوق", scores.shopping],
+      ["الثقافة", scores.culture]
+    ]
+      .filter(([, value]) =>
+        Number.isFinite(Number(value))
+      )
+      .map(([label, value]) => ({
+        label,
+        value: Math.min(
+          100,
+          Math.max(0, Math.round(number(value)))
+        )
+      }));
+  };
+
+  const buildDNASummary = (items) => {
+    if (!items.length) {
+      return "أضف رحلاتك السابقة وقائمة أمنياتك ليصبح التحليل أدق.";
+    }
+
+    const sorted = [...items].sort(
+      (a, b) => b.value - a.value
+    );
+
+    const first = sorted[0];
+    const second = sorted[1];
+
+    if (!second) {
+      return `أبرز اهتمام سياحي لديك حالياً هو ${first.label}.`;
+    }
+
+    return `أسلوب سفرك يميل أكثر إلى ${first.label} و${second.label}، لذلك سيعطي النظام أولوية للوجهات التي تجمع بينهما.`;
+  };
+
+  const renderTravelDNA = (snapshot) => {
+    const items = getDNAScores(snapshot);
+
+    if (!items.length) return "";
+
+    return `
+      <section class="tic-card">
+        <div class="tic-card-body">
+          <div class="tic-feature-row">
+            <div>
+              <span class="tic-chip">Travel DNA</span>
+              <h3 class="tic-card-title" style="margin-top:10px">
+                بصمتك السياحية
+              </h3>
+            </div>
+
+            <span class="tic-chip">
+              محدث تلقائياً
+            </span>
+          </div>
+
+          <p class="tic-subtitle" style="margin-top:10px">
+            ${escapeHTML(buildDNASummary(items))}
+          </p>
+
+          <div class="tic-settings-list" style="margin-top:14px">
+            ${items
+              .map(
+                ({ label, value }) => `
+                  <div class="tic-settings-item">
+                    <div class="tic-settings-item-main">
+                      <div class="tic-settings-copy">
+                        <strong>${escapeHTML(label)}</strong>
+                        <small>${escapeHTML(value)}%</small>
+                      </div>
+                    </div>
+
+                    <div
+                      class="tic-progress"
+                      aria-label="${escapeHTML(label)}"
+                    >
+                      <div
+                        class="tic-progress-bar"
+                        style="width:${value}%"
+                      ></div>
+                    </div>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+      </section>
+    `;
+  };
+
+  const renderRecommendationCard = (item, snapshot) => {
     const code = item.countryCode;
-    const isWishlisted =
-      snapshot.wishlistCodes.has(code);
+    const isWishlisted = snapshot.wishlistCodes.has(code);
 
     const reasons = array(
       item.reasons ||
       item.explanations
-    )
-      .slice(0, 2)
-      .map(
-        (reason) =>
-          `<li>${escapeHTML(reason)}</li>`
-      )
-      .join("");
+    ).slice(0, 2);
 
     return `
       <article class="tic-card tic-destination-card">
@@ -659,9 +803,7 @@
           <div class="tic-feature-row">
             <div>
               <span class="tic-chip">
-                ${escapeHTML(
-                  item.flag || "🌍"
-                )}
+                ${escapeHTML(item.flag || "🌍")}
                 ${escapeHTML(
                   item.countryNameAr ||
                   item.nameAr ||
@@ -669,10 +811,9 @@
                 )}
               </span>
 
-              <h3 class="tic-card-title">
-                تطابق
-                ${escapeHTML(
-                  Math.round(number(item.score, 0))
+              <h3 class="tic-card-title" style="margin-top:10px">
+                تطابق ${escapeHTML(
+                  Math.round(number(item.score))
                 )}%
               </h3>
             </div>
@@ -693,22 +834,29 @@
           </div>
 
           ${
-            reasons
-              ? `<ul class="tic-list">${reasons}</ul>`
+            reasons.length
+              ? `
+                <ul class="tic-list" style="margin-top:12px">
+                  ${reasons
+                    .map(
+                      (reason) =>
+                        `<li>${escapeHTML(reason)}</li>`
+                    )
+                    .join("")}
+                </ul>
+              `
               : `
                 <p class="tic-subtitle">
-                  وجهة مقترحة بناءً على أسلوب سفرك.
+                  وجهة مناسبة لطبيعة رحلاتك الحالية.
                 </p>
               `
           }
 
-          <div class="tic-action-row">
+          <div style="margin-top:14px">
             ${renderButton({
-              label: "عرض الدليل",
+              label: "استكشف الدليل",
               action: "guide-open-country",
-              params: {
-                countryCode: code
-              },
+              params: { countryCode: code },
               primary: true,
               block: true
             })}
@@ -719,69 +867,43 @@
   };
 
   const renderRecommendations = (snapshot) => {
-    const ui = getUI();
-
     if (!snapshot.recommendations.length) {
       return `
-        <div class="tic-empty">
-          <span>🧭</span>
-          <h3>لا توجد اقتراحات حالياً</h3>
-          <p>
-            أضف رحلات أو وجهات إلى قائمة الأمنيات
-            ليصبح Travel DNA أدق.
-          </p>
-        </div>
+        <section class="tic-card">
+          <div class="tic-card-body">
+            <span class="tic-chip">TRAVEL DNA</span>
+            <h3 class="tic-card-title" style="margin-top:10px">
+              اقتراحاتك الذكية
+            </h3>
+            <p class="tic-subtitle">
+              أضف رحلات أو دولاً إلى قائمة الأمنيات ليبدأ
+              النظام باقتراح وجهات مخصصة لك.
+            </p>
+          </div>
+        </section>
       `;
     }
 
-    const content = `
+    return `
       <div class="tic-destination-grid">
         ${snapshot.recommendations
           .map((item) =>
-            renderRecommendationCard(
-              item,
-              snapshot
-            )
+            renderRecommendationCard(item, snapshot)
           )
           .join("")}
       </div>
     `;
-
-    if (typeof ui?.section === "function") {
-      return ui.section({
-        eyebrow: "TRAVEL DNA",
-        title: "اقتراحات تناسبك",
-        subtitle:
-          "دول جديدة مقترحة بناءً على رحلاتك السابقة وميزانيتك وأسلوب سفرك.",
-        content
-      });
-    }
-
-    return `
-      <section class="tic-section">
-        <h2>اقتراحات تناسبك</h2>
-        <p>
-          دول جديدة مقترحة بناءً على رحلاتك السابقة
-          وميزانيتك وأسلوب سفرك.
-        </p>
-        ${content}
-      </section>
-    `;
   };
 
   const renderRecentCountries = (snapshot) => {
-    if (!snapshot.recentCountries.length) {
-      return "";
-    }
+    if (!snapshot.recentCountries.length) return "";
 
     return `
       <section class="tic-section">
         <div class="tic-section-head">
           <div>
-            <span class="tic-eyebrow">
-              RECENT
-            </span>
-            <h2>آخر الدول التي فتحتها</h2>
+            <span class="tic-eyebrow">RECENT</span>
+            <h2>رجوع سريع</h2>
           </div>
         </div>
 
@@ -797,12 +919,8 @@
                     country.countryCode
                   )}"
                 >
-                  ${escapeHTML(
-                    country.flag || "🌍"
-                  )}
-                  ${escapeHTML(
-                    country.nameAr
-                  )}
+                  ${escapeHTML(country.flag || "🌍")}
+                  ${escapeHTML(country.nameAr)}
                 </button>
               `
             )
@@ -812,138 +930,63 @@
     `;
   };
 
-  const renderTravelDNA = (snapshot) => {
-    const dna = snapshot.travelDNA;
-
-    if (!dna) return "";
-
-    const scores =
-      dna.scores ||
-      dna.profile?.scores ||
-      {};
-
-    const items = [
-      ["العائلة", scores.family],
-      ["الطبيعة", scores.nature],
-      ["البحر", scores.beach],
-      ["الفخامة", scores.luxury],
-      ["التسوق", scores.shopping],
-      ["الثقافة", scores.culture]
-    ].filter(([, value]) =>
-      Number.isFinite(Number(value))
-    );
-
-    if (!items.length) return "";
-
-    return `
-      <section class="tic-card">
-        <div class="tic-card-body">
-          <span class="tic-chip">
-            Travel DNA
-          </span>
-
-          <h3 class="tic-card-title">
-            بصمتك السياحية
-          </h3>
-
-          <div class="tic-settings-list">
-            ${items
-              .map(
-                ([label, value]) => `
-                  <div class="tic-settings-item">
-                    <div class="tic-settings-item-main">
-                      <div class="tic-settings-copy">
-                        <strong>
-                          ${escapeHTML(label)}
-                        </strong>
-                        <small>
-                          ${escapeHTML(
-                            Math.round(number(value))
-                          )}%
-                        </small>
-                      </div>
-                    </div>
-
-                    <div
-                      class="tic-progress"
-                      aria-label="${escapeHTML(label)}"
-                    >
-                      <div
-                        class="tic-progress-bar"
-                        style="width:${Math.min(
-                          100,
-                          Math.max(
-                            0,
-                            number(value)
-                          )
-                        )}%"
-                      ></div>
-                    </div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-      </section>
-    `;
-  };
-
   const renderDiscoverView = (snapshot) => {
     const ui = getUI();
 
-    const pickerSection =
+    const section = (config) =>
       typeof ui?.section === "function"
-        ? ui.section({
-            eyebrow: "WORLD GUIDE",
-            title: "اختر الدولة",
-            subtitle:
-              "ابحث بالاسم أو اختر الدولة مباشرة من القائمة المرتبة.",
-            content: renderCountryPicker(snapshot)
-          })
+        ? ui.section(config)
         : `
           <section class="tic-section">
-            <h2>اختر الدولة</h2>
-            <p>
-              ابحث بالاسم أو اختر الدولة مباشرة
-              من القائمة المرتبة.
-            </p>
-            ${renderCountryPicker(snapshot)}
+            <span class="tic-eyebrow">${escapeHTML(
+              config.eyebrow || ""
+            )}</span>
+            <h2>${escapeHTML(config.title)}</h2>
+            ${
+              config.subtitle
+                ? `<p>${escapeHTML(config.subtitle)}</p>`
+                : ""
+            }
+            ${config.content}
           </section>
         `;
 
     return `
-      ${renderHero(snapshot)}
+      ${renderHero()}
 
-      ${
-        typeof ui?.section === "function"
-          ? ui.section({
-              eyebrow: "OVERVIEW",
-              title: "العالم بين يديك",
-              subtitle:
-                "دليل عالمي متكامل ومخصص حسب رحلاتك.",
-              content: renderStatistics(snapshot)
-            })
-          : renderStatistics(snapshot)
-      }
+      ${section({
+        eyebrow: "OVERVIEW",
+        title: "العالم بين يديك",
+        subtitle:
+          "دليل عالمي، اقتراحات شخصية، وخطط محفوظة في مكان واحد.",
+        content: renderStatistics(snapshot)
+      })}
 
-      ${pickerSection}
+      ${section({
+        eyebrow: "WORLD GUIDE",
+        title: "اختر الدولة",
+        subtitle:
+          "ابحث فوراً أو اختر من القائمة المرتبة أبجدياً.",
+        content: renderCountryPicker(snapshot)
+      })}
 
       ${renderRecentCountries(snapshot)}
 
-      ${renderRecommendations(snapshot)}
+      ${section({
+        eyebrow: "TRAVEL DNA",
+        title: "اقتراحات تناسبك",
+        subtitle:
+          "كل اقتراح مبني على سجل رحلاتك وميزانيتك وأسلوب سفرك.",
+        content: renderRecommendations(snapshot)
+      })}
 
-      ${
-        typeof ui?.section === "function"
-          ? ui.section({
-              eyebrow: "YOUR PROFILE",
-              title: "كيف يفهمك النظام؟",
-              subtitle:
-                "تحليل مختصر لتفضيلاتك السياحية.",
-              content: renderTravelDNA(snapshot)
-            })
-          : renderTravelDNA(snapshot)
-      }
+      ${section({
+        eyebrow: "YOUR PROFILE",
+        title: "كيف يفهمك النظام؟",
+        subtitle:
+          "ملخص واضح للتفضيلات التي تؤثر في اقتراحاتك.",
+        content: renderTravelDNA(snapshot)
+      })}
     `;
   };
 
@@ -959,10 +1002,8 @@
         ? `
           <section class="tic-card">
             <div class="tic-card-body">
-              <h3>${escapeHTML(title)}</h3>
-              <p class="tic-subtitle">
-                ${escapeHTML(emptyMessage)}
-              </p>
+              <h3 class="tic-card-title">${escapeHTML(title)}</h3>
+              <p class="tic-subtitle">${escapeHTML(emptyMessage)}</p>
             </div>
           </section>
         `
@@ -972,9 +1013,7 @@
     return `
       <section class="tic-card">
         <div class="tic-card-body">
-          <h3 class="tic-card-title">
-            ${escapeHTML(title)}
-          </h3>
+          <h3 class="tic-card-title">${escapeHTML(title)}</h3>
 
           <div class="tic-settings-list">
             ${normalized
@@ -1016,9 +1055,7 @@
                           normalizedItem.city
                             ? `
                               <small>
-                                ${escapeHTML(
-                                  normalizedItem.city
-                                )}
+                                ${escapeHTML(normalizedItem.city)}
                               </small>
                             `
                             : ""
@@ -1037,15 +1074,12 @@
 
   const renderTextList = (title, items) => {
     const normalized = array(items);
-
     if (!normalized.length) return "";
 
     return `
       <section class="tic-card">
         <div class="tic-card-body">
-          <h3 class="tic-card-title">
-            ${escapeHTML(title)}
-          </h3>
+          <h3 class="tic-card-title">${escapeHTML(title)}</h3>
 
           <ul class="tic-list">
             ${normalized
@@ -1070,10 +1104,7 @@
     `;
   };
 
-  const renderInfoCard = (
-    title,
-    rows
-  ) => {
+  const renderInfoCard = (title, rows) => {
     const normalized = array(rows).filter(
       (row) =>
         row &&
@@ -1085,9 +1116,7 @@
     return `
       <section class="tic-card">
         <div class="tic-card-body">
-          <h3 class="tic-card-title">
-            ${escapeHTML(title)}
-          </h3>
+          <h3 class="tic-card-title">${escapeHTML(title)}</h3>
 
           <div class="tic-settings-list">
             ${normalized
@@ -1096,12 +1125,8 @@
                   <div class="tic-settings-item">
                     <div class="tic-settings-item-main">
                       <div class="tic-settings-copy">
-                        <strong>
-                          ${escapeHTML(row.label)}
-                        </strong>
-                        <small>
-                          ${escapeHTML(row.value)}
-                        </small>
+                        <strong>${escapeHTML(row.label)}</strong>
+                        <small>${escapeHTML(row.value)}</small>
                       </div>
                     </div>
                   </div>
@@ -1114,31 +1139,45 @@
     `;
   };
 
-  const renderMonthList = (
-    title,
-    months
-  ) => {
-    const normalized = array(months)
-      .map((month) =>
-        MONTHS_AR[number(month)] ||
-        text(month)
-      )
-      .filter(Boolean);
-
-    return renderTextList(
+  const renderMonthList = (title, months) =>
+    renderTextList(
       title,
-      normalized
+      array(months)
+        .map((month) =>
+          MONTHS_AR[number(month)] ||
+          text(month)
+        )
+        .filter(Boolean)
     );
-  };
 
-  const renderCountryHeader = (
-    guide,
-    snapshot
-  ) => {
+  const renderCountrySectionTabs = () => `
+    <div
+      class="tic-filter-row"
+      style="position:sticky;top:0;z-index:5;padding:10px 0;background:var(--tic-page-bg,rgba(248,250,252,.96));backdrop-filter:blur(14px)"
+    >
+      ${GUIDE_SECTIONS.map(
+        (section) => `
+          <button
+            type="button"
+            class="tic-filter-chip ${
+              state.activeSection === section.id
+                ? "is-active"
+                : ""
+            }"
+            data-action="guide-set-section"
+            data-param-section="${escapeHTML(section.id)}"
+          >
+            ${escapeHTML(section.icon)}
+            ${escapeHTML(section.label)}
+          </button>
+        `
+      ).join("")}
+    </div>
+  `;
+
+  const renderCountryHeader = (guide, snapshot) => {
     const isWishlisted =
-      snapshot.wishlistCodes.has(
-        guide.countryCode
-      );
+      snapshot.wishlistCodes.has(guide.countryCode);
 
     const personalization =
       guide.personalization || {};
@@ -1193,34 +1232,31 @@
         ${
           number(personalization.score) > 0
             ? `
-              <div class="tic-card">
+              <div class="tic-card" style="margin-top:16px">
                 <div class="tic-card-body">
-                  <strong>
-                    نسبة التطابق مع Travel DNA:
-                    ${escapeHTML(
-                      Math.round(
-                        number(
-                          personalization.score
+                  <div class="tic-feature-row">
+                    <strong>
+                      تطابق Travel DNA
+                    </strong>
+
+                    <span class="tic-chip">
+                      ${escapeHTML(
+                        Math.round(
+                          number(personalization.score)
                         )
-                      )
-                    )}%
-                  </strong>
+                      )}%
+                    </span>
+                  </div>
 
                   ${
-                    array(
-                      personalization.reasons
-                    ).length
+                    array(personalization.reasons).length
                       ? `
-                        <ul class="tic-list">
-                          ${array(
-                            personalization.reasons
-                          )
+                        <ul class="tic-list" style="margin-top:10px">
+                          ${array(personalization.reasons)
                             .slice(0, 3)
                             .map(
                               (reason) => `
-                                <li>
-                                  ${escapeHTML(reason)}
-                                </li>
+                                <li>${escapeHTML(reason)}</li>
                               `
                             )
                             .join("")}
@@ -1234,476 +1270,433 @@
             : ""
         }
 
-        <div class="tic-action-row">
+        <div
+          class="tic-action-row"
+          style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px"
+        >
           ${renderButton({
-            label: "رجوع للاستكشاف",
-            action: "guide-show-discover"
-          })}
-
-          ${renderButton({
-            label: "خطة رحلة ذكية",
+            label: "رحلة ذكية",
             action: "guide-create-ai-plan",
             params: {
-              countryCode:
-                guide.countryCode
+              countryCode: guide.countryCode
             },
-            primary: true
+            primary: true,
+            block: true
           })}
 
           ${renderButton({
-            label: "إضافة للخطة السنوية",
+            label: "الخطة السنوية",
             action: "guide-open-year-planner",
             params: {
-              countryCode:
-                guide.countryCode
-            }
+              countryCode: guide.countryCode
+            },
+            block: true
+          })}
+        </div>
+
+        <div style="margin-top:10px">
+          ${renderButton({
+            label: "العودة لكل الدول",
+            action: "guide-show-discover",
+            block: true
           })}
         </div>
       </section>
     `;
   };
 
-  const renderCountrySections = (
-    guide
-  ) => {
-    const sections =
-      guide.sections || {};
+  const renderCountrySection = (guide) => {
+    const sections = guide.sections || {};
 
-    return `
-      <div class="tic-destination-grid">
-        ${renderEntityList(
-          "أفضل المدن",
-          sections.cities
-        )}
+    switch (state.activeSection) {
+      case "stay":
+        return `
+          <div class="tic-destination-grid">
+            ${renderEntityList("أفضل الفنادق", sections.hotels)}
+            ${renderEntityList(
+              "فنادق توفر شطاف",
+              sections.shattafHotels,
+              "تحقق مباشرة مع الفندق قبل الحجز."
+            )}
+            ${renderEntityList("أفضل المنتجعات", sections.resorts)}
+          </div>
+        `;
 
-        ${renderEntityList(
-          "أفضل الفنادق",
-          sections.hotels
-        )}
+      case "explore":
+        return `
+          <div class="tic-destination-grid">
+            ${renderEntityList("أفضل المدن", sections.cities)}
+            ${renderEntityList("الشواطئ", sections.beaches)}
+            ${renderEntityList("الأماكن السياحية", sections.attractions)}
+            ${renderEntityList("الأنشطة", sections.activities)}
+            ${renderEntityList(
+              "المطاعم الحلال",
+              sections.halalRestaurants,
+              "تحقق من شهادة الحلال أو اسأل المطعم."
+            )}
+            ${renderEntityList("المقاهي", sections.cafes)}
+          </div>
+        `;
 
-        ${renderEntityList(
-          "فنادق توفر شطاف",
-          sections.shattafHotels,
-          "لا توجد بيانات مؤكدة حالياً. تحقق مباشرة مع الفندق قبل الحجز."
-        )}
+      case "essentials":
+        return `
+          <div class="tic-destination-grid">
+            ${renderInfoCard("المواصلات", [
+              {
+                label: "نظرة عامة",
+                value: sections.transportation?.overview
+              },
+              {
+                label: "البطاقات",
+                value: array(
+                  sections.transportation?.cards
+                ).join("، ")
+              },
+              {
+                label: "التطبيقات",
+                value: array(
+                  sections.transportation?.apps
+                ).join("، ")
+              }
+            ])}
 
-        ${renderEntityList(
-          "أفضل المنتجعات",
-          sections.resorts
-        )}
+            ${renderEntityList(
+              "وسائل المواصلات",
+              sections.transportation?.methods
+            )}
 
-        ${renderEntityList(
-          "الشواطئ",
-          sections.beaches
-        )}
+            ${renderInfoCard("استئجار السيارات", [
+              {
+                label: "الحالة",
+                value:
+                  sections.carRental?.available === false
+                    ? "غير موصى به أو غير متاح"
+                    : "متاح"
+              },
+              {
+                label: "المتطلبات",
+                value: array(
+                  sections.carRental?.requirements
+                ).join("، ")
+              }
+            ])}
 
-        ${renderEntityList(
-          "الأماكن السياحية",
-          sections.attractions
-        )}
+            ${renderTextList(
+              "نصائح القيادة",
+              sections.carRental?.tips
+            )}
 
-        ${renderEntityList(
-          "الأنشطة",
-          sections.activities
-        )}
+            ${renderInfoCard("التأشيرة", [
+              {
+                label: "الحالة",
+                value:
+                  sections.visa?.required === true
+                    ? "مطلوبة"
+                    : sections.visa?.required === false
+                      ? "غير مطلوبة"
+                      : "تحقق من المصدر الرسمي"
+              },
+              {
+                label: "النوع",
+                value: sections.visa?.type
+              },
+              {
+                label: "المدة",
+                value: sections.visa?.duration
+              }
+            ])}
 
-        ${renderEntityList(
-          "المطاعم الحلال",
-          sections.halalRestaurants,
-          "تحقق من شهادة الحلال أو اسأل المطعم قبل الطلب."
-        )}
+            ${renderTextList(
+              "خطوات التأشيرة",
+              sections.visa?.process
+            )}
 
-        ${renderEntityList(
-          "المقاهي",
-          sections.cafes
-        )}
+            ${renderTextList(
+              "ملاحظات التأشيرة",
+              sections.visa?.notes
+            )}
 
-        ${renderInfoCard(
-          "المواصلات",
-          [
-            {
-              label: "نظرة عامة",
-              value:
-                sections.transportation?.overview
-            },
-            {
-              label: "البطاقات",
-              value: array(
-                sections.transportation?.cards
-              ).join("، ")
-            },
-            {
-              label: "التطبيقات",
-              value: array(
-                sections.transportation?.apps
-              ).join("، ")
-            }
-          ]
-        )}
+            ${renderInfoCard("العملة", [
+              {
+                label: "الاسم",
+                value: sections.currency?.name
+              },
+              {
+                label: "الرمز",
+                value: sections.currency?.code
+              },
+              {
+                label: "العلامة",
+                value: sections.currency?.symbol
+              }
+            ])}
 
-        ${renderEntityList(
-          "وسائل المواصلات",
-          sections.transportation?.methods
-        )}
+            ${renderTextList(
+              "نصائح الدفع",
+              sections.currency?.cashTips
+            )}
 
-        ${renderInfoCard(
-          "استئجار السيارات",
-          [
-            {
-              label: "متوفر",
-              value:
-                sections.carRental?.available ===
-                false
-                  ? "غير موصى به أو غير متاح"
-                  : "متاح"
-            },
-            {
-              label: "المتطلبات",
-              value: array(
-                sections.carRental?.requirements
-              ).join("، ")
-            }
-          ]
-        )}
+            ${renderInfoCard("اللغة", [
+              {
+                label: "اللغة الأساسية",
+                value: sections.language?.primary
+              },
+              {
+                label: "اللغات الشائعة",
+                value: array(
+                  sections.language?.common
+                ).join("، ")
+              },
+              {
+                label: "مستوى الإنجليزية",
+                value: sections.language?.englishLevel
+              }
+            ])}
 
-        ${renderTextList(
-          "نصائح القيادة",
-          sections.carRental?.tips
-        )}
+            ${renderInfoCard("الكهرباء", [
+              {
+                label: "الجهد",
+                value: sections.electricity?.voltage
+              },
+              {
+                label: "التردد",
+                value: sections.electricity?.frequency
+              },
+              {
+                label: "نوع القابس",
+                value: array(
+                  sections.electricity?.plugTypes
+                ).join("، ")
+              },
+              {
+                label: "المحول",
+                value:
+                  sections.electricity?.adapterNeeded === true
+                    ? "مطلوب"
+                    : sections.electricity?.adapterNeeded === false
+                      ? "غير مطلوب غالباً"
+                      : ""
+              }
+            ])}
 
-        ${renderInfoCard(
-          "التأشيرة",
-          [
-            {
-              label: "الحالة",
-              value:
-                sections.visa?.required === true
-                  ? "مطلوبة"
-                  : sections.visa?.required === false
-                    ? "غير مطلوبة"
-                    : "تحقق من المصدر الرسمي"
-            },
-            {
-              label: "النوع",
-              value: sections.visa?.type
-            },
-            {
-              label: "المدة",
-              value: sections.visa?.duration
-            }
-          ]
-        )}
+            ${renderInfoCard("الإنترنت", [
+              {
+                label: "الجودة",
+                value: sections.internet?.quality
+              },
+              {
+                label: "eSIM",
+                value:
+                  sections.internet?.esim === true
+                    ? "متوفر"
+                    : sections.internet?.esim === false
+                      ? "غير متوفر"
+                      : ""
+              },
+              {
+                label: "الشركات",
+                value: array(
+                  sections.internet?.providers
+                ).join("، ")
+              }
+            ])}
+          </div>
+        `;
 
-        ${renderTextList(
-          "خطوات التأشيرة",
-          sections.visa?.process
-        )}
+      case "planning":
+        return `
+          <div class="tic-destination-grid">
+            ${renderInfoCard("الطقس", [
+              {
+                label: "الوصف",
+                value: sections.weather?.overview
+              },
+              {
+                label: "المناخ",
+                value: sections.weather?.climate
+              }
+            ])}
 
-        ${renderTextList(
-          "ملاحظات التأشيرة",
-          sections.visa?.notes
-        )}
+            ${renderMonthList(
+              "أفضل أشهر الزيارة",
+              sections.bestMonths
+            )}
 
-        ${renderInfoCard(
-          "العملة",
-          [
-            {
-              label: "الاسم",
-              value: sections.currency?.name
-            },
-            {
-              label: "الرمز",
-              value: sections.currency?.code
-            },
-            {
-              label: "العلامة",
-              value: sections.currency?.symbol
-            }
-          ]
-        )}
+            ${renderMonthList(
+              "أسوأ أشهر الزيارة",
+              sections.worstMonths
+            )}
 
-        ${renderTextList(
-          "نصائح الدفع",
-          sections.currency?.cashTips
-        )}
-
-        ${renderInfoCard(
-          "اللغة",
-          [
-            {
-              label: "اللغة الأساسية",
-              value: sections.language?.primary
-            },
-            {
-              label: "اللغات الشائعة",
-              value: array(
-                sections.language?.common
-              ).join("، ")
-            },
-            {
-              label: "مستوى الإنجليزية",
-              value:
-                sections.language?.englishLevel
-            }
-          ]
-        )}
-
-        ${renderInfoCard(
-          "الكهرباء",
-          [
-            {
-              label: "الجهد",
-              value:
-                sections.electricity?.voltage
-            },
-            {
-              label: "التردد",
-              value:
-                sections.electricity?.frequency
-            },
-            {
-              label: "نوع القابس",
-              value: array(
-                sections.electricity?.plugTypes
-              ).join("، ")
-            },
-            {
-              label: "المحول",
-              value:
-                sections.electricity?.adapterNeeded ===
-                true
-                  ? "مطلوب"
-                  : sections.electricity?.adapterNeeded ===
-                      false
-                    ? "غير مطلوب غالباً"
-                    : ""
-            }
-          ]
-        )}
-
-        ${renderInfoCard(
-          "الإنترنت",
-          [
-            {
-              label: "الجودة",
-              value: sections.internet?.quality
-            },
-            {
-              label: "eSIM",
-              value:
-                sections.internet?.esim === true
-                  ? "متوفر"
-                  : sections.internet?.esim === false
-                    ? "غير متوفر"
-                    : ""
-            },
-            {
-              label: "الشركات",
-              value: array(
-                sections.internet?.providers
-              ).join("، ")
-            }
-          ]
-        )}
-
-        ${renderTextList(
-          "نصائح الإنترنت",
-          sections.internet?.tips
-        )}
-
-        ${renderInfoCard(
-          "الطقس",
-          [
-            {
-              label: "الوصف",
-              value: sections.weather?.overview
-            },
-            {
-              label: "المناخ",
-              value: sections.weather?.climate
-            }
-          ]
-        )}
-
-        ${renderMonthList(
-          "أفضل أشهر الزيارة",
-          sections.bestMonths
-        )}
-
-        ${renderMonthList(
-          "أسوأ أشهر الزيارة",
-          sections.worstMonths
-        )}
-
-        ${renderInfoCard(
-          "الميزانية المقترحة",
-          [
-            {
-              label: "العملة",
-              value: sections.budget?.currency
-            },
-            {
-              label: "اليومية",
-              value:
-                typeof sections.budget?.dailyBudget ===
-                "object"
-                  ? Object.entries(
-                      sections.budget.dailyBudget
-                    )
-                      .map(
-                        ([key, value]) =>
-                          `${key}: ${value}`
+            ${renderInfoCard("الميزانية المقترحة", [
+              {
+                label: "العملة",
+                value: sections.budget?.currency
+              },
+              {
+                label: "اليومية",
+                value:
+                  typeof sections.budget?.dailyBudget === "object"
+                    ? Object.entries(
+                        sections.budget.dailyBudget
                       )
-                      .join("، ")
-                  : sections.budget?.dailyBudget
-            },
-            {
-              label: "ميزانية الرحلة",
-              value:
-                typeof sections.budget?.tripBudget ===
-                "object"
-                  ? Object.entries(
-                      sections.budget.tripBudget
-                    )
-                      .map(
-                        ([key, value]) =>
-                          `${key}: ${value}`
+                        .map(
+                          ([key, value]) =>
+                            `${key}: ${value}`
+                        )
+                        .join("، ")
+                    : sections.budget?.dailyBudget
+              },
+              {
+                label: "ميزانية الرحلة",
+                value:
+                  typeof sections.budget?.tripBudget === "object"
+                    ? Object.entries(
+                        sections.budget.tripBudget
                       )
-                      .join("، ")
-                  : sections.budget?.tripBudget
-            }
-          ]
-        )}
+                        .map(
+                          ([key, value]) =>
+                            `${key}: ${value}`
+                        )
+                        .join("، ")
+                    : sections.budget?.tripBudget
+              }
+            ])}
 
-        ${renderTextList(
-          "نصائح الميزانية",
-          sections.budget?.notes
-        )}
+            ${renderInfoCard("مدة الرحلة المثالية", [
+              {
+                label: "الحد الأدنى",
+                value:
+                  sections.idealDuration?.minimumDays
+                    ? `${sections.idealDuration.minimumDays} أيام`
+                    : ""
+              },
+              {
+                label: "الموصى بها",
+                value:
+                  sections.idealDuration?.recommendedDays
+                    ? `${sections.idealDuration.recommendedDays} أيام`
+                    : ""
+              },
+              {
+                label: "الحد الأعلى",
+                value:
+                  sections.idealDuration?.maximumDays
+                    ? `${sections.idealDuration.maximumDays} أيام`
+                    : ""
+              }
+            ])}
 
-        ${renderInfoCard(
-          "مدة الرحلة المثالية",
-          [
-            {
-              label: "الحد الأدنى",
-              value:
-                sections.idealDuration?.minimumDays
-                  ? `${sections.idealDuration.minimumDays} أيام`
-                  : ""
-            },
-            {
-              label: "الموصى بها",
-              value:
-                sections.idealDuration?.recommendedDays
-                  ? `${sections.idealDuration.recommendedDays} أيام`
-                  : ""
-            },
-            {
-              label: "الحد الأعلى",
-              value:
-                sections.idealDuration?.maximumDays
-                  ? `${sections.idealDuration.maximumDays} أيام`
-                  : ""
-            }
-          ]
-        )}
+            ${renderInfoCard("حجز الطيران", [
+              {
+                label: "قبل الرحلة",
+                value:
+                  sections.flightBooking?.bestLeadDays
+                    ? `${sections.flightBooking.bestLeadDays} يوماً تقريباً`
+                    : ""
+              },
+              {
+                label: "أفضل فترة",
+                value: sections.flightBooking?.bestWindow
+              }
+            ])}
 
-        ${renderInfoCard(
-          "أفضل توقيت لحجز الطيران",
-          [
-            {
-              label: "قبل الرحلة",
-              value:
-                sections.flightBooking?.bestLeadDays
-                  ? `${sections.flightBooking.bestLeadDays} يوماً تقريباً`
-                  : ""
-            },
-            {
-              label: "الفترة",
-              value:
-                sections.flightBooking?.bestWindow
-            }
-          ]
-        )}
+            ${renderInfoCard("حجز الفندق", [
+              {
+                label: "قبل الرحلة",
+                value:
+                  sections.hotelBooking?.bestLeadDays
+                    ? `${sections.hotelBooking.bestLeadDays} يوماً تقريباً`
+                    : ""
+              },
+              {
+                label: "أفضل فترة",
+                value: sections.hotelBooking?.bestWindow
+              }
+            ])}
 
-        ${renderTextList(
-          "نصائح حجز الطيران",
-          sections.flightBooking?.tips
-        )}
+            ${renderTextList("أهم النصائح", sections.tips)}
+            ${renderTextList("التحذيرات", sections.warnings)}
+            ${renderTextList("قائمة التجهيز", sections.packing)}
+          </div>
+        `;
 
-        ${renderInfoCard(
-          "أفضل توقيت لحجز الفندق",
-          [
-            {
-              label: "قبل الرحلة",
-              value:
-                sections.hotelBooking?.bestLeadDays
-                  ? `${sections.hotelBooking.bestLeadDays} يوماً تقريباً`
-                  : ""
-            },
-            {
-              label: "الفترة",
-              value:
-                sections.hotelBooking?.bestWindow
-            }
-          ]
-        )}
+      case "audiences":
+        return `
+          <div class="tic-destination-grid">
+            ${renderEntityList(
+              "مناسب للعوائل",
+              sections.family
+            )}
+            ${renderEntityList(
+              "مناسب للأزواج",
+              sections.couples
+            )}
+            ${renderEntityList(
+              "مناسب للأطفال",
+              sections.children
+            )}
+            ${renderEntityList(
+              "محبي الطبيعة",
+              sections.nature
+            )}
+            ${renderEntityList(
+              "محبي البحر",
+              sections.sea
+            )}
+            ${renderEntityList(
+              "محبي التسوق",
+              sections.shopping
+            )}
+          </div>
+        `;
 
-        ${renderTextList(
-          "نصائح حجز الفندق",
-          sections.hotelBooking?.tips
-        )}
+      case "overview":
+      default:
+        return `
+          <div class="tic-destination-grid">
+            ${renderInfoCard("نظرة سريعة", [
+              {
+                label: "العاصمة",
+                value: sections.overview?.capital
+              },
+              {
+                label: "المنطقة",
+                value: sections.overview?.region
+              },
+              {
+                label: "الأمان",
+                value: sections.overview?.safety
+              },
+              {
+                label: "أسلوب الرحلة",
+                value: array(
+                  sections.overview?.travelStyle
+                ).join("، ")
+              }
+            ])}
 
-        ${renderTextList(
-          "أهم النصائح",
-          sections.tips
-        )}
-
-        ${renderTextList(
-          "التحذيرات",
-          sections.warnings
-        )}
-
-        ${renderTextList(
-          "قائمة التجهيز",
-          sections.packing
-        )}
-
-        ${renderEntityList(
-          "أماكن مناسبة للعوائل",
-          sections.family
-        )}
-
-        ${renderEntityList(
-          "أماكن مناسبة للأزواج",
-          sections.couples
-        )}
-
-        ${renderEntityList(
-          "أماكن مناسبة للأطفال",
-          sections.children
-        )}
-
-        ${renderEntityList(
-          "أماكن مناسبة لمحبي الطبيعة",
-          sections.nature
-        )}
-
-        ${renderEntityList(
-          "أماكن مناسبة لمحبي البحر",
-          sections.sea
-        )}
-
-        ${renderEntityList(
-          "أماكن مناسبة للتسوق",
-          sections.shopping
-        )}
-      </div>
-    `;
+            ${renderEntityList("أفضل المدن", sections.cities)}
+            ${renderMonthList(
+              "أفضل أشهر الزيارة",
+              sections.bestMonths
+            )}
+            ${renderInfoCard("مدة الرحلة المثالية", [
+              {
+                label: "الموصى بها",
+                value:
+                  sections.idealDuration?.recommendedDays
+                    ? `${sections.idealDuration.recommendedDays} أيام`
+                    : ""
+              }
+            ])}
+            ${renderTextList("أهم النصائح", sections.tips)}
+            ${renderTextList("التحذيرات", sections.warnings)}
+          </div>
+        `;
+    }
   };
 
-  const renderCountryView = (
-    snapshot
-  ) => {
+  const renderCountryView = (snapshot) => {
     const guide = snapshot.selectedGuide;
     const ui = getUI();
 
@@ -1713,8 +1706,7 @@
           <span>⚠️</span>
           <h2>تعذر تحميل الدليل</h2>
           <p>
-            تأكد من أن ملفات بيانات الدول ومحرك
-            Guide Intelligence تم تحميلها قبل الصفحة.
+            تأكد من تحميل بيانات الدول ومحرك Guide Intelligence.
           </p>
           ${renderButton({
             label: "العودة للاستكشاف",
@@ -1725,13 +1717,13 @@
       `;
     }
 
-    const content = renderCountrySections(guide);
+    const content = `
+      ${renderCountrySectionTabs()}
+      ${renderCountrySection(guide)}
+    `;
 
     return `
-      ${renderCountryHeader(
-        guide,
-        snapshot
-      )}
+      ${renderCountryHeader(guide, snapshot)}
 
       ${
         typeof ui?.section === "function"
@@ -1740,8 +1732,7 @@
               title: "الدليل السياحي الكامل",
               subtitle:
                 `اكتمال البيانات ${escapeHTML(
-                  guide.completeness?.percent ||
-                  0
+                  guide.completeness?.percent || 0
                 )}%`,
               content
             })
@@ -1750,16 +1741,12 @@
     `;
   };
 
-  const renderPage = (
-    snapshot
-  ) => `
+  const renderPage = (snapshot) => `
     <div
       class="tic-module"
       data-page="guide"
       data-page-version="${PAGE_VERSION}"
-      data-guide-view="${escapeHTML(
-        state.activeView
-      )}"
+      data-guide-view="${escapeHTML(state.activeView)}"
     >
       ${
         state.activeView === "country"
@@ -1781,10 +1768,7 @@
       "input",
       (event) => {
         state.search = event.target.value;
-
-        refresh({
-          preserveFocus: true
-        });
+        refresh({ preserveFocus: true });
       }
     );
 
@@ -1816,18 +1800,12 @@
     }
   };
 
-  const refresh = (
-    options = {}
-  ) => {
-    if (
-      !state.container ||
-      !state.mounted
-    ) {
+  const refresh = (options = {}) => {
+    if (!state.container || !state.mounted) {
       return false;
     }
 
-    const activeElement =
-      document.activeElement;
+    const activeElement = document.activeElement;
 
     const preserveSearch =
       options.preserveFocus === true &&
@@ -1837,13 +1815,11 @@
 
     const cursor =
       preserveSearch &&
-      typeof activeElement.selectionStart ===
-        "number"
+      typeof activeElement.selectionStart === "number"
         ? activeElement.selectionStart
         : null;
 
-    const snapshot =
-      buildSnapshot();
+    const snapshot = buildSnapshot();
 
     state.container.innerHTML =
       renderPage(snapshot);
@@ -1860,40 +1836,30 @@
         input.focus();
 
         if (cursor !== null) {
-          input.setSelectionRange(
-            cursor,
-            cursor
-          );
+          input.setSelectionRange(cursor, cursor);
         }
       }
     }
 
     emit("refreshed", {
       view: state.activeView,
-      countryCode:
-        state.selectedCountryCode,
-      resultCount:
-        snapshot.countries.length
+      section: state.activeSection,
+      countryCode: state.selectedCountryCode,
+      resultCount: snapshot.countries.length
     });
 
     return true;
   };
 
-  const openCountry = (
-    countryCode
-  ) => {
-    const intelligence =
-      getGuideIntelligence();
-
-    const code =
-      text(countryCode).toUpperCase();
+  const openCountry = (countryCode) => {
+    const intelligence = getGuideIntelligence();
+    const code = text(countryCode).toUpperCase();
 
     if (!code || !intelligence) {
       safeToast(
         "تعذر فتح الدولة حالياً.",
         "error"
       );
-
       return false;
     }
 
@@ -1919,19 +1885,26 @@
           "لا توجد بيانات كافية لهذه الدولة حالياً.",
           "info"
         );
-
         return false;
       }
 
       state.selectedCountryCode = code;
       state.selectedGuide = guide;
       state.activeView = "country";
+      state.activeSection = "overview";
 
-      intelligence.saveRecentCountry?.(
-        code
-      );
+      intelligence.saveRecentCountry?.(code);
 
       refresh();
+
+      try {
+        state.container?.scrollTo?.({
+          top: 0,
+          behavior: "smooth"
+        });
+      } catch (error) {
+        // Scrolling is optional.
+      }
 
       emit("country-opened", {
         countryCode: code
@@ -1963,24 +1936,14 @@
       return;
     }
 
-    const register = (
-      name,
-      handler
-    ) => {
+    const register = (name, handler) => {
       if (ui.hasAction?.(name)) return;
 
       const unsubscribe =
-        ui.registerAction(
-          name,
-          handler
-        );
+        ui.registerAction(name, handler);
 
-      if (
-        typeof unsubscribe === "function"
-      ) {
-        state.actionUnsubscribers.push(
-          unsubscribe
-        );
+      if (typeof unsubscribe === "function") {
+        state.actionUnsubscribers.push(unsubscribe);
       }
     };
 
@@ -1990,7 +1953,29 @@
         state.activeView = "discover";
         state.selectedCountryCode = "";
         state.selectedGuide = null;
+        state.activeSection = "overview";
         refresh();
+        return true;
+      }
+    );
+
+    register(
+      "guide-focus-country-picker",
+      () => {
+        state.activeView = "discover";
+        state.pendingFocusSelector =
+          "[data-guide-search]";
+        refresh();
+
+        window.setTimeout(() => {
+          state.container
+            ?.querySelector("[data-guide-country-picker]")
+            ?.scrollIntoView?.({
+              behavior: "smooth",
+              block: "center"
+            });
+        }, 50);
+
         return true;
       }
     );
@@ -2001,6 +1986,25 @@
         state.search = "";
         state.pendingFocusSelector =
           "[data-guide-search]";
+        refresh();
+        return true;
+      }
+    );
+
+    register(
+      "guide-set-section",
+      ({ params }) => {
+        const section = text(params.section);
+
+        if (
+          !GUIDE_SECTIONS.some(
+            (item) => item.id === section
+          )
+        ) {
+          return false;
+        }
+
+        state.activeSection = section;
         refresh();
         return true;
       }
@@ -2023,14 +2027,9 @@
           getGuideIntelligence();
 
         const countryCode =
-          text(
-            params.countryCode
-          ).toUpperCase();
+          text(params.countryCode).toUpperCase();
 
-        if (
-          !countryCode ||
-          !intelligence
-        ) {
+        if (!countryCode || !intelligence) {
           return false;
         }
 
@@ -2047,9 +2046,7 @@
               countryCode
             );
 
-        if (result === false) {
-          return false;
-        }
+        if (result === false) return false;
 
         safeToast(
           exists
@@ -2059,7 +2056,6 @@
         );
 
         refresh();
-
         return true;
       }
     );
@@ -2076,10 +2072,7 @@
             state.selectedCountryCode
           ).toUpperCase();
 
-        if (
-          !countryCode ||
-          !intelligence
-        ) {
+        if (!countryCode || !intelligence) {
           return false;
         }
 
@@ -2090,22 +2083,17 @@
               countryCode
             );
 
-          const defaultDays =
-            number(
-              guide?.sections
-                ?.idealDuration
-                ?.recommendedDays,
-              7
-            );
+          const defaultDays = number(
+            guide?.sections
+              ?.idealDuration
+              ?.recommendedDays,
+            7
+          );
 
           const result =
             intelligence.createAITripPlan?.({
               countryCode,
-              days:
-                Math.max(
-                  1,
-                  defaultDays
-                ),
+              days: Math.max(1, defaultDays),
               travelers: 2,
               tripType: "family",
               requiresHalal: true,
@@ -2154,14 +2142,15 @@
           ).toUpperCase();
 
         try {
+          const nextMonth =
+            ((new Date().getMonth() + 1) % 12) + 1;
+
           const lockedSlots =
             countryCode
               ? [
                   {
                     countryCode,
-                    month:
-                      new Date().getMonth() +
-                      2,
+                    month: nextMonth,
                     days: 7,
                     tripType: "family"
                   }
@@ -2170,15 +2159,13 @@
 
           const plan =
             intelligence?.createYearPlan?.({
-              year:
-                new Date().getFullYear(),
+              year: new Date().getFullYear(),
               tripsCount: 3,
               lockedSlots,
               persist: true
             }) ||
             getYearPlanner()?.generate?.({
-              year:
-                new Date().getFullYear(),
+              year: new Date().getFullYear(),
               tripsCount: 3,
               lockedSlots,
               persist: true
@@ -2217,8 +2204,7 @@
 
     if (
       !store ||
-      typeof store.subscribe !==
-        "function" ||
+      typeof store.subscribe !== "function" ||
       state.unsubscribeStore
     ) {
       return;
@@ -2266,21 +2252,18 @@
         state.selectedCountryCode =
           routeCountryCode;
         state.activeView = "country";
+        state.activeSection = "overview";
         state.selectedGuide = null;
       }
 
-      return renderPage(
-        buildSnapshot()
-      );
+      return renderPage(buildSnapshot());
     },
 
     mount(context = {}) {
       this.init();
 
       const container =
-        resolveContainer(
-          context.container
-        );
+        resolveContainer(context.container);
 
       if (!container) {
         throw new Error(
@@ -2295,14 +2278,14 @@
         state.selectedCountryCode =
           routeCountryCode;
         state.activeView = "country";
+        state.activeSection = "overview";
         state.selectedGuide = null;
       }
 
       state.container = container;
       state.mounted = true;
 
-      const snapshot =
-        buildSnapshot();
+      const snapshot = buildSnapshot();
 
       container.innerHTML =
         renderPage(snapshot);
@@ -2310,8 +2293,7 @@
       applyListeners();
 
       emit("mounted", {
-        countryCount:
-          snapshot.countries.length,
+        countryCount: snapshot.countries.length,
         selectedCountryCode:
           state.selectedCountryCode
       });
@@ -2321,9 +2303,7 @@
 
     afterEnter(context = {}) {
       const container =
-        resolveContainer(
-          context.container
-        );
+        resolveContainer(context.container);
 
       if (container) {
         state.container = container;
@@ -2341,6 +2321,7 @@
         state.selectedCountryCode =
           routeCountryCode;
         state.activeView = "country";
+        state.activeSection = "overview";
         state.selectedGuide = null;
         refresh();
       } else {
@@ -2355,32 +2336,23 @@
       state.container = null;
 
       emit("unmounted");
-
       return true;
     },
 
     refresh,
-
     openCountry,
 
     subscribe(listener) {
-      if (
-        typeof listener !==
-        "function"
-      ) {
+      if (typeof listener !== "function") {
         throw new TypeError(
           "TIC Guide subscriber must be a function."
         );
       }
 
-      state.subscribers.add(
-        listener
-      );
+      state.subscribers.add(listener);
 
       return () =>
-        state.subscribers.delete(
-          listener
-        );
+        state.subscribers.delete(listener);
     },
 
     getSnapshot() {
@@ -2394,8 +2366,7 @@
       this.unmount();
 
       if (
-        typeof state.unsubscribeStore ===
-        "function"
+        typeof state.unsubscribeStore === "function"
       ) {
         state.unsubscribeStore();
       }
@@ -2433,14 +2404,11 @@
         id: this.id,
         title: this.title,
         version: this.version,
-        initialized:
-          state.initialized,
-        mounted:
-          state.mounted,
-        activeView:
-          state.activeView,
-        search:
-          state.search,
+        initialized: state.initialized,
+        mounted: state.mounted,
+        activeView: state.activeView,
+        activeSection: state.activeSection,
+        search: state.search,
         selectedCountryCode:
           state.selectedCountryCode,
         hasContainer:
@@ -2480,8 +2448,7 @@
 
   if (
     router &&
-    typeof router.register ===
-      "function"
+    typeof router.register === "function"
   ) {
     if (!router.has?.("guide")) {
       router.register("guide", {
@@ -2495,8 +2462,7 @@
     }
 
     if (
-      typeof router.registerPage ===
-      "function"
+      typeof router.registerPage === "function"
     ) {
       router.registerPage(
         "guide",
