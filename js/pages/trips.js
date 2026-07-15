@@ -1,7 +1,7 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V3.4.0
-   Unified Travel Passport Edition
+   Trips Page Module V3.5.0
+   Visual Section Separation Edition
 
    File Path:
    js/pages/trips.js
@@ -33,8 +33,8 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.4.0";
-  const STYLE_ID = "tic-trips-v34-styles";
+  const PAGE_VERSION = "3.5.0";
+  const STYLE_ID = "tic-trips-v35-styles";
 
   const state = {
     initialized: false,
@@ -232,7 +232,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.4.0"] {
+      [data-page="trips"][data-page-version="3.5.0"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -1475,6 +1475,221 @@
         .trips-modal,
         .country-sheet {
           border-radius: 30px;
+        }
+      }
+
+      /* =====================================================
+         Trips V3.5.0 — Visual Section Separation
+         Presentation only; no data or persistence changes.
+      ===================================================== */
+
+      [data-page="trips"][data-page-version="3.5.0"] {
+        --trips-journey-accent: #256d8f;
+        --trips-journey-soft: #edf7fb;
+        --trips-passport-accent: #8a641d;
+        --trips-passport-soft: #fff9eb;
+        --trips-section-divider: rgba(6, 27, 56, .10);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-shell {
+        gap: 0;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-hero {
+        margin-bottom: 26px;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone {
+        position: relative;
+        display: grid;
+        gap: 18px;
+        min-width: 0;
+        padding: 22px 18px;
+        border: 1px solid transparent;
+        border-radius: 30px;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone + .trips-zone {
+        margin-top: 30px;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--overview {
+        margin-bottom: 24px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys {
+        border-color: #d6e7ef;
+        background:
+          radial-gradient(circle at 100% 0%, rgba(37,109,143,.10), transparent 31%),
+          linear-gradient(160deg, #f8fcfe 0%, var(--trips-journey-soft) 100%);
+        box-shadow: 0 18px 42px rgba(37, 109, 143, .07);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--passport {
+        padding: 0;
+        border: 0;
+        background: transparent;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-width: 0;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--trips-section-divider);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-icon {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 15px;
+        font-size: 20px;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy {
+        min-width: 0;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy small {
+        display: block;
+        font-size: 9px;
+        font-weight: 950;
+        letter-spacing: .09em;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy strong {
+        display: block;
+        margin-top: 2px;
+        color: var(--trips-navy);
+        font-size: 16px;
+        line-height: 1.35;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone__marker-copy p {
+        margin: 3px 0 0;
+        color: var(--trips-muted);
+        font-size: 11px;
+        line-height: 1.55;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-zone__marker-icon {
+        background: #dceff7;
+        color: var(--trips-journey-accent);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-zone__marker-copy small,
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-section__eyebrow {
+        color: var(--trips-journey-accent);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-tabs {
+        border-color: #cddfe8;
+        background: rgba(255,255,255,.84);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trips-tab.is-active {
+        background: #123b5a;
+        box-shadow: 0 10px 20px rgba(18, 59, 90, .18);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trip-card-v3__cover {
+        background: linear-gradient(135deg, #d9f4f0 0%, #7db8c5 53%, #173f60 100%);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-zone--journeys .trip-card-v3__open {
+        background: linear-gradient(135deg, #2c88a9, #175b7b);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        margin: 34px 0 20px;
+        color: var(--trips-passport-accent);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider::before,
+      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(138,100,29,.28), transparent);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .trips-passport-divider span {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 34px;
+        padding: 0 13px;
+        border: 1px solid #ead9ae;
+        border-radius: 999px;
+        background: var(--trips-passport-soft);
+        font-size: 10px;
+        font-weight: 950;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .passport-section {
+        border-color: #e6d8b4;
+        background:
+          radial-gradient(circle at 92% 0%, rgba(197,145,38,.15), transparent 31%),
+          linear-gradient(155deg, #fffdf8 0%, #f8f1df 100%);
+        box-shadow: 0 20px 48px rgba(112, 81, 22, .09);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .passport-kicker {
+        color: var(--trips-passport-accent);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .passport-icon {
+        border: 1px solid #ead9ae;
+        background: #fff6dc;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .passport-add {
+        background: linear-gradient(135deg, #b8872b, #7d5a1a);
+        box-shadow: 0 11px 25px rgba(125, 90, 26, .18);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .passport-count {
+        border-color: #ead9ae;
+        background: #fffdf7;
+        color: #7d642e;
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .country-magnet {
+        border-color: #e7d9b8;
+        background:
+          radial-gradient(circle at 85% 10%, rgba(255,255,255,.72), transparent 28%),
+          linear-gradient(145deg, #fffdf7, #eee3c8);
+        box-shadow: 0 13px 30px rgba(112, 81, 22, .07);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .country-magnet::after {
+        border-color: rgba(157,112,24,.10);
+      }
+
+      [data-page="trips"][data-page-version="3.5.0"] .country-magnet__open {
+        color: #7a5719;
+      }
+
+      @media (max-width: 520px) {
+        [data-page="trips"][data-page-version="3.5.0"] .trips-zone {
+          padding: 18px 14px;
+          border-radius: 25px;
+        }
+
+        [data-page="trips"][data-page-version="3.5.0"] .trips-zone + .trips-zone {
+          margin-top: 25px;
         }
       }
     `;
@@ -2726,14 +2941,11 @@
     <div class="trips-shell">
       <section class="trips-hero">
         <div class="trips-hero__top">
-          <span class="trips-hero__eyebrow">
-            TRIPS CENTER
-          </span>
+          <span class="trips-hero__eyebrow">TRIPS CENTER</span>
         </div>
 
         <div class="trips-hero__content">
           <h1>رحلاتي</h1>
-
           <p>
             نظّم رحلاتك القادمة، وبعد اكتمالها تنضم تلقائياً
             إلى جواز سفرك الشخصي مع الدول والمدن والذكريات.
@@ -2741,70 +2953,68 @@
         </div>
 
         <div class="trips-hero__actions">
-          <button
-            type="button"
-            class="trips-action trips-action--primary"
-            data-action="trips-new"
-          >
+          <button type="button" class="trips-action trips-action--primary" data-action="trips-new">
             ＋ رحلة جديدة
           </button>
 
-          <button
-            type="button"
-            class="trips-action trips-action--glass"
-            data-action="trips-add-memory"
-          >
+          <button type="button" class="trips-action trips-action--glass" data-action="trips-add-memory">
             🌍 رحلة سابقة
           </button>
         </div>
       </section>
 
-      <section class="trips-section">
-        <div class="trips-section__header">
-          <div>
-            <p class="trips-section__eyebrow">
-              QUICK OVERVIEW
-            </p>
+      <section class="trips-zone trips-zone--overview">
+        <section class="trips-section">
+          <div class="trips-section__header">
+            <div>
+              <p class="trips-section__eyebrow">QUICK OVERVIEW</p>
+              <h2>ملخص سفراتك</h2>
+              <p class="trips-section__subtitle">
+                أرقام سريعة وواضحة من جميع الرحلات المحفوظة.
+              </p>
+            </div>
+          </div>
 
-            <h2>ملخص سفراتك</h2>
+          ${renderOverview(snapshot.statistics)}
+        </section>
 
-            <p class="trips-section__subtitle">
-              أرقام سريعة وواضحة من جميع الرحلات المحفوظة.
-            </p>
+        ${renderNextTripBrief(snapshot)}
+      </section>
+
+      <section class="trips-zone trips-zone--journeys">
+        <div class="trips-zone__marker">
+          <span class="trips-zone__marker-icon" aria-hidden="true">✈</span>
+          <div class="trips-zone__marker-copy">
+            <small>JOURNEY OPERATIONS</small>
+            <strong>منطقة الرحلات النشطة</strong>
+            <p>كل ما يتعلق بالرحلات القادمة والجارية والتخطيط لها.</p>
           </div>
         </div>
 
-        ${renderOverview(snapshot.statistics)}
-      </section>
-
-      ${renderNextTripBrief(snapshot)}
-
-      <section class="trips-section">
-        <div class="trips-section__header">
-          <div>
-            <p class="trips-section__eyebrow">
-              ACTIVE JOURNEYS
-            </p>
-
-            <h2>
-              ${escapeHTML(
-                TAB_LABELS[state.activeTab] ||
-                "رحلاتك"
-              )}
-            </h2>
-
-            <p class="trips-section__subtitle">
-              الرحلات القادمة والجارية فقط؛ المكتملة تنتقل إلى جواز السفر.
-            </p>
+        <section class="trips-section">
+          <div class="trips-section__header">
+            <div>
+              <p class="trips-section__eyebrow">ACTIVE JOURNEYS</p>
+              <h2>${escapeHTML(TAB_LABELS[state.activeTab] || "رحلاتك")}</h2>
+              <p class="trips-section__subtitle">
+                الرحلات القادمة والجارية فقط؛ المكتملة تنتقل إلى جواز السفر.
+              </p>
+            </div>
           </div>
-        </div>
 
-        ${renderTabs()}
-        ${renderFilters()}
-        ${renderTabContent(snapshot)}
+          ${renderTabs()}
+          ${renderFilters()}
+          ${renderTabContent(snapshot)}
+        </section>
       </section>
 
-      ${renderPassport(snapshot)}
+      <div class="trips-passport-divider" aria-hidden="true">
+        <span>🌍 الانتقال إلى سجل السفر</span>
+      </div>
+
+      <section class="trips-zone trips-zone--passport">
+        ${renderPassport(snapshot)}
+      </section>
     </div>
   `;
 
