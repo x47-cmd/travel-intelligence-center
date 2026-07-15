@@ -34,16 +34,17 @@
   />
 
   <!-- =====================================================
-       Travel Intelligence Center V3.0.0
+       Travel Intelligence Center V4.0.0
 
        Premium iPhone-first interface
        Smart next-trip summary V2.4.0
        Fast Single-Page Trip Form V4.1.0
        Ticket and hotel document import
-       Guide Intelligence Platform V3.0.0
-       Travel DNA and destination recommendations
-       AI trip planner and annual travel planner
-       Budget Intelligence Platform V3.0.0
+       Unified Guide Intelligence V4.0.0
+       Complete 195-country World Guide Data
+       Guide Engine + Travel AI + Planner Engine
+       Passport and Guide country-code integration
+       Budget Intelligence Platform preserved
        Expense, savings and payment intelligence
        Budget analytics, AI, alerts and notifications
   ====================================================== -->
@@ -76,8 +77,13 @@
        Required order:
        Store → Router → UI
 
-       Store V2.0.0 includes:
+       Store V2.2.0 includes:
        - Complete trip persistence
+       - Travel Passport lifecycle
+       - Guide wishlist persistence
+       - Annual travel-plan persistence
+       - ISO country-code normalization
+       - Travel DNA persistence
        - Flight and hotel fields
        - Expense persistence
        - Savings persistence
@@ -87,7 +93,7 @@
 
   <script
     defer
-    src="js/store.js?v=2.0.0"
+    src="js/store.js?v=2.2.0"
   ></script>
 
   <script
@@ -101,20 +107,25 @@
   ></script>
 
   <!-- =====================================================
-       3. Guide Intelligence Data Layer
+       3. Unified Guide Intelligence Data Layer
 
        Required order:
-       Countries Catalog → Travel Knowledge
+       World Guide Data
+
+       WorldGuideData V4.0.0:
+       - Complete 195-country catalog
+       - Country codes and flags
+       - Baseline costs
+       - Best travel months
+       - Temperature profiles
+       - Recommended durations
+       - Halal and shattaf indicators
+       - Curated destination overrides
   ====================================================== -->
 
   <script
     defer
-    src="js/data/countries-catalog.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/data/travel-knowledge.js?v=1.0.0"
+    src="js/data/world-data.js?v=4.0.0"
   ></script>
 
   <!-- =====================================================
@@ -177,45 +188,48 @@
   ></script>
 
   <!-- =====================================================
-       6. Guide Intelligence Engines
+       6. Unified Guide Intelligence Engines
 
        Required order:
-       Recommendation
-       → Search
-       → AI Planner
-       → Travel DNA
-       → Year Planner
-       → Guide Intelligence Orchestrator
+       Planner Engine
+       → Travel AI
+       → Guide Engine
+
+       Planner Engine:
+       - Wishlist management
+       - Annual plans
+       - Plan readiness
+       - Plan-to-trip conversion
+
+       Travel AI:
+       - Travel profile analysis
+       - Destination scoring
+       - Budget fit
+       - Hotel recommendations
+       - Daily itinerary generation
+
+       Guide Engine:
+       - Main Guide orchestrator
+       - Country search and selection
+       - Passport and visited-country sync
+       - Recommendations
+       - Country guides
+       - Trip and annual-plan actions
   ====================================================== -->
 
   <script
     defer
-    src="js/features/destination-recommendation-engine.js?v=1.0.0"
+    src="js/features/planner-engine.js?v=4.0.0"
   ></script>
 
   <script
     defer
-    src="js/features/guide-search-engine.js?v=1.0.0"
+    src="js/features/travel-ai.js?v=4.0.0"
   ></script>
 
   <script
     defer
-    src="js/features/guide-ai-planner.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/travel-dna.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/travel-year-planner.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/guide-intelligence.js?v=1.0.0"
+    src="js/features/guide-engine.js?v=4.0.0"
   ></script>
 
   <!-- =====================================================
@@ -234,8 +248,9 @@
        → Integration Engine
 
        Important:
-       The Integration Engine must load after all other
-       Budget Intelligence engines.
+       Budget Travel Intelligence remains deferred.
+       Existing stable Budget Platform files remain enabled.
+       Integration Engine must load after all other Budget engines.
   ====================================================== -->
 
   <script
@@ -293,6 +308,13 @@
 
        All core services, data layers and feature engines
        must load before the page modules.
+
+       Current stable page versions:
+       - Home V2.4.0
+       - Trips V3.6.0
+       - Guide V4.0.0
+       - Budget V3.1.1
+       - More V2.0.0
   ====================================================== -->
 
   <script
@@ -302,17 +324,17 @@
 
   <script
     defer
-    src="js/pages/trips.js?v=2.0.0"
+    src="js/pages/trips.js?v=3.6.0"
   ></script>
 
   <script
     defer
-    src="js/pages/guide.js?v=3.0.0"
+    src="js/pages/guide.js?v=4.0.0"
   ></script>
 
   <script
     defer
-    src="js/pages/budget.js?v=3.0.0"
+    src="js/pages/budget.js?v=3.1.1"
   ></script>
 
   <script
@@ -323,19 +345,24 @@
   <!-- =====================================================
        9. Application Bootstrap
 
-       Application Bootstrap V3.0.0:
-       - Initializes Guide Intelligence
-       - Initializes Budget Intelligence
+       Application Bootstrap V4.0.0:
+       - Initializes WorldGuideData
+       - Initializes PlannerEngine
+       - Initializes TravelAI
+       - Initializes GuideEngine
+       - Preserves Budget Intelligence engines
        - Registers all pages
        - Starts the Router
+       - Synchronizes Trip Passport lifecycle
        - Provides runtime diagnostics
+       - Supports async page and feature initialization
 
        This must remain the final JavaScript file.
   ====================================================== -->
 
   <script
     defer
-    src="js/app.js?v=3.0.0"
+    src="js/app.js?v=4.0.0"
   ></script>
 </head>
 
@@ -393,10 +420,10 @@
         </h2>
 
         <p>
-          يتم تجهيز الرحلات، الوجهات، الميزانيات،
+          يتم تجهيز الرحلات، جواز السفر، دليل 195 دولة،
+          الاقتراحات الذكية، الجداول السياحية، الميزانيات،
           المصروفات، الادخار، الدفعات، المستندات،
-          التجهيز، الذكريات، قائمة الأمنيات،
-          ومحركات الذكاء الخاصة بالسفر والميزانية.
+          التجهيز، الذكريات، وقائمة الأمنيات.
         </p>
 
         <div
