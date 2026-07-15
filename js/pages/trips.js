@@ -1,18 +1,21 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V3.3.0
+   Trips Page Module V3.4.0
+   Unified Travel Passport Edition
 
    File Path:
    js/pages/trips.js
 
    Purpose:
-   - Complete redesign of "رحلاتي" as a personal travel hub.
-   - Separates operational journeys, travel journal and passport analytics.
-   - Supports adding old trips without forcing full booking details.
-   - Automatically includes completed future trips in travel memories.
-   - Final compact card, search, countdown and passport refinements.
-   - Preserves current Store / Router / UI / Trip Form integrations.
-   - Injects scoped styles so the page is complete from one file.
+   - Keeps upcoming and active journeys as the operational travel area.
+   - Removes the separate "مكتبة سفراتي" section completely.
+   - Merges all completed and historical trips into "جواز سفري".
+   - Preserves every existing trip record in Store without migration deletion.
+   - Opens each country as a passport folder containing its related trips.
+   - Supports adding historical trips directly from the passport.
+   - Uses one trip record only; completed trips automatically appear in passport.
+   - Preserves Store / Router / UI / Trip Form integrations.
+   - Injects all scoped styles from this file.
 
    Dependencies:
    - js/config.js
@@ -30,8 +33,8 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.3.0";
-  const STYLE_ID = "tic-trips-v3-styles";
+  const PAGE_VERSION = "3.4.0";
+  const STYLE_ID = "tic-trips-v34-styles";
 
   const state = {
     initialized: false,
@@ -40,6 +43,7 @@
     activeView: "hub",
     activeTab: "upcoming",
     activeTripId: null,
+    activeCountryKey: null,
     filtersOpen: false,
     filters: {
       search: "",
@@ -51,16 +55,22 @@
     unsubscribeStore: null,
     actionUnsubscribers: [],
     subscribers: new Set(),
-    lastSnapshot: null
+    lastSnapshot: null,
+    refreshQueued: false
   };
 
   const STATUS_LABELS = {
+    draft: "مسودة",
     planning: "قيد التخطيط",
+    planned: "مخططة",
     booked: "تم الحجز",
+    confirmed: "مؤكدة",
     ready: "جاهزة للسفر",
     ongoing: "جارية الآن",
+    active: "جارية الآن",
     completed: "مكتملة",
-    cancelled: "ملغاة"
+    cancelled: "ملغاة",
+    archived: "مؤرشفة"
   };
 
   const TYPE_LABELS = {
@@ -97,9 +107,7 @@
     if (typeof structuredClone === "function") {
       try {
         return structuredClone(value);
-      } catch (error) {
-        // Continue to JSON fallback.
-      }
+      } catch (error) {}
     }
 
     try {
@@ -149,9 +157,16 @@
       .toString(36)
       .slice(2, 9)}`;
 
+  const normalizeCountryKey = (value) =>
+    text(value)
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+
   const getStore = () =>
     window.TIC?.Store ||
     window.TICStore ||
+    window.Store ||
     null;
 
   const getRouter = () =>
@@ -217,7 +232,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.3.0"] {
+      [data-page="trips"][data-page-version="3.4.0"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -225,10 +240,9 @@
         --trips-soft: #f6f9fc;
         --trips-line: #dce5ef;
         --trips-muted: #75839b;
-        --trips-gold: #bf7d13;
         --trips-shadow: 0 18px 45px rgba(16, 40, 70, .09);
         color: var(--trips-navy);
-        padding-bottom: 28px;
+        padding-bottom: 30px;
       }
 
       [data-page="trips"] * {
@@ -237,15 +251,14 @@
 
       .trips-shell {
         display: grid;
-        gap: 22px;
+        gap: 24px;
       }
 
       .trips-hero {
         position: relative;
         overflow: hidden;
-        min-height: 315px;
-        padding: 28px;
-        border-radius: 34px;
+        padding: 22px;
+        border-radius: 27px;
         background:
           radial-gradient(circle at 15% 5%, rgba(255,255,255,.13) 0 120px, transparent 122px),
           linear-gradient(140deg, #16a797 0%, #0c8079 52%, #082b50 100%);
@@ -275,42 +288,44 @@
       .trips-hero__eyebrow {
         display: inline-flex;
         align-items: center;
-        min-height: 38px;
-        padding: 0 18px;
+        min-height: 30px;
+        padding: 0 13px;
         border: 1px solid rgba(255,255,255,.20);
         border-radius: 999px;
         background: rgba(255,255,255,.10);
-        font-weight: 800;
+        font-size: 11px;
+        font-weight: 900;
       }
 
       .trips-hero h1 {
-        margin: 30px 0 8px;
+        margin: 18px 0 8px;
         color: #fff;
-        font-size: clamp(38px, 10vw, 58px);
+        font-size: clamp(32px, 8vw, 44px);
         line-height: 1.05;
       }
 
       .trips-hero p {
-        max-width: 520px;
+        max-width: 500px;
         margin: 0;
         color: rgba(255,255,255,.82);
-        font-size: 18px;
-        line-height: 1.9;
+        font-size: 14px;
+        line-height: 1.8;
       }
 
       .trips-hero__actions {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
-        margin-top: 25px;
+        margin-top: 18px;
       }
 
       .trips-action {
-        min-height: 52px;
-        padding: 0 20px;
+        min-height: 46px;
+        padding: 0 12px;
         border: 0;
-        border-radius: 18px;
+        border-radius: 15px;
         font: inherit;
+        font-size: 13px;
         font-weight: 900;
         cursor: pointer;
       }
@@ -349,64 +364,187 @@
       .trips-section h2 {
         margin: 0;
         color: var(--trips-navy);
-        font-size: clamp(27px, 7vw, 38px);
+        font-size: clamp(24px, 6vw, 32px);
         line-height: 1.2;
       }
 
       .trips-section__subtitle {
-        margin: 6px 0 0;
+        margin: 4px 0 0;
         color: var(--trips-muted);
+        font-size: 13px;
         line-height: 1.7;
       }
 
       .trips-overview {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
+        gap: 8px;
       }
 
       .trips-stat {
-        min-height: 156px;
-        padding: 18px;
+        min-height: 88px;
+        padding: 9px 5px;
         border: 1px solid var(--trips-line);
-        border-radius: 27px;
+        border-radius: 18px;
         background: #fff;
+        text-align: center;
         box-shadow: 0 11px 28px rgba(16, 40, 70, .045);
       }
 
       .trips-stat__icon {
         display: grid;
         place-items: center;
-        width: 48px;
-        height: 48px;
-        border-radius: 17px;
+        width: 29px;
+        height: 29px;
+        margin-inline: auto;
+        border-radius: 10px;
         background: var(--trips-mint);
         color: var(--trips-navy);
-        font-size: 22px;
+        font-size: 13px;
       }
 
       .trips-stat strong {
         display: block;
-        margin-top: 18px;
-        font-size: 31px;
+        margin-top: 8px;
+        font-size: 19px;
         line-height: 1;
       }
 
       .trips-stat span {
         display: block;
-        margin-top: 9px;
+        margin-top: 4px;
         color: var(--trips-muted);
+        font-size: 8.5px;
         font-weight: 800;
+      }
+
+      .trips-next-brief {
+        display: grid;
+        gap: 13px;
+        padding: 17px;
+        border: 1px solid #cde6e1;
+        border-radius: 25px;
+        background:
+          radial-gradient(circle at 0% 0%, rgba(23,167,151,.13), transparent 34%),
+          linear-gradient(145deg, #ffffff, #f1faf8);
+        box-shadow: 0 14px 34px rgba(15,118,110,.08);
+      }
+
+      .trips-next-brief__head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+      }
+
+      .trips-next-brief__head span {
+        color: var(--trips-teal-dark);
+        font-size: 10px;
+        font-weight: 950;
+        letter-spacing: .09em;
+      }
+
+      .trips-next-brief__head h2 {
+        margin: 3px 0 0;
+        font-size: 23px;
+      }
+
+      .trips-next-brief__head p {
+        margin: 4px 0 0;
+        color: var(--trips-muted);
+        font-size: 13px;
+      }
+
+      .trips-next-brief__countdown {
+        flex: 0 0 auto;
+        min-width: 72px;
+        padding: 10px 8px;
+        border-radius: 999px;
+        background: var(--trips-navy);
+        color: #fff;
+        text-align: center;
+      }
+
+      .trips-next-brief__countdown strong,
+      .trips-next-brief__countdown small {
+        display: block;
+      }
+
+      .trips-next-brief__countdown strong {
+        font-size: 17px;
+      }
+
+      .trips-next-brief__countdown small {
+        margin-top: 2px;
+        color: rgba(255,255,255,.67);
+        font-size: 9px;
+      }
+
+      .trips-next-brief__facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .trips-next-brief__facts > div {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        flex: 1 1 calc(50% - 7px);
+        min-width: 125px;
+        padding: 9px 10px;
+        border: 1px solid rgba(220,229,239,.88);
+        border-radius: 999px;
+        background: rgba(255,255,255,.85);
+      }
+
+      .trips-next-brief__facts > div > span {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 27px;
+        height: 27px;
+        border-radius: 9px;
+        background: var(--trips-mint);
+        font-size: 12px;
+      }
+
+      .trips-next-brief__facts small,
+      .trips-next-brief__facts strong {
+        display: block;
+      }
+
+      .trips-next-brief__facts small {
+        color: var(--trips-muted);
+        font-size: 8px;
+      }
+
+      .trips-next-brief__facts strong {
+        margin-top: 2px;
+        font-size: 10px;
+      }
+
+      .trips-next-brief__action {
+        min-height: 44px;
+        border: 0;
+        border-radius: 15px;
+        background: #fff;
+        box-shadow: inset 0 0 0 1px #b9ddd6;
+        color: var(--trips-teal-dark);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 950;
       }
 
       .trips-tabs {
         display: flex;
         gap: 8px;
         overflow-x: auto;
-        padding: 5px;
+        padding: 4px;
         border: 1px solid var(--trips-line);
-        border-radius: 22px;
-        background: #fff;
+        border-radius: 19px;
+        background: rgba(255,255,255,.92);
+        box-shadow: inset 0 0 0 1px rgba(220,229,239,.75);
         scrollbar-width: none;
       }
 
@@ -415,14 +553,15 @@
       }
 
       .trips-tab {
-        flex: 0 0 auto;
-        min-height: 46px;
-        padding: 0 18px;
+        flex: 1 0 auto;
+        min-height: 42px;
+        padding: 0 14px;
         border: 0;
-        border-radius: 17px;
+        border-radius: 14px;
         background: transparent;
         color: var(--trips-muted);
         font: inherit;
+        font-size: 13px;
         font-weight: 900;
         cursor: pointer;
       }
@@ -439,10 +578,28 @@
         gap: 10px;
       }
 
-      .trips-search {
+      .trips-search-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
         flex: 1;
+        min-width: 0;
+      }
+
+      .trips-search-wrap > span {
+        position: absolute;
+        inset-inline-start: 16px;
+        z-index: 1;
+        color: var(--trips-muted);
+        font-size: 17px;
+        pointer-events: none;
+      }
+
+      .trips-search {
+        width: 100%;
         min-height: 55px;
         padding: 0 18px;
+        padding-inline-start: 44px;
         border: 1px solid var(--trips-line);
         border-radius: 18px;
         background: #fff;
@@ -451,12 +608,11 @@
         outline: none;
       }
 
-      .trips-search:focus {
-        border-color: rgba(15, 143, 131, .55);
-        box-shadow: 0 0 0 4px rgba(15, 143, 131, .09);
-      }
-
       .trips-filter-toggle {
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 1px;
         min-width: 55px;
         min-height: 55px;
         border: 1px solid var(--trips-line);
@@ -464,7 +620,13 @@
         background: #fff;
         color: var(--trips-navy);
         font: inherit;
+        font-size: 17px;
         font-weight: 900;
+      }
+
+      .trips-filter-toggle small {
+        color: var(--trips-muted);
+        font-size: 8px;
       }
 
       .trips-filters {
@@ -517,7 +679,7 @@
       .trip-card-v3 {
         overflow: hidden;
         border: 1px solid var(--trips-line);
-        border-radius: 30px;
+        border-radius: 25px;
         background: #fff;
         box-shadow: var(--trips-shadow);
       }
@@ -526,33 +688,33 @@
         position: relative;
         display: flex;
         align-items: flex-end;
-        min-height: 155px;
-        padding: 20px;
+        min-height: 112px;
+        padding: 16px;
         background:
           linear-gradient(135deg, rgba(196,246,234,.96), rgba(41,129,142,.69) 56%, rgba(7,39,68,.96));
       }
 
       .trip-card-v3__emoji {
         position: absolute;
-        inset-inline-start: 22px;
-        top: 22px;
-        font-size: 48px;
+        inset-inline-start: 18px;
+        top: 16px;
+        font-size: 38px;
       }
 
       .trip-card-v3__badge {
         display: inline-flex;
         align-items: center;
-        min-height: 32px;
-        padding: 0 12px;
+        min-height: 29px;
+        padding: 0 10px;
         border-radius: 999px;
         background: rgba(255,255,255,.88);
         color: var(--trips-navy);
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 950;
       }
 
       .trip-card-v3__body {
-        padding: 20px;
+        padding: 17px;
       }
 
       .trip-card-v3__title-row {
@@ -586,7 +748,8 @@
         white-space: nowrap;
       }
 
-      .trip-status-v3[data-status="ongoing"] {
+      .trip-status-v3[data-status="ongoing"],
+      .trip-status-v3[data-status="active"] {
         background: #fff0d1;
         color: #9d6300;
       }
@@ -610,9 +773,9 @@
       }
 
       .trip-card-v3__meta-item {
-        min-height: 75px;
+        min-height: 68px;
         padding: 12px;
-        border-radius: 17px;
+        border-radius: 16px;
         background: var(--trips-soft);
       }
 
@@ -662,9 +825,9 @@
       }
 
       .trip-card-v3__open {
-        min-height: 50px;
+        min-height: 48px;
         border: 0;
-        border-radius: 17px;
+        border-radius: 16px;
         background: linear-gradient(135deg, #17a797, #0a7d74);
         color: #fff;
         font: inherit;
@@ -672,92 +835,120 @@
       }
 
       .trip-card-v3__menu {
-        min-width: 50px;
-        min-height: 50px;
+        min-width: 44px;
+        width: 44px;
+        min-height: 44px;
+        height: 44px;
+        align-self: center;
         border: 1px solid var(--trips-line);
-        border-radius: 17px;
+        border-radius: 50%;
         background: #fff;
         color: var(--trips-navy);
         font: inherit;
+        font-size: 17px;
         font-weight: 950;
       }
 
-      .memory-card {
+      .passport-section {
+        position: relative;
         overflow: hidden;
+        display: grid;
+        gap: 16px;
+        padding: 20px;
         border: 1px solid var(--trips-line);
-        border-radius: 28px;
-        background: #fff;
+        border-radius: 29px;
+        background:
+          radial-gradient(circle at 90% 0%, rgba(9, 39, 70, .10), transparent 30%),
+          linear-gradient(145deg, #ffffff, #f5f8fc);
         box-shadow: var(--trips-shadow);
       }
 
-      .memory-card__cover {
-        min-height: 125px;
-        padding: 18px;
-        background:
-          radial-gradient(circle at 75% 15%, rgba(255,255,255,.35), transparent 33%),
-          linear-gradient(135deg, #d8f8ef, #81cabb 55%, #0a4962);
+      .passport-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 13px;
       }
 
-      .memory-card__stamp {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 9px 13px;
-        border: 2px solid rgba(6, 27, 56, .34);
-        border-radius: 13px;
-        color: var(--trips-navy);
+      .passport-head h2 {
+        margin: 4px 0 0;
+        font-size: clamp(25px, 7vw, 34px);
+      }
+
+      .passport-head p {
+        margin: 5px 0 0;
+        color: var(--trips-muted);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .passport-kicker {
+        display: block;
+        color: var(--trips-teal-dark);
+        font-size: 11px;
         font-weight: 950;
-        transform: rotate(-2deg);
+        letter-spacing: .08em;
       }
 
-      .memory-card__body {
-        padding: 19px;
-      }
-
-      .memory-card h3 {
-        margin: 0;
+      .passport-icon {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 17px;
+        background: var(--trips-mint);
         font-size: 23px;
       }
 
-      .memory-card p {
-        margin: 7px 0 0;
+      .passport-toolbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+      }
+
+      .passport-add {
+        min-height: 48px;
+        border: 0;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #17a797, #0b7a72);
+        color: #fff;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 950;
+      }
+
+      .passport-count {
+        display: grid;
+        place-items: center;
+        min-width: 78px;
+        padding: 0 13px;
+        border: 1px solid var(--trips-line);
+        border-radius: 16px;
+        background: #fff;
         color: var(--trips-muted);
-        line-height: 1.7;
-      }
-
-      .memory-card__facts {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 7px;
-        margin-top: 14px;
-      }
-
-      .memory-card__fact {
-        padding: 7px 10px;
-        border-radius: 999px;
-        background: var(--trips-soft);
-        color: #56657d;
-        font-size: 12px;
-        font-weight: 850;
+        font-size: 11px;
+        font-weight: 900;
       }
 
       .country-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 14px;
       }
 
       .country-magnet {
         position: relative;
         overflow: hidden;
-        min-height: 185px;
-        padding: 20px;
+        min-height: 205px;
+        padding: 18px;
         border: 1px solid var(--trips-line);
-        border-radius: 31px;
+        border-radius: 25px;
         background:
           radial-gradient(circle at 85% 10%, rgba(255,255,255,.65), transparent 28%),
           linear-gradient(145deg, #effcf9, #c5eee6);
         box-shadow: 0 13px 30px rgba(16, 40, 70, .07);
+        cursor: pointer;
       }
 
       .country-magnet::after {
@@ -776,11 +967,15 @@
       }
 
       .country-magnet h3 {
+        position: relative;
+        z-index: 1;
         margin: 22px 0 4px;
         font-size: 22px;
       }
 
       .country-magnet p {
+        position: relative;
+        z-index: 1;
         margin: 0;
         color: var(--trips-muted);
       }
@@ -791,110 +986,100 @@
         top: 16px;
         display: grid;
         place-items: center;
-        min-width: 38px;
-        height: 38px;
-        padding: 0 9px;
+        min-width: 46px;
+        min-height: 42px;
+        padding: 6px 9px;
         border-radius: 999px;
         background: var(--trips-navy);
         color: #fff;
         font-size: 13px;
         font-weight: 950;
+        line-height: 1.05;
       }
 
-      .trips-empty {
-        padding: 35px 20px;
+      .country-magnet__count small {
+        display: block;
+        margin-top: 2px;
+        color: rgba(255,255,255,.68);
+        font-size: 7px;
+      }
+
+      .country-magnet__stats {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 14px;
+      }
+
+      .country-magnet__stats > span {
+        min-width: 0;
+        padding: 8px 5px;
+        border-radius: 13px;
+        background: rgba(255,255,255,.72);
+        text-align: center;
+      }
+
+      .country-magnet__stats small,
+      .country-magnet__stats strong {
+        display: block;
+      }
+
+      .country-magnet__stats small {
+        color: var(--trips-muted);
+        font-size: 8px;
+      }
+
+      .country-magnet__stats strong {
+        margin-top: 3px;
+        font-size: 12px;
+      }
+
+      .country-magnet__open {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 13px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(6,27,56,.08);
+        color: var(--trips-teal-dark);
+        font-size: 11px;
+        font-weight: 950;
+      }
+
+      .trips-empty,
+      .passport-empty {
+        padding: 32px 20px;
         border: 1px dashed #cbd8e6;
-        border-radius: 28px;
+        border-radius: 24px;
         background: rgba(255,255,255,.75);
         text-align: center;
       }
 
-      .trips-empty__icon {
+      .trips-empty__icon,
+      .passport-empty__icon {
         font-size: 42px;
       }
 
-      .trips-empty h3 {
+      .trips-empty h3,
+      .passport-empty h3 {
         margin: 12px 0 5px;
         font-size: 23px;
       }
 
-      .trips-empty p {
+      .trips-empty p,
+      .passport-empty p {
         margin: 0;
         color: var(--trips-muted);
         line-height: 1.7;
       }
 
-      .trips-empty button {
+      .trips-empty button,
+      .passport-empty button {
         margin-top: 16px;
-      }
-
-      .trips-modal-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 9999;
-        display: grid;
-        align-items: end;
-        padding: 18px;
-        background: rgba(4, 14, 32, .52);
-        backdrop-filter: blur(9px);
-      }
-
-      .trips-modal {
-        width: min(720px, 100%);
-        max-height: calc(100vh - 36px);
-        margin-inline: auto;
-        overflow: auto;
-        border-radius: 32px 32px 22px 22px;
-        background: #fff;
-        box-shadow: 0 35px 90px rgba(0,0,0,.25);
-      }
-
-      .trips-modal__header {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 20px;
-        border-bottom: 1px solid var(--trips-line);
-        background: rgba(255,255,255,.96);
-        backdrop-filter: blur(12px);
-      }
-
-      .trips-modal__header h3 {
-        margin: 0;
-        font-size: 23px;
-      }
-
-      .trips-modal__close {
-        width: 42px;
-        height: 42px;
-        border: 1px solid var(--trips-line);
-        border-radius: 14px;
-        background: #fff;
-        font: inherit;
-        font-size: 24px;
-      }
-
-      .trips-modal__body {
-        display: grid;
-        gap: 15px;
-        padding: 20px;
-      }
-
-      .trips-modal__grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      .trips-modal__footer {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        padding: 0 20px 22px;
       }
 
       .trips-btn {
@@ -981,13 +1166,234 @@
         line-height: 1.5;
       }
 
-      @media (max-width: 760px) {
-        .trips-overview {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
+      .trips-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        align-items: end;
+        padding: 18px;
+        background: rgba(4, 14, 32, .52);
+        backdrop-filter: blur(9px);
+      }
 
-        .trips-grid,
-        .country-grid {
+      .trips-modal {
+        width: min(720px, 100%);
+        max-height: calc(100vh - 36px);
+        margin-inline: auto;
+        overflow: auto;
+        border-radius: 32px 32px 22px 22px;
+        background: #fff;
+        box-shadow: 0 35px 90px rgba(0,0,0,.25);
+      }
+
+      .trips-modal__header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 20px;
+        border-bottom: 1px solid var(--trips-line);
+        background: rgba(255,255,255,.96);
+        backdrop-filter: blur(12px);
+      }
+
+      .trips-modal__header h3 {
+        margin: 0;
+        font-size: 23px;
+      }
+
+      .trips-modal__close {
+        width: 42px;
+        height: 42px;
+        border: 1px solid var(--trips-line);
+        border-radius: 14px;
+        background: #fff;
+        font: inherit;
+        font-size: 24px;
+      }
+
+      .trips-modal__body {
+        display: grid;
+        gap: 15px;
+        padding: 20px;
+      }
+
+      .trips-modal__grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .trips-modal__footer {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 0 20px 22px;
+      }
+
+      .country-sheet {
+        width: min(760px, 100%);
+        max-height: calc(100vh - 28px);
+        margin-inline: auto;
+        overflow: auto;
+        border-radius: 32px 32px 22px 22px;
+        background: #fff;
+        box-shadow: 0 35px 90px rgba(0,0,0,.25);
+      }
+
+      .country-sheet__hero {
+        position: relative;
+        overflow: hidden;
+        padding: 24px;
+        background:
+          radial-gradient(circle at 10% 10%, rgba(255,255,255,.25), transparent 30%),
+          linear-gradient(140deg, #bcefe5, #58b9aa 50%, #0a4e66);
+        color: var(--trips-navy);
+      }
+
+      .country-sheet__hero::after {
+        content: "";
+        position: absolute;
+        inset-inline-end: -30px;
+        bottom: -60px;
+        width: 170px;
+        height: 170px;
+        border: 22px solid rgba(255,255,255,.16);
+        border-radius: 50%;
+      }
+
+      .country-sheet__hero-top {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: 12px;
+      }
+
+      .country-sheet__flag {
+        display: block;
+        font-size: 52px;
+      }
+
+      .country-sheet__hero h3 {
+        position: relative;
+        z-index: 1;
+        margin: 12px 0 4px;
+        font-size: 32px;
+      }
+
+      .country-sheet__hero p {
+        position: relative;
+        z-index: 1;
+        margin: 0;
+        color: rgba(6,27,56,.68);
+      }
+
+      .country-sheet__stats {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .country-sheet__stats > div {
+        padding: 10px 7px;
+        border-radius: 15px;
+        background: rgba(255,255,255,.72);
+        text-align: center;
+      }
+
+      .country-sheet__stats small,
+      .country-sheet__stats strong {
+        display: block;
+      }
+
+      .country-sheet__stats small {
+        color: var(--trips-muted);
+        font-size: 8px;
+      }
+
+      .country-sheet__stats strong {
+        margin-top: 4px;
+        font-size: 12px;
+      }
+
+      .country-sheet__body {
+        display: grid;
+        gap: 14px;
+        padding: 20px;
+      }
+
+      .country-sheet__title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .country-sheet__title-row h4 {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      .country-trip-list {
+        display: grid;
+        gap: 11px;
+      }
+
+      .country-trip-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        padding: 13px;
+        border: 1px solid var(--trips-line);
+        border-radius: 19px;
+        background: var(--trips-soft);
+      }
+
+      .country-trip-row__icon {
+        display: grid;
+        place-items: center;
+        width: 43px;
+        height: 43px;
+        border-radius: 14px;
+        background: #fff;
+        font-size: 20px;
+      }
+
+      .country-trip-row h5 {
+        margin: 0;
+        font-size: 15px;
+      }
+
+      .country-trip-row p {
+        margin: 4px 0 0;
+        color: var(--trips-muted);
+        font-size: 11px;
+      }
+
+      .country-trip-row button {
+        min-height: 38px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--trips-navy);
+        color: #fff;
+        font: inherit;
+        font-size: 10px;
+        font-weight: 900;
+      }
+
+      @media (max-width: 760px) {
+        .trips-grid {
           grid-template-columns: 1fr;
         }
 
@@ -997,687 +1403,77 @@
           grid-template-columns: 1fr;
         }
 
-        .trips-hero {
-          min-height: 330px;
-          padding: 24px 22px;
-          border-radius: 31px;
-        }
-
         .trips-section__header {
           align-items: start;
           flex-direction: column;
         }
       }
 
-      /* =====================================================
-         Trips V3.1.0 — Compact & Personal Refinement
-      ===================================================== */
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-shell {
-        gap: 24px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-hero {
-        min-height: 0;
-        padding: 22px;
-        border-radius: 27px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-hero__eyebrow {
-        min-height: 30px;
-        padding: 0 13px;
-        font-size: 11px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-hero h1 {
-        margin-top: 18px;
-        font-size: clamp(32px, 8vw, 44px);
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-hero p {
-        max-width: 470px;
-        font-size: 14px;
-        line-height: 1.75;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-hero__actions {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        margin-top: 18px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-action {
-        min-height: 46px;
-        padding: 0 12px;
-        border-radius: 15px;
-        font-size: 13px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-section h2 {
-        font-size: clamp(24px, 6vw, 32px);
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-section__subtitle {
-        margin-top: 4px;
-        font-size: 13px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-overview {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 8px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat {
-        min-height: 104px;
-        padding: 12px 9px;
-        border-radius: 20px;
-        text-align: center;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat__icon {
-        width: 35px;
-        height: 35px;
-        margin-inline: auto;
-        border-radius: 12px;
-        font-size: 16px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat strong {
-        margin-top: 10px;
-        font-size: 23px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat span {
-        margin-top: 6px;
-        font-size: 10px;
-        line-height: 1.35;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-tabs {
-        padding: 4px;
-        border-radius: 19px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-tab {
-        flex: 1 0 auto;
-        min-height: 42px;
-        padding: 0 14px;
-        border-radius: 14px;
-        font-size: 13px;
-      }
-
-      .trips-personal-section {
-        position: relative;
-        overflow: hidden;
-        display: grid;
-        gap: 16px;
-        padding: 20px;
-        border: 1px solid var(--trips-line);
-        border-radius: 29px;
-        background: #fff;
-        box-shadow: var(--trips-shadow);
-      }
-
-      .trips-personal-section--memory {
-        background:
-          radial-gradient(circle at 8% 0%, rgba(28, 167, 151, .12), transparent 31%),
-          linear-gradient(145deg, #ffffff, #f5fbfa);
-      }
-
-      .trips-personal-section--passport {
-        background:
-          radial-gradient(circle at 90% 0%, rgba(9, 39, 70, .10), transparent 30%),
-          linear-gradient(145deg, #ffffff, #f5f8fc);
-      }
-
-      .trips-personal-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 13px;
-      }
-
-      .trips-personal-copy {
-        min-width: 0;
-      }
-
-      .trips-personal-kicker {
-        display: block;
-        color: var(--trips-teal-dark);
-        font-size: 11px;
-        font-weight: 950;
-        letter-spacing: .08em;
-      }
-
-      .trips-personal-head h2 {
-        margin: 4px 0 0;
-        font-size: clamp(25px, 7vw, 34px);
-      }
-
-      .trips-personal-head p {
-        margin: 5px 0 0;
-        color: var(--trips-muted);
-        font-size: 13px;
-        line-height: 1.65;
-      }
-
-      .trips-personal-icon {
-        flex: 0 0 auto;
-        display: grid;
-        place-items: center;
-        width: 48px;
-        height: 48px;
-        border-radius: 17px;
-        background: var(--trips-mint);
-        font-size: 23px;
-      }
-
-      .trips-personal-action {
-        width: 100%;
-        min-height: 48px;
-        border: 0;
-        border-radius: 16px;
-        background: linear-gradient(135deg, #17a797, #0b7a72);
-        color: #fff;
-        font: inherit;
-        font-size: 13px;
-        font-weight: 950;
-      }
-
-      .trips-memory-preview,
-      .trips-country-preview {
-        display: grid;
-        gap: 12px;
-      }
-
-      .trips-personal-empty {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        align-items: center;
-        gap: 13px;
-        min-height: 105px;
-        padding: 15px;
-        border: 1px dashed #cbd8e6;
-        border-radius: 21px;
-        background: rgba(255,255,255,.72);
-      }
-
-      .trips-personal-empty__icon {
-        display: grid;
-        place-items: center;
-        width: 48px;
-        height: 48px;
-        border-radius: 16px;
-        background: #fff;
-        font-size: 22px;
-        box-shadow: 0 8px 20px rgba(16,40,70,.06);
-      }
-
-      .trips-personal-empty strong {
-        display: block;
-        font-size: 16px;
-      }
-
-      .trips-personal-empty p {
-        margin: 4px 0 0;
-        color: var(--trips-muted);
-        font-size: 12px;
-        line-height: 1.55;
-      }
-
-      .trips-memory-preview .memory-card {
-        box-shadow: none;
-      }
-
-      .trips-country-preview .country-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .trips-country-preview .country-magnet {
-        min-height: 150px;
-        padding: 16px;
-        border-radius: 24px;
-      }
-
-      .trips-country-preview .country-magnet__flag {
-        font-size: 31px;
-      }
-
-      .trips-country-preview .country-magnet h3 {
-        margin-top: 16px;
-        font-size: 18px;
-      }
-
       @media (max-width: 520px) {
-        [data-page="trips"][data-page-version="3.3.0"] .trips-overview {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-
-        [data-page="trips"][data-page-version="3.3.0"] .trips-stat {
-          min-height: 96px;
-          padding: 10px 5px;
-        }
-
-        [data-page="trips"][data-page-version="3.3.0"] .trips-stat__icon {
-          width: 31px;
-          height: 31px;
-          font-size: 14px;
-        }
-
-        [data-page="trips"][data-page-version="3.3.0"] .trips-stat strong {
-          font-size: 20px;
-        }
-
-        [data-page="trips"][data-page-version="3.3.0"] .trips-stat span {
-          font-size: 9px;
-        }
-
-        .trips-personal-section {
+        .passport-section {
           padding: 17px;
           border-radius: 25px;
         }
-      }
 
-      @media (max-width: 390px) {
-        [data-page="trips"][data-page-version="3.3.0"] .trips-hero__actions {
-          grid-template-columns: 1fr;
+        .country-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
         }
 
-        .trips-country-preview .country-grid {
-          grid-template-columns: 1fr;
+        .country-magnet {
+          min-height: 190px;
+          padding: 14px;
+          border-radius: 22px;
         }
-      }
 
-      /* =====================================================
-         Trips V3.2.0 — Final Premium Pass
-      ===================================================== */
+        .country-magnet__flag {
+          font-size: 31px;
+        }
 
-      [data-page="trips"][data-page-version="3.3.0"] .trips-tabs {
-        position: relative;
-        background: rgba(255,255,255,.92);
-        box-shadow: inset 0 0 0 1px rgba(220,229,239,.75);
-      }
+        .country-magnet h3 {
+          margin-top: 17px;
+          font-size: 18px;
+        }
 
-      [data-page="trips"][data-page-version="3.3.0"] .trips-tab {
-        transition:
-          color 180ms ease,
-          background 180ms ease,
-          transform 180ms ease,
-          box-shadow 180ms ease;
-      }
+        .country-magnet p {
+          font-size: 11px;
+          line-height: 1.45;
+        }
 
-      [data-page="trips"][data-page-version="3.3.0"] .trips-tab.is-active {
-        transform: translateY(-1px);
-      }
+        .country-magnet__stats {
+          gap: 4px;
+        }
 
-      [data-page="trips"][data-page-version="3.3.0"] .trips-filter-toggle {
-        display: grid;
-        place-items: center;
-        align-content: center;
-        gap: 1px;
-        font-size: 17px;
-      }
+        .country-magnet__stats > span {
+          padding: 7px 3px;
+        }
 
-      [data-page="trips"][data-page-version="3.3.0"] .trips-filter-toggle small {
-        color: var(--trips-muted);
-        font-size: 8px;
-        font-weight: 900;
-      }
-
-      .trips-next-brief {
-        display: grid;
-        gap: 15px;
-        padding: 19px;
-        border: 1px solid #cde6e1;
-        border-radius: 27px;
-        background:
-          radial-gradient(circle at 0% 0%, rgba(23,167,151,.13), transparent 34%),
-          linear-gradient(145deg, #ffffff, #f1faf8);
-        box-shadow: 0 14px 34px rgba(15,118,110,.08);
-      }
-
-      .trips-next-brief__head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 14px;
-      }
-
-      .trips-next-brief__head span {
-        color: var(--trips-teal-dark);
-        font-size: 10px;
-        font-weight: 950;
-        letter-spacing: .09em;
-      }
-
-      .trips-next-brief__head h2 {
-        margin: 3px 0 0;
-        font-size: 23px;
-      }
-
-      .trips-next-brief__head p {
-        margin: 4px 0 0;
-        color: var(--trips-muted);
-        font-size: 13px;
-      }
-
-      .trips-next-brief__countdown {
-        flex: 0 0 auto;
-        min-width: 78px;
-        padding: 11px 10px;
-        border-radius: 18px;
-        background: var(--trips-navy);
-        color: #fff;
-        text-align: center;
-      }
-
-      .trips-next-brief__countdown strong,
-      .trips-next-brief__countdown small {
-        display: block;
-      }
-
-      .trips-next-brief__countdown strong {
-        font-size: 17px;
-      }
-
-      .trips-next-brief__countdown small {
-        margin-top: 2px;
-        color: rgba(255,255,255,.67);
-        font-size: 9px;
-      }
-
-      .trips-next-brief__facts {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 7px;
-      }
-
-      .trips-next-brief__facts > div {
-        min-width: 0;
-        padding: 10px 7px;
-        border: 1px solid rgba(220,229,239,.88);
-        border-radius: 15px;
-        background: rgba(255,255,255,.85);
-        text-align: center;
-      }
-
-      .trips-next-brief__facts small,
-      .trips-next-brief__facts strong {
-        display: block;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .trips-next-brief__facts small {
-        color: var(--trips-muted);
-        font-size: 9px;
-      }
-
-      .trips-next-brief__facts strong {
-        margin-top: 4px;
-        font-size: 11px;
-      }
-
-      .trips-next-brief__action {
-        min-height: 44px;
-        border: 0;
-        border-radius: 15px;
-        background: #fff;
-        box-shadow: inset 0 0 0 1px #b9ddd6;
-        color: var(--trips-teal-dark);
-        font: inherit;
-        font-size: 12px;
-        font-weight: 950;
-      }
-
-      .memory-card__cover {
-        background-size: cover;
-        background-position: center;
-      }
-
-      .country-magnet__count {
-        min-width: 46px;
-        height: auto;
-        min-height: 42px;
-        padding: 6px 9px;
-        line-height: 1.05;
-      }
-
-      .country-magnet__count small {
-        display: block;
-        margin-top: 2px;
-        color: rgba(255,255,255,.68);
-        font-size: 7px;
-      }
-
-      .country-magnet__stats {
-        position: relative;
-        z-index: 1;
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px;
-        margin-top: 14px;
-      }
-
-      .country-magnet__stats > span {
-        min-width: 0;
-        padding: 8px 5px;
-        border-radius: 13px;
-        background: rgba(255,255,255,.72);
-        text-align: center;
-      }
-
-      .country-magnet__stats small,
-      .country-magnet__stats strong {
-        display: block;
-      }
-
-      .country-magnet__stats small {
-        color: var(--trips-muted);
-        font-size: 8px;
-      }
-
-      .country-magnet__stats strong {
-        margin-top: 3px;
-        font-size: 12px;
-      }
-
-      @media (max-width: 520px) {
-        .trips-next-brief__facts {
+        .country-sheet__stats {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
-
-        .trips-next-brief__facts strong {
-          font-size: 10px;
-        }
-      }
-
-
-      /* =====================================================
-         Trips V3.3.0 — Visual Polish & Compactness
-      ===================================================== */
-
-      [data-page="trips"][data-page-version="3.3.0"] {
-        --trips-radius-card: 25px;
-        --trips-radius-inner: 16px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat {
-        min-height: 88px;
-        padding: 9px 5px;
-        border-radius: 18px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat__icon {
-        width: 29px;
-        height: 29px;
-        border-radius: 10px;
-        font-size: 13px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat strong {
-        margin-top: 8px;
-        font-size: 19px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-stat span {
-        margin-top: 4px;
-        font-size: 8.5px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3,
-      [data-page="trips"][data-page-version="3.3.0"] .memory-card,
-      [data-page="trips"][data-page-version="3.3.0"] .country-magnet,
-      [data-page="trips"][data-page-version="3.3.0"] .trips-personal-section,
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief {
-        border-radius: var(--trips-radius-card);
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__cover {
-        min-height: 112px;
-        padding: 16px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__emoji {
-        inset-inline-start: 18px;
-        top: 16px;
-        font-size: 38px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__badge {
-        min-height: 29px;
-        padding: 0 10px;
-        font-size: 11px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__body {
-        padding: 17px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__meta-item {
-        min-height: 68px;
-        border-radius: var(--trips-radius-inner);
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__menu {
-        min-width: 44px;
-        width: 44px;
-        min-height: 44px;
-        height: 44px;
-        align-self: center;
-        border-radius: 50%;
-        font-size: 17px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trip-card-v3__open {
-        min-height: 48px;
-        border-radius: var(--trips-radius-inner);
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief {
-        gap: 13px;
-        padding: 17px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__countdown {
-        min-width: 72px;
-        padding: 10px 8px;
-        border-radius: 999px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 7px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        flex: 1 1 calc(50% - 7px);
-        min-width: 125px;
-        padding: 9px 10px;
-        border-radius: 999px;
-        text-align: start;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div > span {
-        flex: 0 0 auto;
-        display: grid;
-        place-items: center;
-        width: 27px;
-        height: 27px;
-        border-radius: 9px;
-        background: var(--trips-mint);
-        font-size: 12px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div > div {
-        min-width: 0;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts small,
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts strong {
-        text-align: start;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts small {
-        font-size: 8px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts strong {
-        margin-top: 2px;
-        font-size: 10px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-search-wrap {
-        position: relative;
-        display: flex;
-        align-items: center;
-        flex: 1;
-        min-width: 0;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-search-wrap > span {
-        position: absolute;
-        inset-inline-start: 16px;
-        z-index: 1;
-        color: var(--trips-muted);
-        font-size: 17px;
-        pointer-events: none;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-search {
-        padding-inline-start: 44px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .memory-card__cover {
-        min-height: 108px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .country-magnet {
-        min-height: 165px;
-      }
-
-      [data-page="trips"][data-page-version="3.3.0"] .trips-personal-empty {
-        border-radius: 18px;
       }
 
       @media (max-width: 390px) {
-        [data-page="trips"][data-page-version="3.3.0"] .trips-next-brief__facts > div {
+        .trips-hero__actions {
+          grid-template-columns: 1fr;
+        }
+
+        .country-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .trips-next-brief__facts > div {
           flex-basis: 100%;
         }
       }
-
 
       @media (min-width: 761px) {
         .trips-modal-backdrop {
           align-items: center;
         }
 
-        .trips-modal {
+        .trips-modal,
+        .country-sheet {
           border-radius: 30px;
         }
       }
@@ -1732,12 +1528,16 @@
     }
 
     if (typeof store.set === "function") {
-      store.set("trips", clone(trips));
+      store.set("trips", clone(trips), {
+        immediate: true
+      });
       return true;
     }
 
     if (typeof store.patch === "function") {
-      store.patch({ trips: clone(trips) });
+      store.patch({ trips: clone(trips) }, undefined, {
+        immediate: true
+      });
       return true;
     }
 
@@ -1745,7 +1545,9 @@
       store.update((currentState) => ({
         ...currentState,
         trips: clone(trips)
-      }));
+      }), {
+        immediate: true
+      });
       return true;
     }
 
@@ -1764,8 +1566,7 @@
     }
 
     if (typeof store?.upsertTrip === "function") {
-      await store.upsertTrip(trip);
-      return trip;
+      return (await store.upsertTrip(trip)) || trip;
     }
 
     const trips = getTrips();
@@ -1789,13 +1590,11 @@
     };
 
     if (typeof store?.updateTrip === "function") {
-      await store.updateTrip(tripId, updated);
-      return updated;
+      return (await store.updateTrip(tripId, updated)) || updated;
     }
 
     if (typeof store?.upsertTrip === "function") {
-      await store.upsertTrip(updated);
-      return updated;
+      return (await store.upsertTrip(updated)) || updated;
     }
 
     const trips = getTrips();
@@ -1900,7 +1699,9 @@
   const tripStatus = (trip) => {
     const raw = text(trip.status).toLowerCase();
 
-    if (raw === "cancelled") return raw;
+    if (raw === "cancelled" || raw === "archived") {
+      return raw;
+    }
 
     const today = startOfDay(new Date());
     const start = toDate(trip.startDate);
@@ -1922,20 +1723,27 @@
       return "completed";
     }
 
+    if (raw === "active") return "ongoing";
+
     if (raw) return raw;
 
     return "planning";
   };
 
-  const isMemoryTrip = (trip) =>
+  const isPassportTrip = (trip) =>
     trip.isMemory === true ||
     trip.memorySource === "manual-history" ||
     tripStatus(trip) === "completed";
 
   const isUpcomingTrip = (trip) =>
-    ["planning", "booked", "ready"].includes(
-      tripStatus(trip)
-    );
+    [
+      "draft",
+      "planning",
+      "planned",
+      "booked",
+      "confirmed",
+      "ready"
+    ].includes(tripStatus(trip));
 
   const formatDate = (value, options = {}) => {
     const parsed = toDate(value);
@@ -1987,6 +1795,8 @@
       "thailand": "🇹🇭",
       "كازاخستان": "🇰🇿",
       "kazakhstan": "🇰🇿",
+      "الدنمارك": "🇩🇰",
+      "denmark": "🇩🇰",
       "إسبانيا": "🇪🇸",
       "اسبانيا": "🇪🇸",
       "spain": "🇪🇸",
@@ -2013,7 +1823,11 @@
       "malaysia": "🇲🇾",
       "إندونيسيا": "🇮🇩",
       "اندونيسيا": "🇮🇩",
-      "indonesia": "🇮🇩"
+      "indonesia": "🇮🇩",
+      "النمسا": "🇦🇹",
+      "austria": "🇦🇹",
+      "سنغافورة": "🇸🇬",
+      "singapore": "🇸🇬"
     };
 
     return flags[normalized] || "🌍";
@@ -2045,7 +1859,7 @@
     const map = new Map();
 
     trips
-      .filter(isMemoryTrip)
+      .filter(isPassportTrip)
       .forEach((trip) => {
         const country =
           text(trip.country) ||
@@ -2053,7 +1867,7 @@
           text(trip.destination) ||
           "وجهة غير محددة";
 
-        const key = country.toLowerCase();
+        const key = normalizeCountryKey(country);
 
         if (!map.has(key)) {
           map.set(key, {
@@ -2067,7 +1881,7 @@
             firstVisit: null,
             lastVisit: null,
             totalDays: 0,
-            tripIds: []
+            trips: []
           });
         }
 
@@ -2079,7 +1893,7 @@
 
         item.visits += 1;
         item.totalDays += Math.max(0, durationDays(trip));
-        item.tripIds.push(trip.id);
+        item.trips.push(clone(trip));
 
         normalizeCities(trip).forEach((city) =>
           item.cities.add(city)
@@ -2099,25 +1913,33 @@
     return [...map.values()]
       .map((item) => ({
         ...item,
-        cities: [...item.cities]
+        cities: [...item.cities],
+        trips: item.trips.sort(
+          (a, b) =>
+            (toDate(b.startDate)?.getTime() || 0) -
+            (toDate(a.startDate)?.getTime() || 0)
+        )
       }))
       .sort((a, b) =>
-        a.country.localeCompare(b.country, "ar")
+        (b.lastVisit?.getTime() || 0) -
+        (a.lastVisit?.getTime() || 0)
       );
   };
 
   const statisticsFrom = (trips, countries) => ({
-    total: trips.length,
+    total: trips.filter(
+      (trip) => tripStatus(trip) !== "archived"
+    ).length,
     upcoming: trips.filter(isUpcomingTrip).length,
     ongoing: trips.filter(
       (trip) =>
         tripStatus(trip) === "ongoing"
     ).length,
-    memories: trips.filter(isMemoryTrip).length,
+    memories: trips.filter(isPassportTrip).length,
     countries: countries.length,
     cities: new Set(
       trips
-        .filter(isMemoryTrip)
+        .filter(isPassportTrip)
         .flatMap(normalizeCities)
         .map((city) => city.toLowerCase())
     ).size
@@ -2130,6 +1952,10 @@
     const byTab = trips.filter((trip) => {
       const status = tripStatus(trip);
 
+      if (status === "archived" || status === "completed") {
+        return false;
+      }
+
       switch (state.activeTab) {
         case "upcoming":
           return isUpcomingTrip(trip);
@@ -2137,11 +1963,8 @@
         case "ongoing":
           return status === "ongoing";
 
-        case "memories":
-          return isMemoryTrip(trip);
-
         case "all":
-          return true;
+          return status !== "archived";
 
         default:
           return true;
@@ -2161,7 +1984,6 @@
         ...(Array.isArray(trip.cities) ? trip.cities : []),
         trip.accommodation,
         trip.airline,
-        trip.bestMemory,
         trip.notes
       ]
         .filter(Boolean)
@@ -2247,6 +2069,12 @@
             (trip) =>
               String(trip.id) ===
               String(state.activeTripId)
+          ) || null
+        : null,
+      activeCountry: state.activeCountryKey
+        ? countries.find(
+            (country) =>
+              country.key === state.activeCountryKey
           ) || null
         : null,
       statistics: statisticsFrom(trips, countries),
@@ -2377,7 +2205,7 @@
       {
         icon: "♡",
         value: statistics.memories,
-        label: "ذكريات سفر"
+        label: "رحلات سابقة"
       }
     ];
 
@@ -2476,6 +2304,9 @@
                   </option>
 
                   ${Object.entries(STATUS_LABELS)
+                    .filter(([value]) =>
+                      !["completed", "archived"].includes(value)
+                    )
                     .map(([value, label]) => `
                       <option
                         value="${escapeHTML(value)}"
@@ -2558,17 +2389,15 @@
         : 0;
 
     const countdown =
-      status === "completed"
-        ? "ضمن ذكريات السفر"
-        : remaining === null
-          ? "الموعد غير محدد"
-          : remaining === 0
-            ? "السفر اليوم"
-            : remaining === 1
-              ? "متبقي يوم"
-              : remaining > 1
-                ? `متبقي ${remaining} يوم`
-                : "بدأت الرحلة";
+      remaining === null
+        ? "الموعد غير محدد"
+        : remaining === 0
+          ? "السفر اليوم"
+          : remaining === 1
+            ? "متبقي يوم"
+            : remaining > 1
+              ? `متبقي ${remaining} يوم`
+              : "بدأت الرحلة";
 
     const location =
       trip.destination ||
@@ -2696,129 +2525,15 @@
     `;
   };
 
-  const renderMemoryCard = (trip) => {
-    const location =
-      [trip.city, trip.country]
-        .filter(Boolean)
-        .join("، ") ||
-      trip.destination ||
-      "وجهة غير محددة";
-
-    const year =
-      toDate(trip.startDate)?.getFullYear() ||
-      trip.travelYear ||
-      "—";
-
-    const cities = normalizeCities(trip);
-
-    return `
-      <article class="memory-card">
-        <div
-          class="memory-card__cover"
-          ${
-            trip.coverImage
-              ? `style="background-image:linear-gradient(135deg,rgba(8,23,43,.18),rgba(8,23,43,.58)),url('${escapeHTML(trip.coverImage)}');background-size:cover;background-position:center"`
-              : ""
-          }
-        >
-          <span class="memory-card__stamp">
-            ${escapeHTML(
-              trip.countryFlag ||
-              countryFlag(trip.country)
-            )}
-            ${escapeHTML(year)}
-          </span>
-        </div>
-
-        <div class="memory-card__body">
-          <h3>
-            ${escapeHTML(
-              trip.title ||
-              trip.destination ||
-              "ذكرى سفر"
-            )}
-          </h3>
-
-          <p>
-            ${escapeHTML(location)}
-          </p>
-
-          <div class="memory-card__facts">
-            <span class="memory-card__fact">
-              ${escapeHTML(
-                TYPE_LABELS[trip.tripType] ||
-                "رحلة"
-              )}
-            </span>
-
-            ${
-              cities.length
-                ? `
-                  <span class="memory-card__fact">
-                    ${escapeHTML(cities.length)} مدينة
-                  </span>
-                `
-                : ""
-            }
-
-            ${
-              number(trip.rating) > 0
-                ? `
-                  <span class="memory-card__fact">
-                    ★ ${escapeHTML(trip.rating)}/5
-                  </span>
-                `
-                : ""
-            }
-
-            ${
-              trip.wouldVisitAgain === true
-                ? `
-                  <span class="memory-card__fact">
-                    أزورها مرة أخرى
-                  </span>
-                `
-                : ""
-            }
-          </div>
-
-          ${
-            trip.bestMemory
-              ? `
-                <p style="margin-top:14px">
-                  “${escapeHTML(trip.bestMemory)}”
-                </p>
-              `
-              : ""
-          }
-
-          <div class="trip-card-v3__actions">
-            <button
-              type="button"
-              class="trip-card-v3__open"
-              data-action="trips-view-details"
-              data-trip-id="${escapeHTML(trip.id)}"
-            >
-              فتح الذكرى
-            </button>
-
-            <button
-              type="button"
-              class="trip-card-v3__menu"
-              data-action="trips-card-menu"
-              data-trip-id="${escapeHTML(trip.id)}"
-              aria-label="إجراءات الرحلة"
-            >
-              •••
-            </button>
-          </div>
-        </div>
-      </article>
-    `;
-  };
-
   const renderCountryCard = (country) => `
-    <article class="country-magnet">
+    <article
+      class="country-magnet"
+      role="button"
+      tabindex="0"
+      data-action="trips-open-country"
+      data-country-key="${escapeHTML(country.key)}"
+      aria-label="فتح رحلات ${escapeHTML(country.country)}"
+    >
       <span class="country-magnet__count">
         ${escapeHTML(country.visits)}
         <small>زيارة</small>
@@ -2861,6 +2576,11 @@
             }
           </strong>
         </span>
+      </div>
+
+      <div class="country-magnet__open">
+        <span>فتح سجل الدولة</span>
+        <span>←</span>
       </div>
     </article>
   `;
@@ -2915,9 +2635,9 @@
         },
         all: {
           icon: "✈",
-          title: "لا توجد رحلات",
+          title: "لا توجد رحلات نشطة",
           message:
-            "أضف رحلة قادمة أو سجّل رحلة سابقة لبناء سجل سفرك.",
+            "الرحلات المكتملة موجودة داخل جواز سفرك، ويمكنك إضافة رحلة جديدة.",
           actionLabel: "إنشاء رحلة جديدة",
           action: "trips-new"
         }
@@ -2938,109 +2658,64 @@
     `;
   };
 
-  const renderMemoriesShowcase = (snapshot) => {
-    const memories = snapshot.trips
-      .filter(isMemoryTrip)
-      .sort((a, b) =>
-        (toDate(b.startDate)?.getTime() || 0) -
-        (toDate(a.startDate)?.getTime() || 0)
-      );
-
-    return `
-      <section class="trips-personal-section trips-personal-section--memory">
-        <div class="trips-personal-head">
-          <div class="trips-personal-copy">
-            <span class="trips-personal-kicker">
-              MY TRAVEL LIBRARY
-            </span>
-
-            <h2>مكتبة سفراتي</h2>
-
-            <p>
-              يوميات رحلاتك السابقة: الصور، التقييم، أجمل الذكريات،
-              الأشخاص والأماكن المرتبطة بكل رحلة.
-            </p>
-          </div>
-
-          <span class="trips-personal-icon">♡</span>
-        </div>
-
-        ${
-          memories.length
-            ? `
-              <div class="trips-memory-preview">
-                ${memories
-                  .map(renderMemoryCard)
-                  .join("")}
-              </div>
-            `
-            : `
-              <div class="trips-personal-empty">
-                <span class="trips-personal-empty__icon">♡</span>
-
-                <div>
-                  <strong>ابدأ مكتبة ذكرياتك</strong>
-                  <p>
-                    أضف الرحلات التي سافرتها قبل البرنامج،
-                    والرحلات المكتملة ستنضم تلقائياً.
-                  </p>
-                </div>
-              </div>
-            `
-        }
-
-        <button
-          type="button"
-          class="trips-personal-action"
-          data-action="trips-add-memory"
-        >
-          ＋ إضافة رحلة سابقة
-        </button>
-      </section>
-    `;
-  };
-
-  const renderCountriesShowcase = (snapshot) => `
-    <section class="trips-personal-section trips-personal-section--passport">
-      <div class="trips-personal-head">
-        <div class="trips-personal-copy">
-          <span class="trips-personal-kicker">
+  const renderPassport = (snapshot) => `
+    <section class="passport-section">
+      <div class="passport-head">
+        <div>
+          <span class="passport-kicker">
             MY TRAVEL PASSPORT
           </span>
 
           <h2>الدول التي زرتها</h2>
 
           <p>
-            كل دولة تزورها تصبح جزءاً من جواز سفرك الشخصي،
-            مع عدد الزيارات والمدن المرتبطة بها.
+            جواز سفرك الشخصي يجمع الدول والرحلات السابقة في مكان واحد.
+            اضغط على أي دولة لفتح جميع رحلاتك وذكرياتك المرتبطة بها.
           </p>
         </div>
 
-        <span class="trips-personal-icon">🌍</span>
+        <span class="passport-icon">🌍</span>
+      </div>
+
+      <div class="passport-toolbar">
+        <button
+          type="button"
+          class="passport-add"
+          data-action="trips-add-memory"
+        >
+          ＋ إضافة رحلة سابقة
+        </button>
+
+        <span class="passport-count">
+          ${escapeHTML(snapshot.statistics.memories)} رحلة
+        </span>
       </div>
 
       ${
         snapshot.countries.length
           ? `
-            <div class="trips-country-preview">
-              <div class="country-grid">
-                ${snapshot.countries
-                  .map(renderCountryCard)
-                  .join("")}
-              </div>
+            <div class="country-grid">
+              ${snapshot.countries
+                .map(renderCountryCard)
+                .join("")}
             </div>
           `
           : `
-            <div class="trips-personal-empty">
-              <span class="trips-personal-empty__icon">🌍</span>
+            <div class="passport-empty">
+              <div class="passport-empty__icon">🌍</div>
+              <h3>جواز سفرك ما زال فارغاً</h3>
+              <p>
+                أضف رحلة سابقة، والرحلات الحالية ستنضم تلقائياً
+                بعد انتهاء تاريخها بدون إعادة إدخال.
+              </p>
 
-              <div>
-                <strong>جواز سفرك ما زال فارغاً</strong>
-                <p>
-                  أضف رحلة سابقة أولاً، وسيتكوّن هذا الجواز تلقائياً
-                  من الدول المسجلة داخل مكتبة سفراتك.
-                </p>
-              </div>
+              <button
+                type="button"
+                class="trips-btn trips-btn--primary"
+                data-action="trips-add-memory"
+              >
+                إضافة أول رحلة سابقة
+              </button>
             </div>
           `
       }
@@ -3060,8 +2735,8 @@
           <h1>رحلاتي</h1>
 
           <p>
-            نظّم رحلاتك القادمة واحتفظ بسجل سفر شخصي
-            يجمع ذكرياتك والدول التي زرتها.
+            نظّم رحلاتك القادمة، وبعد اكتمالها تنضم تلقائياً
+            إلى جواز سفرك الشخصي مع الدول والمدن والذكريات.
           </p>
         </div>
 
@@ -3079,7 +2754,7 @@
             class="trips-action trips-action--glass"
             data-action="trips-add-memory"
           >
-            ♡ رحلة سابقة
+            🌍 رحلة سابقة
           </button>
         </div>
       </section>
@@ -3094,7 +2769,7 @@
             <h2>ملخص سفراتك</h2>
 
             <p class="trips-section__subtitle">
-              أرقام سريعة بدون مساحات كبيرة أو تفاصيل زائدة.
+              أرقام سريعة وواضحة من جميع الرحلات المحفوظة.
             </p>
           </div>
         </div>
@@ -3119,7 +2794,7 @@
             </h2>
 
             <p class="trips-section__subtitle">
-              رحلاتك القادمة والجارية في مكان واضح وسريع.
+              الرحلات القادمة والجارية فقط؛ المكتملة تنتقل إلى جواز السفر.
             </p>
           </div>
         </div>
@@ -3129,8 +2804,7 @@
         ${renderTabContent(snapshot)}
       </section>
 
-      ${renderMemoriesShowcase(snapshot)}
-      ${renderCountriesShowcase(snapshot)}
+      ${renderPassport(snapshot)}
     </div>
   `;
 
@@ -3171,7 +2845,12 @@
       ],
       ["شركة الطيران", trip.airline || "—"],
       ["رقم الرحلة", trip.flightNumber || "—"],
-      ["الفندق", trip.accommodation || "—"],
+      [
+        "الفندق",
+        typeof trip.accommodation === "string"
+          ? trip.accommodation || "—"
+          : trip.hotelName || "—"
+      ],
       ["رقم الحجز", trip.bookingReference || "—"],
       [
         "التقييم",
@@ -3350,7 +3029,7 @@
             <div>
               <h3>إضافة رحلة سابقة</h3>
               <small style="color:#75839b">
-                سجل بسيط لذكرياتك، ويمكنك استكمال التفاصيل لاحقاً.
+                ستُحفظ الرحلة داخل جواز سفرك مباشرة.
               </small>
             </div>
 
@@ -3404,6 +3083,7 @@
                   max="2100"
                   value="${escapeHTML(
                     draft.travelYear ||
+                    toDate(draft.startDate)?.getFullYear() ||
                     new Date().getFullYear()
                   )}"
                 >
@@ -3460,7 +3140,11 @@
                 <label>الفندق أو السكن</label>
                 <input
                   name="accommodation"
-                  value="${escapeHTML(draft.accommodation || "")}"
+                  value="${escapeHTML(
+                    typeof draft.accommodation === "string"
+                      ? draft.accommodation
+                      : draft.hotelName || ""
+                  )}"
                   placeholder="اختياري"
                 >
               </div>
@@ -3544,7 +3228,7 @@
               type="submit"
               class="trips-btn trips-btn--primary"
             >
-              حفظ في مكتبة السفر
+              حفظ في جواز السفر
             </button>
           </div>
         </form>
@@ -3552,14 +3236,152 @@
     `;
   };
 
-  const showMemoryModal = () => {
+  const renderCountrySheet = (country) => {
+    if (!country) return "";
+
+    return `
+      <div class="trips-modal-backdrop" data-country-sheet>
+        <section class="country-sheet">
+          <div class="country-sheet__hero">
+            <div class="country-sheet__hero-top">
+              <span class="country-sheet__flag">
+                ${escapeHTML(country.flag)}
+              </span>
+
+              <button
+                type="button"
+                class="trips-modal__close"
+                data-action="trips-close-country"
+                aria-label="إغلاق"
+              >
+                ×
+              </button>
+            </div>
+
+            <h3>${escapeHTML(country.country)}</h3>
+
+            <p>
+              ${
+                country.cities.length
+                  ? escapeHTML(country.cities.join("، "))
+                  : "لم تُسجل المدن بعد"
+              }
+            </p>
+
+            <div class="country-sheet__stats">
+              <div>
+                <small>الزيارات</small>
+                <strong>${escapeHTML(country.visits)}</strong>
+              </div>
+
+              <div>
+                <small>المدن</small>
+                <strong>${escapeHTML(country.cities.length)}</strong>
+              </div>
+
+              <div>
+                <small>الأيام</small>
+                <strong>${escapeHTML(country.totalDays || 0)}</strong>
+              </div>
+
+              <div>
+                <small>آخر زيارة</small>
+                <strong>
+                  ${
+                    country.lastVisit
+                      ? escapeHTML(country.lastVisit.getFullYear())
+                      : "—"
+                  }
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="country-sheet__body">
+            <div class="country-sheet__title-row">
+              <h4>رحلاتك داخل الدولة</h4>
+
+              <button
+                type="button"
+                class="trips-btn trips-btn--secondary"
+                data-action="trips-add-memory"
+                style="min-height:40px;padding:0 12px"
+              >
+                ＋ إضافة رحلة
+              </button>
+            </div>
+
+            <div class="country-trip-list">
+              ${country.trips
+                .map((trip) => {
+                  const year =
+                    toDate(trip.startDate)?.getFullYear() ||
+                    trip.travelYear ||
+                    "—";
+
+                  const location =
+                    trip.city ||
+                    trip.destination ||
+                    country.country;
+
+                  return `
+                    <article class="country-trip-row">
+                      <span class="country-trip-row__icon">
+                        ${escapeHTML(
+                          trip.emoji ||
+                          trip.icon ||
+                          country.flag ||
+                          "✈"
+                        )}
+                      </span>
+
+                      <div>
+                        <h5>
+                          ${escapeHTML(
+                            trip.title ||
+                            `رحلة ${country.country}`
+                          )}
+                        </h5>
+
+                        <p>
+                          ${escapeHTML(location)} ·
+                          ${escapeHTML(year)}
+                          ${
+                            number(trip.rating) > 0
+                              ? ` · ★ ${escapeHTML(trip.rating)}/5`
+                              : ""
+                          }
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        data-action="trips-open-country-trip"
+                        data-trip-id="${escapeHTML(trip.id)}"
+                      >
+                        فتح
+                      </button>
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>
+          </div>
+        </section>
+      </div>
+    `;
+  };
+
+  const showMemoryModal = (draft = {}) => {
     closeModal();
+    closeCountrySheet();
+
+    state.memoryDraft = clone(draft);
 
     const wrapper = document.createElement("div");
     wrapper.innerHTML = renderMemoryModal();
 
-    const modal =
-      wrapper.firstElementChild;
+    const modal = wrapper.firstElementChild;
 
     if (!modal) return false;
 
@@ -3588,12 +3410,62 @@
     return true;
   };
 
+  const showCountrySheet = (countryKey) => {
+    closeCountrySheet();
+
+    const snapshot = buildSnapshot();
+    const country = snapshot.countries.find(
+      (item) => item.key === countryKey
+    );
+
+    if (!country) return false;
+
+    state.activeCountryKey = countryKey;
+
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = renderCountrySheet(country);
+
+    const sheet = wrapper.firstElementChild;
+
+    if (!sheet) return false;
+
+    document.body.appendChild(sheet);
+    document.body.style.overflow = "hidden";
+
+    sheet.addEventListener("click", (event) => {
+      if (
+        event.target === sheet ||
+        event.target.closest(
+          '[data-action="trips-close-country"]'
+        )
+      ) {
+        closeCountrySheet();
+      }
+    });
+
+    return true;
+  };
+
   const closeModal = () => {
     document
       .querySelector("[data-trips-modal]")
       ?.remove();
 
-    document.body.style.overflow = "";
+    if (!document.querySelector("[data-country-sheet]")) {
+      document.body.style.overflow = "";
+    }
+  };
+
+  const closeCountrySheet = () => {
+    document
+      .querySelector("[data-country-sheet]")
+      ?.remove();
+
+    state.activeCountryKey = null;
+
+    if (!document.querySelector("[data-trips-modal]")) {
+      document.body.style.overflow = "";
+    }
   };
 
   const handleMemorySubmit = async (event) => {
@@ -3636,8 +3508,11 @@
       .map(text)
       .filter(Boolean);
 
+    const existingId = state.memoryDraft?.id || null;
+
     const trip = {
-      id: createId("memory"),
+      ...(existingId ? clone(state.memoryDraft) : {}),
+      id: existingId || createId("memory"),
       title,
       destination:
         [text(formData.get("city")), country]
@@ -3669,18 +3544,25 @@
       status: "completed",
       isMemory: true,
       memorySource: "manual-history",
-      budget: 0,
-      spent: 0,
-      createdAt: now,
+      budget: number(state.memoryDraft?.budget),
+      spent: number(state.memoryDraft?.spent),
+      createdAt:
+        state.memoryDraft?.createdAt || now,
       updatedAt: now
     };
 
     try {
       getUI()?.showLoader?.(
-        "جاري حفظ ذكرى السفر..."
+        existingId
+          ? "جاري تحديث الرحلة..."
+          : "جاري حفظ الرحلة السابقة..."
       );
 
-      await addTripToStore(trip);
+      if (existingId) {
+        await updateTrip(existingId, trip);
+      } else {
+        await addTripToStore(trip);
+      }
 
       closeModal();
 
@@ -3691,24 +3573,31 @@
       refresh();
 
       getUI()?.toast?.(
-        "تمت إضافة الرحلة إلى مكتبة السفر.",
+        existingId
+          ? "تم تحديث الرحلة داخل جواز السفر."
+          : "تمت إضافة الرحلة إلى جواز السفر.",
         "success"
       );
 
-      emit("memory-created", {
-        tripId: trip.id,
-        country: trip.country
-      });
+      emit(
+        existingId
+          ? "passport-trip-updated"
+          : "passport-trip-created",
+        {
+          tripId: trip.id,
+          country: trip.country
+        }
+      );
 
       return true;
     } catch (error) {
       console.error(
-        "TIC Trips memory create error:",
+        "TIC Trips passport trip save error:",
         error
       );
 
       getUI()?.toast?.(
-        "تعذر حفظ رحلة الذكريات.",
+        "تعذر حفظ الرحلة.",
         "error"
       );
 
@@ -3726,7 +3615,7 @@
 
     const source =
       event?.target?.closest?.(
-        "[data-trip-id]"
+        "[data-trip-id], [data-country-key]"
       ) ||
       null;
 
@@ -3736,6 +3625,10 @@
         payload.params?.tripId ||
         payload.params?.id ||
         source?.getAttribute("data-trip-id") ||
+        null,
+      countryKey:
+        payload.params?.countryKey ||
+        source?.getAttribute("data-country-key") ||
         null
     };
   };
@@ -3759,17 +3652,24 @@
             state.filters.type = "all";
 
             refresh();
-
-            state.container
-              ?.querySelector(
-                ".trips-section:last-of-type"
-              )
-              ?.scrollIntoView({
-                behavior: "smooth",
-                block: "start"
-              });
           }
         );
+      });
+
+    state.container
+      .querySelectorAll("[data-country-key]")
+      .forEach((card) => {
+        card.addEventListener("keydown", (event) => {
+          if (
+            event.key === "Enter" ||
+            event.key === " "
+          ) {
+            event.preventDefault();
+            showCountrySheet(
+              card.getAttribute("data-country-key")
+            );
+          }
+        });
       });
 
     const searchInput =
@@ -3878,10 +3778,39 @@
       tab: state.activeTab,
       tripCount:
         snapshot.filteredTrips.length,
+      passportTripCount:
+        snapshot.statistics.memories,
+      countryCount:
+        snapshot.statistics.countries,
       activeTripId: state.activeTripId
     });
 
     return true;
+  };
+
+  const scheduleSafeRefresh = () => {
+    if (
+      state.refreshQueued ||
+      !state.mounted
+    ) {
+      return;
+    }
+
+    state.refreshQueued = true;
+
+    window.requestAnimationFrame(() => {
+      state.refreshQueued = false;
+
+      if (
+        document.querySelector(
+          "[data-trips-modal], [data-country-sheet]"
+        )
+      ) {
+        return;
+      }
+
+      refresh();
+    });
   };
 
   const registerActions = () => {
@@ -3923,9 +3852,48 @@
     });
 
     register("trips-add-memory", () => {
-      state.memoryDraft = {};
-      return showMemoryModal();
+      return showMemoryModal({});
     });
+
+    register("trips-open-country", (payload) => {
+      const { countryKey } =
+        readActionParams(payload);
+
+      if (!countryKey) return false;
+
+      return showCountrySheet(countryKey);
+    });
+
+    register("trips-close-country", () => {
+      closeCountrySheet();
+      return true;
+    });
+
+    register(
+      "trips-open-country-trip",
+      (payload) => {
+        const { tripId } =
+          readActionParams(payload);
+
+        if (!tripId || !findTrip(tripId)) {
+          return false;
+        }
+
+        closeCountrySheet();
+
+        state.activeTripId = tripId;
+        state.activeView = "details";
+
+        refresh();
+
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth"
+        });
+
+        return true;
+      }
+    );
 
     register("trips-close-modal", () => {
       closeModal();
@@ -3999,15 +3967,11 @@
 
       if (!trip) return false;
 
-      const tripForm = getTripForm();
-
-      if (
-        trip.isMemory === true &&
-        !tripForm?.openEdit
-      ) {
-        state.memoryDraft = clone(trip);
-        return showMemoryModal();
+      if (isPassportTrip(trip)) {
+        return showMemoryModal(trip);
       }
+
+      const tripForm = getTripForm();
 
       if (tripForm?.openEdit) {
         return tripForm.openEdit(tripId);
@@ -4073,6 +4037,10 @@
               );
 
         if (choice === "edit") {
+          if (isPassportTrip(trip)) {
+            return showMemoryModal(trip);
+          }
+
           const tripForm = getTripForm();
 
           if (tripForm?.openEdit) {
@@ -4184,153 +4152,6 @@
         return false;
       }
     );
-
-    register(
-      "trips-duplicate",
-      async (payload) => {
-        const { tripId } =
-          readActionParams(payload);
-
-        const trip = findTrip(tripId);
-
-        if (!trip) return false;
-
-        const confirmed =
-          typeof ui.confirm === "function"
-            ? await ui.confirm({
-                title: "تكرار الرحلة",
-                message:
-                  `سيتم إنشاء نسخة جديدة من "${
-                    trip.title ||
-                    trip.destination
-                  }".`,
-                confirmLabel: "إنشاء نسخة",
-                cancelLabel: "إلغاء"
-              })
-            : window.confirm(
-                "هل تريد إنشاء نسخة من هذه الرحلة؟"
-              );
-
-        if (confirmed !== true) {
-          return false;
-        }
-
-        try {
-          ui.showLoader?.(
-            "جاري إنشاء نسخة..."
-          );
-
-          const duplicate =
-            await duplicateTripInStore(
-              tripId
-            );
-
-          state.activeView = "hub";
-          state.activeTab = "upcoming";
-          state.activeTripId = null;
-
-          refresh();
-
-          ui.toast?.(
-            "تم إنشاء نسخة جديدة.",
-            "success"
-          );
-
-          emit("duplicated", {
-            sourceTripId: tripId,
-            duplicateTripId:
-              duplicate?.id || null
-          });
-
-          return duplicate;
-        } catch (error) {
-          console.error(
-            "TIC Trips duplicate error:",
-            error
-          );
-
-          ui.toast?.(
-            "تعذر تكرار الرحلة.",
-            "error"
-          );
-
-          return false;
-        } finally {
-          ui.hideLoader?.();
-        }
-      }
-    );
-
-    register(
-      "trips-delete",
-      async (payload) => {
-        const { tripId } =
-          readActionParams(payload);
-
-        const trip = findTrip(tripId);
-
-        if (!trip) return false;
-
-        const confirmed =
-          typeof ui.confirm === "function"
-            ? await ui.confirm({
-                title: "حذف الرحلة",
-                message:
-                  `سيتم حذف "${
-                    trip.title ||
-                    trip.destination
-                  }" نهائياً.`,
-                confirmLabel: "حذف",
-                cancelLabel: "إلغاء",
-                danger: true
-              })
-            : window.confirm(
-                "هل تريد حذف هذه الرحلة نهائياً؟"
-              );
-
-        if (confirmed !== true) {
-          return false;
-        }
-
-        try {
-          ui.showLoader?.(
-            "جاري حذف الرحلة..."
-          );
-
-          await deleteTripFromStore(tripId);
-
-          state.activeView = "hub";
-          state.activeTripId = null;
-
-          refresh();
-
-          ui.toast?.(
-            "تم حذف الرحلة.",
-            "success"
-          );
-
-          emit("deleted", {
-            tripId
-          });
-
-          return true;
-        } catch (error) {
-          console.error(
-            "TIC Trips delete error:",
-            error
-          );
-
-          ui.toast?.(
-            "تعذر حذف الرحلة.",
-            "error"
-          );
-
-          return false;
-        } finally {
-          ui.hideLoader?.();
-        }
-      }
-    );
   };
 
   const subscribeToStore = () => {
@@ -4346,9 +4167,7 @@
 
     state.unsubscribeStore =
       store.subscribe(() => {
-        if (state.mounted) {
-          refresh();
-        }
+        scheduleSafeRefresh();
       });
   };
 
@@ -4446,7 +4265,9 @@
         view: state.activeView,
         tab: state.activeTab,
         activeTripId: state.activeTripId,
-        tripCount: snapshot.trips.length
+        tripCount: snapshot.trips.length,
+        passportTripCount:
+          snapshot.statistics.memories
       });
 
       return container;
@@ -4468,6 +4289,7 @@
 
     unmount() {
       closeModal();
+      closeCountrySheet();
 
       state.mounted = false;
       state.container = null;
@@ -4510,20 +4332,7 @@
     },
 
     openMemories() {
-      state.activeView = "hub";
-      state.activeTab = "upcoming";
-      const result = refresh();
-
-      window.requestAnimationFrame(() => {
-        state.container
-          ?.querySelector(".trips-personal-section--memory")
-          ?.scrollIntoView({
-            behavior: "smooth",
-            block: "start"
-          });
-      });
-
-      return result;
+      return this.openCountries();
     },
 
     openCountries() {
@@ -4533,7 +4342,7 @@
 
       window.requestAnimationFrame(() => {
         state.container
-          ?.querySelector(".trips-personal-section--passport")
+          ?.querySelector(".passport-section")
           ?.scrollIntoView({
             behavior: "smooth",
             block: "start"
@@ -4543,9 +4352,14 @@
       return result;
     },
 
+    openCountry(countryKey) {
+      return showCountrySheet(
+        normalizeCountryKey(countryKey)
+      );
+    },
+
     addPastTrip() {
-      state.memoryDraft = {};
-      return showMemoryModal();
+      return showMemoryModal({});
     },
 
     setFilters(filters = {}) {
@@ -4613,6 +4427,7 @@
       state.activeView = "hub";
       state.activeTab = "upcoming";
       state.activeTripId = null;
+      state.activeCountryKey = null;
       state.initialized = false;
 
       return true;
@@ -4628,6 +4443,7 @@
         activeView: state.activeView,
         activeTab: state.activeTab,
         activeTripId: state.activeTripId,
+        activeCountryKey: state.activeCountryKey,
         filters: clone(state.filters),
         filtersOpen: state.filtersOpen,
         hasContainer: Boolean(state.container),
