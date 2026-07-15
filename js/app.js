@@ -1,17 +1,19 @@
 /* =========================================================
    Travel Intelligence Center
-   Application Bootstrap V2.0.0
+   Application Bootstrap V2.1.0
 
    File Path:
    js/app.js
 
    Purpose:
    - Bootstraps the complete application safely.
-   - Connects Config, Store, Router, UI and Pages.
+   - Connects Config, Data, Store, Router, UI, Features and Pages.
+   - Initializes Guide Intelligence Platform dependencies.
    - Registers all available page modules.
    - Restores the requested route when possible.
    - Falls back to the home page when needed.
    - Keeps the application stable on iPhone and desktop.
+   - Provides diagnostics for the complete runtime.
 
    Dependencies:
    - js/config.js
@@ -19,7 +21,15 @@
    - js/store.js
    - js/router.js
    - js/ui.js
+   - js/data/countries-catalog.js
+   - js/data/travel-knowledge.js
    - js/features/trip-form.js
+   - js/features/destination-recommendation-engine.js
+   - js/features/guide-search-engine.js
+   - js/features/guide-ai-planner.js
+   - js/features/travel-dna.js
+   - js/features/travel-year-planner.js
+   - js/features/guide-intelligence.js
    - js/pages/home.js
    - js/pages/trips.js
    - js/pages/guide.js
@@ -33,7 +43,7 @@
   window.TIC = window.TIC || {};
 
   const TIC = window.TIC;
-  const APP_VERSION = "2.0.0";
+  const APP_VERSION = "2.1.0";
 
   const state = {
     initialized: false,
@@ -41,7 +51,9 @@
     starting: false,
     container: null,
     registeredPages: new Set(),
-    errors: []
+    initializedFeatures: new Set(),
+    errors: [],
+    startTime: null
   };
 
   const getContainer = () =>
@@ -70,7 +82,6 @@
 
     if (
       hashRoute &&
-      hashRoute !== "home" &&
       TIC.Pages?.[hashRoute]
     ) {
       return hashRoute;
@@ -99,6 +110,102 @@
     return entry;
   };
 
+  const initializeFeature = (
+    featureId,
+    feature
+  ) => {
+    if (
+      !featureId ||
+      !feature ||
+      state.initializedFeatures.has(featureId)
+    ) {
+      return false;
+    }
+
+    try {
+      if (
+        typeof feature.init === "function"
+      ) {
+        feature.init();
+      }
+
+      state.initializedFeatures.add(
+        featureId
+      );
+
+      return true;
+    } catch (error) {
+      recordError(
+        `initialize-feature:${featureId}`,
+        error
+      );
+
+      return false;
+    }
+  };
+
+  const initializeFeatures = () => {
+    const orderedFeatures = [
+      [
+        "trip-form",
+        TIC.Features?.TripForm ||
+        window.TICTripForm
+      ],
+      [
+        "destination-recommendation",
+        TIC.Features?.DestinationRecommendation ||
+        window.TICDestinationRecommendation
+      ],
+      [
+        "guide-search",
+        TIC.Features?.GuideSearch ||
+        window.TICGuideSearch
+      ],
+      [
+        "guide-ai-planner",
+        TIC.Features?.GuideAIPlanner ||
+        window.TICGuideAIPlanner
+      ],
+      [
+        "travel-dna",
+        TIC.Features?.TravelDNA ||
+        window.TICTravelDNA
+      ],
+      [
+        "travel-year-planner",
+        TIC.Features?.TravelYearPlanner ||
+        window.TICTravelYearPlanner
+      ],
+      [
+        "guide-intelligence",
+        TIC.Features?.GuideIntelligence ||
+        window.TICGuideIntelligence
+      ]
+    ];
+
+    orderedFeatures.forEach(
+      ([featureId, feature]) => {
+        initializeFeature(
+          featureId,
+          feature
+        );
+      }
+    );
+
+    Object.entries(
+      TIC.Features || {}
+    ).forEach(
+      ([featureId, feature]) => {
+        initializeFeature(
+          featureId,
+          feature
+        );
+      }
+    );
+
+    return state.initializedFeatures.size;
+  };
+
   const registerPages = () => {
     const router = TIC.Router;
 
@@ -120,12 +227,20 @@
         }
 
         try {
+          if (
+            typeof pageModule.init === "function"
+          ) {
+            pageModule.init();
+          }
+
           router.registerPage(
             pageId,
             pageModule
           );
 
-          state.registeredPages.add(pageId);
+          state.registeredPages.add(
+            pageId
+          );
         } catch (error) {
           recordError(
             `register-page:${pageId}`,
@@ -168,6 +283,15 @@
           route
         });
 
+      if (
+        typeof page.afterEnter === "function"
+      ) {
+        page.afterEnter({
+          container,
+          route
+        });
+      }
+
       return true;
     }
 
@@ -185,10 +309,13 @@
       typeof router.go === "function"
     ) {
       try {
-        const result = router.go(route, {
-          source: "app-bootstrap",
-          replace: true
-        });
+        const result = router.go(
+          route,
+          {
+            source: "app-bootstrap",
+            replace: true
+          }
+        );
 
         if (
           result &&
@@ -269,9 +396,105 @@
       });
     }
 
+    initializeFeatures();
     registerPages();
 
     return true;
+  };
+
+  const runDiagnostics = () => {
+    const featureDiagnostics = {};
+
+    Object.entries(
+      TIC.Features || {}
+    ).forEach(
+      ([featureId, feature]) => {
+        try {
+          featureDiagnostics[featureId] =
+            typeof feature?.diagnostics === "function"
+              ? feature.diagnostics()
+              : {
+                  available: Boolean(feature)
+                };
+        } catch (error) {
+          featureDiagnostics[featureId] = {
+            available: Boolean(feature),
+            error: error.message
+          };
+        }
+      }
+    );
+
+    const pageDiagnostics = {};
+
+    Object.entries(
+      TIC.Pages || {}
+    ).forEach(
+      ([pageId, page]) => {
+        try {
+          pageDiagnostics[pageId] =
+            typeof page?.diagnostics === "function"
+              ? page.diagnostics()
+              : {
+                  available: Boolean(page)
+                };
+        } catch (error) {
+          pageDiagnostics[pageId] = {
+            available: Boolean(page),
+            error: error.message
+          };
+        }
+      }
+    );
+
+    return {
+      id: "app",
+      version: APP_VERSION,
+      initialized:
+        state.initialized,
+      started:
+        state.started,
+      starting:
+        state.starting,
+      hasContainer:
+        Boolean(state.container),
+      configAvailable:
+        Boolean(TIC.Config),
+      dataAvailable:
+        Boolean(TIC.Data),
+      storeAvailable:
+        Boolean(TIC.Store),
+      routerAvailable:
+        Boolean(TIC.Router),
+      uiAvailable:
+        Boolean(TIC.UI),
+      countriesCatalogAvailable:
+        Boolean(
+          TIC.Data?.Countries ||
+          window.TICCountriesCatalog
+        ),
+      travelKnowledgeAvailable:
+        Boolean(
+          TIC.Data?.TravelKnowledge ||
+          window.TICTravelKnowledge
+        ),
+      registeredPages:
+        Array.from(
+          state.registeredPages
+        ),
+      initializedFeatures:
+        Array.from(
+          state.initializedFeatures
+        ),
+      featureDiagnostics,
+      pageDiagnostics,
+      errorCount:
+        state.errors.length,
+      errors:
+        state.errors.slice(),
+      startTime:
+        state.startTime
+    };
   };
 
   const App = {
@@ -288,6 +511,8 @@
       }
 
       state.starting = true;
+      state.startTime =
+        new Date().toISOString();
 
       try {
         initializeModules();
@@ -308,6 +533,10 @@
                 registeredPages:
                   Array.from(
                     state.registeredPages
+                  ),
+                initializedFeatures:
+                  Array.from(
+                    state.initializedFeatures
                   ),
                 timestamp:
                   new Date().toISOString()
@@ -366,14 +595,21 @@
       state.initialized = false;
       state.started = false;
       state.starting = false;
+      state.container = null;
       state.registeredPages.clear();
+      state.initializedFeatures.clear();
       state.errors = [];
+      state.startTime = null;
 
       return this.init();
     },
 
     registerPages() {
       return registerPages();
+    },
+
+    initializeFeatures() {
+      return initializeFeatures();
     },
 
     go(route, options = {}) {
@@ -391,36 +627,7 @@
     },
 
     diagnostics() {
-      return {
-        id: this.id,
-        version: this.version,
-        initialized:
-          state.initialized,
-        started:
-          state.started,
-        starting:
-          state.starting,
-        hasContainer:
-          Boolean(state.container),
-        configAvailable:
-          Boolean(TIC.Config),
-        dataAvailable:
-          Boolean(TIC.Data),
-        storeAvailable:
-          Boolean(TIC.Store),
-        routerAvailable:
-          Boolean(TIC.Router),
-        uiAvailable:
-          Boolean(TIC.UI),
-        registeredPages:
-          Array.from(
-            state.registeredPages
-          ),
-        errorCount:
-          state.errors.length,
-        errors:
-          state.errors.slice()
-      };
+      return runDiagnostics();
     }
   };
 
