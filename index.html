@@ -32,12 +32,14 @@
   />
 
   <!-- =====================================================
-       Travel Intelligence Center V2.4.0
+       Travel Intelligence Center V2.5.0
        Premium iPhone-first interface
        Smart next-trip summary V2.4.0
        Fast Single-Page Trip Form V4.1.0
        Ticket and hotel document import
-       Manual flight-time priority fix
+       Guide Intelligence Platform V3.0.0
+       Travel DNA and destination recommendations
+       AI trip planner and annual travel planner
   ====================================================== -->
 
   <link
@@ -46,7 +48,7 @@
   />
 
   <!-- =====================================================
-       1. Configuration and Static Data
+       1. Configuration and Base Data
   ====================================================== -->
   <script
     defer
@@ -63,9 +65,9 @@
        Store → Router → UI
   ====================================================== -->
   <script
-  defer
-  src="js/store.js?v=1.1.0"
-></script>
+    defer
+    src="js/store.js?v=1.1.0"
+  ></script>
 
   <script
     defer
@@ -78,7 +80,21 @@
   ></script>
 
   <!-- =====================================================
-       3. Optional Document Reading Engines
+       3. Guide Intelligence Data Layer
+       Countries Catalog → Travel Knowledge
+  ====================================================== -->
+  <script
+    defer
+    src="js/data/countries-catalog.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/data/travel-knowledge.js?v=1.0.0"
+  ></script>
+
+  <!-- =====================================================
+       4. Optional Document Reading Engines
        Tesseract.js: OCR for ticket/hotel images
        PDF.js: text extraction from PDF bookings
   ====================================================== -->
@@ -102,7 +118,7 @@
   </script>
 
   <!-- =====================================================
-       4. Smart Document Import Layer
+       5. Smart Document Import Layer
        Reader → Ticket Import → Hotel Import → Trip Form
   ====================================================== -->
   <script
@@ -126,7 +142,43 @@
   ></script>
 
   <!-- =====================================================
-       5. Application Pages
+       6. Guide Intelligence Engines
+       Recommendation → Search → AI Planner → Travel DNA
+       → Year Planner → Guide Intelligence Orchestrator
+  ====================================================== -->
+  <script
+    defer
+    src="js/features/destination-recommendation-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/guide-search-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/guide-ai-planner.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/travel-dna.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/travel-year-planner.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/guide-intelligence.js?v=1.0.0"
+  ></script>
+
+  <!-- =====================================================
+       7. Application Pages
+       All page dependencies must load before these files.
   ====================================================== -->
   <script
     defer
@@ -140,7 +192,7 @@
 
   <script
     defer
-    src="js/pages/guide.js?v=2.0.0"
+    src="js/pages/guide.js?v=3.0.0"
   ></script>
 
   <script
@@ -154,12 +206,12 @@
   ></script>
 
   <!-- =====================================================
-       6. Application Bootstrap
+       8. Application Bootstrap
        Must remain the final JavaScript file.
   ====================================================== -->
   <script
     defer
-    src="js/app.js?v=2.0.0"
+    src="js/app.js?v=2.1.0"
   ></script>
 </head>
 
@@ -218,7 +270,8 @@
 
         <p>
           يتم تجهيز الرحلات، الوجهات، الميزانيات،
-          المستندات، التجهيز، الذكريات، وقائمة الأمنيات.
+          المستندات، التجهيز، الذكريات، قائمة الأمنيات،
+          ومحركات دليل السفر الذكي.
         </p>
 
         <div
