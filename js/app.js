@@ -1,7 +1,7 @@
 /* =========================================================
    Travel Intelligence Center
-   Application Bootstrap V3.0.0
-   Guide + Budget Intelligence Ready
+   Application Bootstrap V4.0.0
+   Unified Guide + Trips + Budget Runtime
 
    File Path:
    js/app.js
@@ -9,46 +9,37 @@
    Purpose:
    - Bootstraps the complete application safely.
    - Connects Config, Data, Store, Router, UI, Features and Pages.
-   - Initializes Guide Intelligence Platform dependencies.
-   - Initializes Budget Intelligence Platform dependencies.
+   - Initializes the new compact Guide Intelligence architecture:
+     WorldGuideData, GuideEngine, TravelAI and PlannerEngine.
+   - Preserves all existing Budget Intelligence engines.
    - Registers all available page modules.
    - Restores the requested route when possible.
-   - Falls back to the home page when needed.
+   - Falls back to the Home page when needed.
    - Keeps the application stable on iPhone and desktop.
-   - Provides diagnostics for the complete runtime.
-   - Prevents duplicate feature initialization and duplicate routing.
-   - Preserves compatibility with all existing page lifecycle APIs.
+   - Prevents duplicate initialization and duplicate routing.
+   - Supports synchronous and asynchronous module initialization.
+   - Provides complete runtime diagnostics.
+   - Preserves compatibility with legacy Guide Intelligence modules
+     when they are still loaded.
 
-   Dependencies:
+   Required load order:
    - js/config.js
    - js/data.js
    - js/store.js
    - js/router.js
    - js/ui.js
-   - js/data/countries-catalog.js
-   - js/data/travel-knowledge.js
+   - js/data/world-data.js
+   - js/features/guide-engine.js
+   - js/features/travel-ai.js
+   - js/features/planner-engine.js
    - js/features/trip-form.js
-   - js/features/destination-recommendation-engine.js
-   - js/features/guide-search-engine.js
-   - js/features/guide-ai-planner.js
-   - js/features/travel-dna.js
-   - js/features/travel-year-planner.js
-   - js/features/guide-intelligence.js
-   - js/features/budget-engine.js
-   - js/features/expense-engine.js
-   - js/features/savings-engine.js
-   - js/features/budget-analytics.js
-   - js/features/budget-ai.js
-   - js/features/payment-tracker.js
-   - js/features/expense-alert-engine.js
-   - js/features/budget-export-engine.js
-   - js/features/budget-notification-engine.js
-   - js/features/budget-integration-engine.js
+   - Budget Intelligence engine files
    - js/pages/home.js
    - js/pages/trips.js
    - js/pages/guide.js
    - js/pages/budget.js
    - js/pages/more.js
+   - js/app.js
 
    Global APIs:
    - window.TIC.App
@@ -61,12 +52,13 @@
   window.TIC = window.TIC || {};
 
   const TIC = window.TIC;
-  const APP_VERSION = "3.0.0";
+  const APP_VERSION = "4.0.0";
 
   const FEATURE_GROUP = Object.freeze({
     CORE: "core",
     GUIDE: "guide",
     BUDGET: "budget",
+    LEGACY_GUIDE: "legacy-guide",
     OTHER: "other"
   });
 
@@ -87,7 +79,8 @@
     activeRoute: null,
     storeUnsubscribe: null,
     eventBindings: [],
-    startupPromise: null
+    startupPromise: null,
+    routerStarted: false
   };
 
   /* =========================================================
@@ -97,18 +90,14 @@
   const clone = (value) => {
     if (value === undefined) return undefined;
 
-    if (typeof structuredClone === "function") {
-      try {
-        return structuredClone(value);
-      } catch (error) {
-        // Continue to JSON fallback.
-      }
-    }
-
     try {
-      return JSON.parse(JSON.stringify(value));
-    } catch (error) {
-      return value;
+      return structuredClone(value);
+    } catch (_) {
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (_) {
+        return value;
+      }
     }
   };
 
@@ -116,16 +105,6 @@
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value);
-
-  const asArray = (value) => {
-    if (Array.isArray(value)) return value;
-
-    if (isObject(value)) {
-      return Object.values(value);
-    }
-
-    return [];
-  };
 
   const nowISO = () =>
     new Date().toISOString();
@@ -143,6 +122,27 @@
     document.querySelector("#tic-page") ||
     document.querySelector("#app-content") ||
     document.querySelector("#app");
+
+  const isPromiseLike = (value) =>
+    value &&
+    typeof value.then === "function";
+
+  const settle = async (value) =>
+    isPromiseLike(value)
+      ? await value
+      : value;
+
+  const dispatch = (name, detail = {}) => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: clone(detail)
+        })
+      );
+    } catch (_) {
+      // Ignore in test environments without CustomEvent.
+    }
+  };
 
   const recordError = (
     stage,
@@ -166,14 +166,7 @@
       error
     );
 
-    window.dispatchEvent(
-      new CustomEvent(
-        "tic:app:error",
-        {
-          detail: clone(entry)
-        }
-      )
-    );
+    dispatch("tic:app:error", entry);
 
     return entry;
   };
@@ -196,6 +189,8 @@
       `Travel Intelligence Center ${stage} warning:`,
       message
     );
+
+    dispatch("tic:app:warning", entry);
 
     return entry;
   };
@@ -231,27 +226,23 @@
     return "home";
   };
 
-  const resolveFeatureMethod = (
-    feature
-  ) => {
+  const resolveFeatureMethod = (feature) => {
     if (!feature) return null;
 
-    if (
-      typeof feature.initialize === "function"
-    ) {
+    if (typeof feature.initialize === "function") {
       return "initialize";
     }
 
-    if (
-      typeof feature.init === "function"
-    ) {
+    if (typeof feature.init === "function") {
       return "init";
     }
 
-    if (
-      typeof feature.bootstrap === "function"
-    ) {
+    if (typeof feature.bootstrap === "function") {
       return "bootstrap";
+    }
+
+    if (typeof feature.start === "function") {
+      return "start";
     }
 
     return null;
@@ -274,7 +265,7 @@
   };
 
   /* =========================================================
-     Runtime module resolution
+     Runtime resolution
   ========================================================= */
 
   const resolveModules = () => {
@@ -292,6 +283,7 @@
       TIC.Store ||
       window.TICStore ||
       window.Store ||
+      window.TravelStore ||
       {};
 
     TIC.Router =
@@ -309,6 +301,29 @@
 
     TIC.Features =
       TIC.Features || {};
+
+    TIC.Data.WorldGuideData =
+      TIC.Data.WorldGuideData ||
+      window.WorldGuideData ||
+      window.WorldData ||
+      null;
+
+    TIC.Features.GuideEngine =
+      TIC.Features.GuideEngine ||
+      window.GuideEngine ||
+      null;
+
+    TIC.Features.TravelAI =
+      TIC.Features.TravelAI ||
+      window.TravelAI ||
+      window.TravelIntelligence ||
+      null;
+
+    TIC.Features.PlannerEngine =
+      TIC.Features.PlannerEngine ||
+      window.PlannerEngine ||
+      window.TravelPlannerEngine ||
+      null;
 
     return {
       config: TIC.Config,
@@ -333,8 +348,48 @@
     },
 
     {
-      id: "destination-recommendation",
+      id: "world-guide-data",
       group: FEATURE_GROUP.GUIDE,
+      required: true,
+      feature:
+        TIC.Data?.WorldGuideData ||
+        window.WorldGuideData ||
+        window.WorldData
+    },
+
+    {
+      id: "planner-engine",
+      group: FEATURE_GROUP.GUIDE,
+      required: true,
+      feature:
+        TIC.Features?.PlannerEngine ||
+        window.PlannerEngine ||
+        window.TravelPlannerEngine
+    },
+
+    {
+      id: "travel-ai",
+      group: FEATURE_GROUP.GUIDE,
+      required: true,
+      feature:
+        TIC.Features?.TravelAI ||
+        window.TravelAI ||
+        window.TravelIntelligence
+    },
+
+    {
+      id: "guide-engine",
+      group: FEATURE_GROUP.GUIDE,
+      required: true,
+      feature:
+        TIC.Features?.GuideEngine ||
+        window.GuideEngine
+    },
+
+    /* Legacy Guide modules remain optional for compatibility. */
+    {
+      id: "destination-recommendation",
+      group: FEATURE_GROUP.LEGACY_GUIDE,
       required: false,
       feature:
         TIC.Features?.DestinationRecommendation ||
@@ -344,7 +399,7 @@
 
     {
       id: "guide-search",
-      group: FEATURE_GROUP.GUIDE,
+      group: FEATURE_GROUP.LEGACY_GUIDE,
       required: false,
       feature:
         TIC.Features?.GuideSearch ||
@@ -354,7 +409,7 @@
 
     {
       id: "guide-ai-planner",
-      group: FEATURE_GROUP.GUIDE,
+      group: FEATURE_GROUP.LEGACY_GUIDE,
       required: false,
       feature:
         TIC.Features?.GuideAIPlanner ||
@@ -364,7 +419,7 @@
 
     {
       id: "travel-dna",
-      group: FEATURE_GROUP.GUIDE,
+      group: FEATURE_GROUP.LEGACY_GUIDE,
       required: false,
       feature:
         TIC.Features?.TravelDNA ||
@@ -374,7 +429,7 @@
 
     {
       id: "travel-year-planner",
-      group: FEATURE_GROUP.GUIDE,
+      group: FEATURE_GROUP.LEGACY_GUIDE,
       required: false,
       feature:
         TIC.Features?.TravelYearPlanner ||
@@ -384,7 +439,7 @@
 
     {
       id: "guide-intelligence",
-      group: FEATURE_GROUP.GUIDE,
+      group: FEATURE_GROUP.LEGACY_GUIDE,
       required: false,
       feature:
         TIC.Features?.GuideIntelligence ||
@@ -395,7 +450,7 @@
     {
       id: "budget-engine",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.budgetEngine ||
         window.TICBudgetEngine
@@ -404,7 +459,7 @@
     {
       id: "expense-engine",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.expenseEngine ||
         window.TICExpenseEngine
@@ -413,7 +468,7 @@
     {
       id: "savings-engine",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.savingsEngine ||
         window.TICSavingsEngine
@@ -422,7 +477,7 @@
     {
       id: "budget-analytics",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.budgetAnalytics ||
         window.TICBudgetAnalytics
@@ -431,7 +486,7 @@
     {
       id: "budget-ai",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.budgetAI ||
         window.TICBudgetAI
@@ -440,7 +495,7 @@
     {
       id: "payment-tracker",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.paymentTracker ||
         window.TICPaymentTracker
@@ -449,7 +504,7 @@
     {
       id: "expense-alert-engine",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.expenseAlertEngine ||
         window.TICExpenseAlertEngine
@@ -458,7 +513,7 @@
     {
       id: "budget-export-engine",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.budgetExportEngine ||
         window.TICBudgetExportEngine
@@ -467,7 +522,7 @@
     {
       id: "budget-notification-engine",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.budgetNotificationEngine ||
         window.TICBudgetNotificationEngine
@@ -476,7 +531,7 @@
     {
       id: "budget-integration-engine",
       group: FEATURE_GROUP.BUDGET,
-      required: true,
+      required: false,
       feature:
         TIC.Features?.budgetIntegrationEngine ||
         window.TICBudgetIntegrationEngine
@@ -487,9 +542,7 @@
      Feature initialization
   ========================================================= */
 
-  const initializeFeature = (
-    descriptor
-  ) => {
+  const initializeFeature = async (descriptor) => {
     const {
       id,
       group,
@@ -516,15 +569,12 @@
         error: "feature-not-found"
       };
 
-      state.featureResults.set(
-        id,
-        result
-      );
+      state.featureResults.set(id, result);
 
       if (required) {
         recordWarning(
           `initialize-feature:${id}`,
-          "Required Budget feature was not found.",
+          "Required feature was not found.",
           result
         );
       }
@@ -542,12 +592,29 @@
         ui: TIC.UI,
         config: TIC.Config,
         data: TIC.Data,
+        worldData:
+          TIC.Data?.WorldGuideData ||
+          window.WorldGuideData ||
+          window.WorldData ||
+          null,
+        guideEngine:
+          TIC.Features?.GuideEngine ||
+          window.GuideEngine ||
+          null,
+        travelAI:
+          TIC.Features?.TravelAI ||
+          window.TravelAI ||
+          null,
+        plannerEngine:
+          TIC.Features?.PlannerEngine ||
+          window.PlannerEngine ||
+          null,
         app: App,
         autoSync: true,
         strictMode: false
       };
 
-      const result =
+      const rawResult =
         method
           ? callFeature(
               feature,
@@ -555,6 +622,9 @@
               featureOptions
             )
           : null;
+
+      const result =
+        await settle(rawResult);
 
       state.initializedFeatures.add(id);
 
@@ -568,7 +638,7 @@
         result:
           result === undefined
             ? null
-            : result,
+            : clone(result),
         version:
           feature.version ||
           feature.VERSION ||
@@ -576,18 +646,11 @@
         error: null
       };
 
-      state.featureResults.set(
-        id,
-        entry
-      );
+      state.featureResults.set(id, entry);
 
-      window.dispatchEvent(
-        new CustomEvent(
-          "tic:app:feature-initialized",
-          {
-            detail: clone(entry)
-          }
-        )
+      dispatch(
+        "tic:app:feature-initialized",
+        entry
       );
 
       return true;
@@ -607,10 +670,7 @@
         error: error.message
       };
 
-      state.featureResults.set(
-        id,
-        entry
-      );
+      state.featureResults.set(id, entry);
 
       recordError(
         `initialize-feature:${id}`,
@@ -622,39 +682,41 @@
     }
   };
 
-  const initializeFeatures = () => {
+  const initializeFeatures = async () => {
     const descriptors =
       getOrderedFeatures();
 
-    descriptors.forEach(
-      (descriptor) => {
-        initializeFeature(
-          descriptor
+    for (const descriptor of descriptors) {
+      await initializeFeature(descriptor);
+    }
+
+    const knownFeatures =
+      new Set(
+        descriptors
+          .map((descriptor) => descriptor.feature)
+          .filter(Boolean)
+      );
+
+    for (
+      const [featureId, feature]
+      of Object.entries(TIC.Features || {})
+    ) {
+      const alreadyKnown =
+        knownFeatures.has(feature) ||
+        descriptors.some(
+          (descriptor) =>
+            descriptor.id === featureId
         );
-      }
-    );
 
-    Object.entries(
-      TIC.Features || {}
-    ).forEach(
-      ([featureId, feature]) => {
-        const alreadyKnown =
-          descriptors.some(
-            (descriptor) =>
-              descriptor.feature === feature ||
-              descriptor.id === featureId
-          );
+      if (alreadyKnown) continue;
 
-        if (alreadyKnown) return;
-
-        initializeFeature({
-          id: featureId,
-          group: FEATURE_GROUP.OTHER,
-          required: false,
-          feature
-        });
-      }
-    );
+      await initializeFeature({
+        id: featureId,
+        group: FEATURE_GROUP.OTHER,
+        required: false,
+        feature
+      });
+    }
 
     return state.initializedFeatures.size;
   };
@@ -663,7 +725,7 @@
      Page registration
   ========================================================= */
 
-  const registerPages = () => {
+  const registerPages = async () => {
     const router = TIC.Router;
 
     if (
@@ -678,70 +740,69 @@
       return 0;
     }
 
-    Object.entries(
-      TIC.Pages || {}
-    ).forEach(
-      ([pageId, pageModule]) => {
-        if (
-          !pageId ||
-          !pageModule ||
-          state.registeredPages.has(pageId)
-        ) {
-          return;
-        }
+    for (
+      const [pageId, pageModule]
+      of Object.entries(TIC.Pages || {})
+    ) {
+      if (
+        !pageId ||
+        !pageModule ||
+        state.registeredPages.has(pageId)
+      ) {
+        continue;
+      }
 
-        try {
-          if (
-            typeof pageModule.init === "function"
-          ) {
+      try {
+        if (
+          typeof pageModule.init === "function"
+        ) {
+          await settle(
             pageModule.init({
               store: TIC.Store,
               router: TIC.Router,
               ui: TIC.UI,
               app: App
-            });
-          }
-
-          router.registerPage(
-            pageId,
-            pageModule
-          );
-
-          state.registeredPages.add(
-            pageId
-          );
-
-          state.pageResults.set(
-            pageId,
-            {
-              id: pageId,
-              registered: true,
-              version:
-                pageModule.version ||
-                null,
-              error: null
-            }
-          );
-        } catch (error) {
-          state.pageResults.set(
-            pageId,
-            {
-              id: pageId,
-              registered: false,
-              version:
-                pageModule.version ||
-                null,
-              error: error.message
-            }
-          );
-
-          recordError(
-            `register-page:${pageId}`,
-            error
+            })
           );
         }
+
+        router.registerPage(
+          pageId,
+          pageModule
+        );
+
+        state.registeredPages.add(pageId);
+
+        state.pageResults.set(
+          pageId,
+          {
+            id: pageId,
+            registered: true,
+            version:
+              pageModule.version ||
+              null,
+            error: null
+          }
+        );
+      } catch (error) {
+        state.pageResults.set(
+          pageId,
+          {
+            id: pageId,
+            registered: false,
+            version:
+              pageModule.version ||
+              null,
+            error: error.message
+          }
+        );
+
+        recordError(
+          `register-page:${pageId}`,
+          error
+        );
       }
-    );
+    }
 
     return state.registeredPages.size;
   };
@@ -750,7 +811,7 @@
      Router and fallback rendering
   ========================================================= */
 
-  const mountFallback = (
+  const mountFallback = async (
     route = "home"
   ) => {
     const container =
@@ -770,14 +831,16 @@
     if (
       typeof page.mount === "function"
     ) {
-      page.mount({
-        container,
-        route,
-        store: TIC.Store,
-        router: TIC.Router,
-        ui: TIC.UI,
-        app: App
-      });
+      await settle(
+        page.mount({
+          container,
+          route,
+          store: TIC.Store,
+          router: TIC.Router,
+          ui: TIC.UI,
+          app: App
+        })
+      );
 
       state.activeRoute = route;
 
@@ -787,27 +850,34 @@
     if (
       typeof page.render === "function"
     ) {
+      const rendered =
+        await settle(
+          page.render({
+            container,
+            route,
+            store: TIC.Store,
+            router: TIC.Router,
+            ui: TIC.UI,
+            app: App
+          })
+        );
+
       container.innerHTML =
-        page.render({
-          container,
-          route,
-          store: TIC.Store,
-          router: TIC.Router,
-          ui: TIC.UI,
-          app: App
-        });
+        rendered || "";
 
       if (
         typeof page.afterEnter === "function"
       ) {
-        page.afterEnter({
-          container,
-          route,
-          store: TIC.Store,
-          router: TIC.Router,
-          ui: TIC.UI,
-          app: App
-        });
+        await settle(
+          page.afterEnter({
+            container,
+            route,
+            store: TIC.Store,
+            router: TIC.Router,
+            ui: TIC.UI,
+            app: App
+          })
+        );
       }
 
       state.activeRoute = route;
@@ -821,6 +891,10 @@
   };
 
   const startRouter = async () => {
+    if (state.routerStarted) {
+      return true;
+    }
+
     const router = TIC.Router;
     const route = getInitialRoute();
 
@@ -831,23 +905,20 @@
       typeof router.go === "function"
     ) {
       try {
-        const result = router.go(
-          route,
-          {
-            source:
-              "app-bootstrap",
-            replace: true,
-            store: TIC.Store,
-            app: App
-          }
+        await settle(
+          router.go(
+            route,
+            {
+              source:
+                "app-bootstrap",
+              replace: true,
+              store: TIC.Store,
+              app: App
+            }
+          )
         );
 
-        if (
-          result &&
-          typeof result.then === "function"
-        ) {
-          await result;
-        }
+        state.routerStarted = true;
 
         return true;
       } catch (error) {
@@ -858,12 +929,32 @@
       }
     }
 
-    return mountFallback(route);
+    await mountFallback(route);
+
+    state.routerStarted = true;
+
+    return true;
   };
 
   /* =========================================================
      Store and runtime events
   ========================================================= */
+
+  const syncTripLifecycle = () => {
+    try {
+      TIC.Store?.syncTripStatuses?.({
+        forcePersist: false
+      });
+    } catch (error) {
+      recordWarning(
+        "trip-lifecycle-sync",
+        "Trip lifecycle synchronization failed.",
+        {
+          error: error.message
+        }
+      );
+    }
+  };
 
   const subscribeToStore = () => {
     if (
@@ -881,20 +972,16 @@
             snapshot,
             event
           ) => {
-            window.dispatchEvent(
-              new CustomEvent(
-                "tic:app:store-updated",
-                {
-                  detail: {
-                    event:
-                      clone(event),
-                    updatedAt:
-                      snapshot?.meta
-                        ?.updatedAt ||
-                      nowISO()
-                  }
-                }
-              )
+            dispatch(
+              "tic:app:store-updated",
+              {
+                event:
+                  clone(event),
+                updatedAt:
+                  snapshot?.meta
+                    ?.updatedAt ||
+                  nowISO()
+              }
             );
           }
         );
@@ -911,9 +998,7 @@
   };
 
   const bindRuntimeEvents = () => {
-    if (
-      state.eventBindings.length
-    ) {
+    if (state.eventBindings.length) {
       return;
     }
 
@@ -923,16 +1008,9 @@
           "tic:budget-integration-health-changed",
         handler:
           (event) => {
-            window.dispatchEvent(
-              new CustomEvent(
-                "tic:app:budget-health-changed",
-                {
-                  detail:
-                    clone(
-                      event.detail
-                    )
-                }
-              )
+            dispatch(
+              "tic:app:budget-health-changed",
+              event.detail
             );
           }
       },
@@ -952,6 +1030,36 @@
 
       {
         name:
+          "tic:page:trips:passport-trip-created",
+        handler:
+          () => {
+            dispatch(
+              "tic:guide:refresh-requested",
+              {
+                source:
+                  "passport-trip-created"
+              }
+            );
+          }
+      },
+
+      {
+        name:
+          "tic:page:trips:passport-trip-updated",
+        handler:
+          () => {
+            dispatch(
+              "tic:guide:refresh-requested",
+              {
+                source:
+                  "passport-trip-updated"
+              }
+            );
+          }
+      },
+
+      {
+        name:
           "hashchange",
         handler:
           () => {
@@ -960,19 +1068,40 @@
                 window.location.hash
               );
           }
+      },
+
+      {
+        name:
+          "visibilitychange",
+        target:
+          document,
+        handler:
+          () => {
+            if (
+              document.visibilityState ===
+              "visible"
+            ) {
+              syncTripLifecycle();
+            }
+          }
       }
     ];
 
     bindings.forEach(
-      ({ name, handler }) => {
-        window.addEventListener(
+      ({
+        name,
+        handler,
+        target = window
+      }) => {
+        target.addEventListener(
           name,
           handler
         );
 
         state.eventBindings.push({
           name,
-          handler
+          handler,
+          target
         });
       }
     );
@@ -980,8 +1109,12 @@
 
   const unbindRuntimeEvents = () => {
     state.eventBindings.forEach(
-      ({ name, handler }) => {
-        window.removeEventListener(
+      ({
+        name,
+        handler,
+        target = window
+      }) => {
+        target.removeEventListener(
           name,
           handler
         );
@@ -995,19 +1128,21 @@
      Module initialization
   ========================================================= */
 
-  const initializeModules = () => {
+  const initializeModules = async () => {
     resolveModules();
 
     if (
       typeof TIC.Store.init === "function"
     ) {
-      TIC.Store.init();
+      await settle(TIC.Store.init());
     }
+
+    syncTripLifecycle();
 
     if (
       typeof TIC.UI.init === "function"
     ) {
-      TIC.UI.init();
+      await settle(TIC.UI.init());
     }
 
     state.container =
@@ -1022,20 +1157,23 @@
     if (
       typeof TIC.Router.init === "function"
     ) {
-      TIC.Router.init({
-        container:
-          state.container,
-        store:
-          TIC.Store,
-        app:
-          App
-      });
+      await settle(
+        TIC.Router.init({
+          container:
+            state.container,
+          store:
+            TIC.Store,
+          app:
+            App
+        })
+      );
     }
 
     subscribeToStore();
     bindRuntimeEvents();
-    initializeFeatures();
-    registerPages();
+
+    await initializeFeatures();
+    await registerPages();
 
     return true;
   };
@@ -1178,7 +1316,7 @@
           ? "ready"
           : available > 0
             ? "degraded"
-            : "disconnected",
+            : "deferred",
       score:
         budgetFeatures.length > 0
           ? Math.round(
@@ -1195,31 +1333,83 @@
     };
   };
 
+  const getGuideHealth = () => {
+    const ids = [
+      "world-guide-data",
+      "planner-engine",
+      "travel-ai",
+      "guide-engine"
+    ];
+
+    const results =
+      ids.map(
+        (id) =>
+          state.featureResults.get(id)
+      );
+
+    const ready =
+      results.filter(
+        (result) =>
+          result?.available &&
+          result?.initialized
+      ).length;
+
+    const world =
+      TIC.Data?.WorldGuideData ||
+      window.WorldGuideData ||
+      window.WorldData;
+
+    const stats =
+      world?.getStats?.() ||
+      null;
+
+    return {
+      status:
+        ready === ids.length
+          ? "ready"
+          : ready > 0
+            ? "degraded"
+            : "disconnected",
+      score:
+        Math.round(
+          (ready / ids.length) * 100
+        ),
+      readyModules:
+        ready,
+      totalModules:
+        ids.length,
+      totalCountries:
+        stats?.totalCountries ||
+        world?.countries?.length ||
+        0,
+      modules: {
+        worldGuideData:
+          Boolean(world),
+        plannerEngine:
+          Boolean(
+            TIC.Features?.PlannerEngine ||
+            window.PlannerEngine
+          ),
+        travelAI:
+          Boolean(
+            TIC.Features?.TravelAI ||
+            window.TravelAI
+          ),
+        guideEngine:
+          Boolean(
+            TIC.Features?.GuideEngine ||
+            window.GuideEngine
+          )
+      }
+    };
+  };
+
   const runDiagnostics = () => {
     const featureDiagnostics =
       collectFeatureDiagnostics();
 
     const pageDiagnostics =
       collectPageDiagnostics();
-
-    const budgetHealth =
-      getBudgetHealth();
-
-    const guideFeatureIds = [
-      "destination-recommendation",
-      "guide-search",
-      "guide-ai-planner",
-      "travel-dna",
-      "travel-year-planner",
-      "guide-intelligence"
-    ];
-
-    const guideReady =
-      guideFeatureIds.filter(
-        (id) =>
-          featureDiagnostics[id]
-            ?.available
-      ).length;
 
     return {
       id: "app",
@@ -1243,6 +1433,9 @@
       activeRoute:
         state.activeRoute,
 
+      routerStarted:
+        state.routerStarted,
+
       configAvailable:
         Boolean(TIC.Config),
 
@@ -1262,16 +1455,11 @@
       uiAvailable:
         Boolean(TIC.UI),
 
-      countriesCatalogAvailable:
+      worldGuideDataAvailable:
         Boolean(
-          TIC.Data?.Countries ||
-          window.TICCountriesCatalog
-        ),
-
-      travelKnowledgeAvailable:
-        Boolean(
-          TIC.Data?.TravelKnowledge ||
-          window.TICTravelKnowledge
+          TIC.Data?.WorldGuideData ||
+          window.WorldGuideData ||
+          window.WorldData
         ),
 
       registeredPages:
@@ -1284,18 +1472,11 @@
           state.initializedFeatures
         ),
 
-      guideIntelligence: {
-        ready:
-          guideReady ===
-          guideFeatureIds.length,
-        readyFeatures:
-          guideReady,
-        totalFeatures:
-          guideFeatureIds.length
-      },
+      guideIntelligence:
+        getGuideHealth(),
 
       budgetIntelligence:
-        clone(budgetHealth),
+        clone(getBudgetHealth()),
 
       featureDiagnostics,
       pageDiagnostics,
@@ -1357,7 +1538,7 @@
       state.startupPromise =
         (async () => {
           try {
-            initializeModules();
+            await initializeModules();
 
             state.initialized = true;
 
@@ -1369,35 +1550,31 @@
             const diagnostics =
               this.diagnostics();
 
-            window.dispatchEvent(
-              new CustomEvent(
-                "tic:app:started",
-                {
-                  detail: {
-                    version:
-                      APP_VERSION,
-                    route:
-                      state.activeRoute ||
-                      getInitialRoute(),
-                    registeredPages:
-                      Array.from(
-                        state.registeredPages
-                      ),
-                    initializedFeatures:
-                      Array.from(
-                        state.initializedFeatures
-                      ),
-                    guideIntelligence:
-                      diagnostics
-                        .guideIntelligence,
-                    budgetIntelligence:
-                      diagnostics
-                        .budgetIntelligence,
-                    timestamp:
-                      nowISO()
-                  }
-                }
-              )
+            dispatch(
+              "tic:app:started",
+              {
+                version:
+                  APP_VERSION,
+                route:
+                  state.activeRoute ||
+                  getInitialRoute(),
+                registeredPages:
+                  Array.from(
+                    state.registeredPages
+                  ),
+                initializedFeatures:
+                  Array.from(
+                    state.initializedFeatures
+                  ),
+                guideIntelligence:
+                  diagnostics
+                    .guideIntelligence,
+                budgetIntelligence:
+                  diagnostics
+                    .budgetIntelligence,
+                timestamp:
+                  nowISO()
+              }
             );
 
             console.log(
@@ -1416,13 +1593,9 @@
             if (container) {
               container.innerHTML = `
                 <section class="tic-empty-state">
-                  <div class="tic-empty-icon">
-                    !
-                  </div>
+                  <div class="tic-empty-icon">!</div>
 
-                  <h2>
-                    تعذر تشغيل التطبيق
-                  </h2>
+                  <h2>تعذر تشغيل التطبيق</h2>
 
                   <p>
                     حدث خطأ أثناء تحميل مركز السفر الذكي.
@@ -1473,6 +1646,7 @@
         state.starting = false;
         state.container = null;
         state.activeRoute = null;
+        state.routerStarted = false;
         state.registeredPages.clear();
         state.initializedFeatures.clear();
         state.featureResults.clear();
@@ -1488,20 +1662,20 @@
       }
     },
 
-    registerPages() {
-      return registerPages();
+    async registerPages() {
+      return await registerPages();
     },
 
-    initializeFeatures() {
-      return initializeFeatures();
+    async initializeFeatures() {
+      return await initializeFeatures();
     },
 
-    initializeFeature(
+    async initializeFeature(
       id,
       feature,
       options = {}
     ) {
-      return initializeFeature({
+      return await initializeFeature({
         id,
         feature,
         group:
@@ -1541,6 +1715,12 @@
       return (
         state.activeRoute ||
         getInitialRoute()
+      );
+    },
+
+    getGuideHealth() {
+      return clone(
+        getGuideHealth()
       );
     },
 
