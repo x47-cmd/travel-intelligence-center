@@ -12,7 +12,7 @@
 
   <meta
     name="description"
-    content="منصة شخصية ذكية لتنظيم الرحلات، الوجهات، الميزانيات، التجهيز، المستندات، الذكريات، وقائمة الأمنيات في مكان واحد."
+    content="منصة شخصية ذكية لتنظيم الرحلات، الوجهات، الميزانيات، المصروفات، الادخار، الدفعات، التجهيز، المستندات، الذكريات، وقائمة الأمنيات في مكان واحد."
   />
 
   <meta name="theme-color" content="#0f766e" />
@@ -22,17 +22,20 @@
   <meta name="format-detection" content="telephone=no" />
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
+
   <meta
     name="apple-mobile-web-app-status-bar-style"
     content="default"
   />
+
   <meta
     name="apple-mobile-web-app-title"
     content="Travel Center"
   />
 
   <!-- =====================================================
-       Travel Intelligence Center V2.5.0
+       Travel Intelligence Center V3.0.0
+
        Premium iPhone-first interface
        Smart next-trip summary V2.4.0
        Fast Single-Page Trip Form V4.1.0
@@ -40,6 +43,9 @@
        Guide Intelligence Platform V3.0.0
        Travel DNA and destination recommendations
        AI trip planner and annual travel planner
+       Budget Intelligence Platform V3.0.0
+       Expense, savings and payment intelligence
+       Budget analytics, AI, alerts and notifications
   ====================================================== -->
 
   <link
@@ -49,7 +55,11 @@
 
   <!-- =====================================================
        1. Configuration and Base Data
+
+       Required order:
+       Config → Base Data
   ====================================================== -->
+
   <script
     defer
     src="js/config.js?v=1.0.0"
@@ -62,11 +72,22 @@
 
   <!-- =====================================================
        2. Core Services
+
+       Required order:
        Store → Router → UI
+
+       Store V2.0.0 includes:
+       - Complete trip persistence
+       - Flight and hotel fields
+       - Expense persistence
+       - Savings persistence
+       - Payment persistence
+       - Budget Intelligence data
   ====================================================== -->
+
   <script
     defer
-    src="js/store.js?v=1.1.0"
+    src="js/store.js?v=2.0.0"
   ></script>
 
   <script
@@ -81,8 +102,11 @@
 
   <!-- =====================================================
        3. Guide Intelligence Data Layer
+
+       Required order:
        Countries Catalog → Travel Knowledge
   ====================================================== -->
+
   <script
     defer
     src="js/data/countries-catalog.js?v=1.0.0"
@@ -95,9 +119,14 @@
 
   <!-- =====================================================
        4. Optional Document Reading Engines
-       Tesseract.js: OCR for ticket/hotel images
-       PDF.js: text extraction from PDF bookings
+
+       Tesseract.js:
+       - OCR for ticket and hotel images
+
+       PDF.js:
+       - Text extraction from PDF bookings
   ====================================================== -->
+
   <script
     defer
     src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"
@@ -109,18 +138,24 @@
   ></script>
 
   <script>
-    window.addEventListener("DOMContentLoaded", function () {
-      if (window.pdfjsLib) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    window.addEventListener(
+      "DOMContentLoaded",
+      function configurePdfWorker() {
+        if (window.pdfjsLib) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        }
       }
-    });
+    );
   </script>
 
   <!-- =====================================================
        5. Smart Document Import Layer
+
+       Required order:
        Reader → Ticket Import → Hotel Import → Trip Form
   ====================================================== -->
+
   <script
     defer
     src="js/features/document-reader.js?v=1.0.0"
@@ -143,9 +178,16 @@
 
   <!-- =====================================================
        6. Guide Intelligence Engines
-       Recommendation → Search → AI Planner → Travel DNA
-       → Year Planner → Guide Intelligence Orchestrator
+
+       Required order:
+       Recommendation
+       → Search
+       → AI Planner
+       → Travel DNA
+       → Year Planner
+       → Guide Intelligence Orchestrator
   ====================================================== -->
+
   <script
     defer
     src="js/features/destination-recommendation-engine.js?v=1.0.0"
@@ -177,9 +219,82 @@
   ></script>
 
   <!-- =====================================================
-       7. Application Pages
-       All page dependencies must load before these files.
+       7. Budget Intelligence Platform Engines
+
+       Required order:
+       Budget Core
+       → Expense Engine
+       → Savings Engine
+       → Analytics
+       → Budget AI
+       → Payment Tracker
+       → Expense Alerts
+       → Export Engine
+       → Notification Engine
+       → Integration Engine
+
+       Important:
+       The Integration Engine must load after all other
+       Budget Intelligence engines.
   ====================================================== -->
+
+  <script
+    defer
+    src="js/features/budget-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/expense-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/savings-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-analytics.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-ai.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/payment-tracker.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/expense-alert-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-export-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-notification-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-integration-engine.js?v=1.0.0"
+  ></script>
+
+  <!-- =====================================================
+       8. Application Pages
+
+       All core services, data layers and feature engines
+       must load before the page modules.
+  ====================================================== -->
+
   <script
     defer
     src="js/pages/home.js?v=2.4.0"
@@ -197,7 +312,7 @@
 
   <script
     defer
-    src="js/pages/budget.js?v=2.0.0"
+    src="js/pages/budget.js?v=3.0.0"
   ></script>
 
   <script
@@ -206,12 +321,21 @@
   ></script>
 
   <!-- =====================================================
-       8. Application Bootstrap
-       Must remain the final JavaScript file.
+       9. Application Bootstrap
+
+       Application Bootstrap V3.0.0:
+       - Initializes Guide Intelligence
+       - Initializes Budget Intelligence
+       - Registers all pages
+       - Starts the Router
+       - Provides runtime diagnostics
+
+       This must remain the final JavaScript file.
   ====================================================== -->
+
   <script
     defer
-    src="js/app.js?v=2.1.0"
+    src="js/app.js?v=3.0.0"
   ></script>
 </head>
 
@@ -270,8 +394,9 @@
 
         <p>
           يتم تجهيز الرحلات، الوجهات، الميزانيات،
-          المستندات، التجهيز، الذكريات، قائمة الأمنيات،
-          ومحركات دليل السفر الذكي.
+          المصروفات، الادخار، الدفعات، المستندات،
+          التجهيز، الذكريات، قائمة الأمنيات،
+          ومحركات الذكاء الخاصة بالسفر والميزانية.
         </p>
 
         <div
