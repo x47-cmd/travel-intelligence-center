@@ -1,48 +1,32 @@
 /* =========================================================
    Travel Intelligence Center
-   Budget Intelligence Platform Page V3.0.0
+   Budget Intelligence Platform Page V3.1.1
 
    File Path:
    js/pages/budget.js
 
    Purpose:
-   - Production-ready Budget Intelligence Platform page.
-   - Preserves the stable page lifecycle, Router registration,
-     Store subscription and TIC UI integration.
-   - Connects all ten Budget Intelligence engines.
-   - Supports annual budget intelligence, trip budgets, expenses,
-     savings, payments, AI recommendations, alerts, notifications,
-     reports, export and system health.
-   - Provides iPhone-first responsive rendering and local dialogs.
-   - Keeps all finance data synchronized through the central Store.
-
-   Dependencies:
-   - js/config.js
-   - js/store.js
-   - js/router.js
-   - js/ui.js
-   - js/features/budget-engine.js
-   - js/features/expense-engine.js
-   - js/features/savings-engine.js
-   - js/features/budget-analytics.js
-   - js/features/budget-ai.js
-   - js/features/payment-tracker.js
-   - js/features/expense-alert-engine.js
-   - js/features/budget-export-engine.js
-   - js/features/budget-notification-engine.js
-   - js/features/budget-integration-engine.js
-
-   Global APIs:
-   - window.TIC.Pages.budget
-   - window.TICBudgetPage
+   - Complete Budget Intelligence page.
+   - Preserves Store, Router, UI and ten-engine integration.
+   - Improves iPhone scrolling and content hierarchy.
+   - Keeps expenses, savings, payments, AI, alerts and reports.
 ========================================================= */
 
-(function budgetPageFactory(window, document) {
+(function (window, document) {
   "use strict";
 
   const Config = window.TICConfig || window.TIC?.Config || {};
   const PAGE_ID = "budget";
-  const PAGE_VERSION = "3.0.0";
+  const PAGE_VERSION = "3.1.1";
+
+  const VIEWS = Object.freeze({
+    OVERVIEW: "overview",
+    EXPENSES: "expenses",
+    SAVINGS: "savings",
+    PAYMENTS: "payments",
+    ALERTS: "alerts",
+    REPORTS: "reports"
+  });
 
   const state = {
     initialized: false,
@@ -55,36 +39,24 @@
     eventBindings: [],
     subscribers: new Set(),
     lastSnapshot: null,
-    activeView: "overview",
+    activeView: VIEWS.OVERVIEW,
     activeDialog: null,
-    refreshTimer: null
-  };
+    refreshTimer: null,
+    lastSignature: "",
 
-  const VIEWS = Object.freeze({
-    OVERVIEW: "overview",
-    EXPENSES: "expenses",
-    SAVINGS: "savings",
-    PAYMENTS: "payments",
-    ALERTS: "alerts",
-    REPORTS: "reports"
-  });
+    // Scroll stability V3.1.1
+    isUserScrolling: false,
+    scrollIdleTimer: null,
+    pendingRefresh: false,
+    lastKnownScrollY: 0
+  };
 
   const clone = (value) => {
     if (value === undefined) return undefined;
-
     if (typeof structuredClone === "function") {
-      try {
-        return structuredClone(value);
-      } catch (error) {
-        // Continue to JSON fallback.
-      }
+      try { return structuredClone(value); } catch (_) {}
     }
-
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch (error) {
-      return value;
-    }
+    try { return JSON.parse(JSON.stringify(value)); } catch (_) { return value; }
   };
 
   const escapeHTML = (value) =>
@@ -104,98 +76,44 @@
     Math.max(0, number(value, fallback));
 
   const percentage = (part, total) =>
-    total > 0
+    number(total) > 0
       ? Math.round((number(part) / number(total)) * 100)
       : 0;
 
   const asArray = (value) => {
     if (Array.isArray(value)) return value;
-
-    if (
-      value &&
-      typeof value === "object"
-    ) {
-      return Object.values(value);
-    }
-
+    if (value && typeof value === "object") return Object.values(value);
     return [];
   };
 
   const firstDefined = (...values) =>
-    values.find(
-      (value) =>
-        value !== undefined &&
-        value !== null &&
-        value !== ""
-    );
+    values.find((value) => value !== undefined && value !== null && value !== "");
 
   const getStore = () =>
-    window.TIC?.Store ||
-    window.TICStore ||
-    window.Store ||
-    null;
+    window.TIC?.Store || window.TICStore || window.Store || null;
 
   const getRouter = () =>
-    window.TIC?.Router ||
-    window.TICRouter ||
-    null;
+    window.TIC?.Router || window.TICRouter || null;
 
   const getUI = () =>
-    window.TIC?.UI ||
-    window.TICUI ||
-    null;
+    window.TIC?.UI || window.TICUI || null;
 
   const engines = () => ({
-    budget:
-      window.TICBudgetEngine ||
-      window.TIC?.Features?.budgetEngine ||
-      null,
-    expense:
-      window.TICExpenseEngine ||
-      window.TIC?.Features?.expenseEngine ||
-      null,
-    savings:
-      window.TICSavingsEngine ||
-      window.TIC?.Features?.savingsEngine ||
-      null,
-    analytics:
-      window.TICBudgetAnalytics ||
-      window.TIC?.Features?.budgetAnalytics ||
-      null,
-    ai:
-      window.TICBudgetAI ||
-      window.TIC?.Features?.budgetAI ||
-      null,
-    payments:
-      window.TICPaymentTracker ||
-      window.TIC?.Features?.paymentTracker ||
-      null,
-    alerts:
-      window.TICExpenseAlertEngine ||
-      window.TIC?.Features?.expenseAlertEngine ||
-      null,
-    export:
-      window.TICBudgetExportEngine ||
-      window.TIC?.Features?.budgetExportEngine ||
-      null,
-    notifications:
-      window.TICBudgetNotificationEngine ||
-      window.TIC?.Features?.budgetNotificationEngine ||
-      null,
-    integration:
-      window.TICBudgetIntegrationEngine ||
-      window.TIC?.Features?.budgetIntegrationEngine ||
-      null
+    budget: window.TICBudgetEngine || window.TIC?.Features?.budgetEngine || null,
+    expense: window.TICExpenseEngine || window.TIC?.Features?.expenseEngine || null,
+    savings: window.TICSavingsEngine || window.TIC?.Features?.savingsEngine || null,
+    analytics: window.TICBudgetAnalytics || window.TIC?.Features?.budgetAnalytics || null,
+    ai: window.TICBudgetAI || window.TIC?.Features?.budgetAI || null,
+    payments: window.TICPaymentTracker || window.TIC?.Features?.paymentTracker || null,
+    alerts: window.TICExpenseAlertEngine || window.TIC?.Features?.expenseAlertEngine || null,
+    export: window.TICBudgetExportEngine || window.TIC?.Features?.budgetExportEngine || null,
+    notifications: window.TICBudgetNotificationEngine || window.TIC?.Features?.budgetNotificationEngine || null,
+    integration: window.TICBudgetIntegrationEngine || window.TIC?.Features?.budgetIntegrationEngine || null
   });
 
   const resolveContainer = (container) => {
-    if (container instanceof window.Element) {
-      return container;
-    }
-
-    if (typeof container === "string") {
-      return document.querySelector(container);
-    }
+    if (container instanceof window.Element) return container;
+    if (typeof container === "string") return document.querySelector(container);
 
     return (
       document.querySelector("[data-router-view]") ||
@@ -214,21 +132,13 @@
     };
 
     state.subscribers.forEach((listener) => {
-      try {
-        listener(payload);
-      } catch (error) {
-        console.error(
-          "TIC Budget subscriber error:",
-          error
-        );
+      try { listener(payload); } catch (error) {
+        console.error("TIC Budget subscriber error:", error);
       }
     });
 
     window.dispatchEvent(
-      new CustomEvent(
-        `tic:page:${PAGE_ID}:${type}`,
-        { detail: payload }
-      )
+      new CustomEvent(`tic:page:${PAGE_ID}:${type}`, { detail: payload })
     );
 
     return payload;
@@ -236,23 +146,13 @@
 
   const notify = (message, tone = "info") => {
     const ui = getUI();
-
-    if (ui?.toast) {
-      ui.toast(message, { tone });
-      return;
-    }
-
-    if (ui?.showToast) {
-      ui.showToast(message, tone);
-      return;
-    }
-
+    if (ui?.toast) return ui.toast(message, { tone });
+    if (ui?.showToast) return ui.showToast(message, tone);
     console.log(`[Budget:${tone}] ${message}`);
   };
 
   const getStoreState = () => {
     const store = getStore();
-
     if (!store) return {};
 
     try {
@@ -262,13 +162,7 @@
 
       if (typeof store.get === "function") {
         const full = store.get();
-
-        if (
-          full &&
-          typeof full === "object"
-        ) {
-          return clone(full);
-        }
+        if (full && typeof full === "object") return clone(full);
 
         return {
           profile: store.get("profile"),
@@ -277,47 +171,29 @@
           expenses: store.get("expenses"),
           savings: store.get("savings"),
           payments: store.get("payments"),
-          budgetNotifications:
-            store.get("budgetNotifications")
+          budgetNotifications: store.get("budgetNotifications")
         };
       }
 
-      if (store.state) {
-        return clone(store.state);
-      }
-
-      if (store.data) {
-        return clone(store.data);
-      }
+      if (store.state) return clone(store.state);
+      if (store.data) return clone(store.data);
     } catch (error) {
-      console.error(
-        "TIC Budget Store read error:",
-        error
-      );
+      console.error("TIC Budget Store read error:", error);
     }
 
     return {};
   };
 
-  const callEngine = (
-    engine,
-    methods,
-    args = []
-  ) => {
+  const callEngine = (engine, methods, args = []) => {
     if (!engine) return null;
 
     for (const method of methods) {
-      if (typeof engine[method] !== "function") {
-        continue;
-      }
+      if (typeof engine[method] !== "function") continue;
 
       try {
         return engine[method](...args);
       } catch (error) {
-        console.warn(
-          `TIC Budget engine method failed: ${method}`,
-          error
-        );
+        console.warn(`TIC Budget engine method failed: ${method}`, error);
       }
     }
 
@@ -325,256 +201,110 @@
   };
 
   const fallbackSnapshot = (raw) => {
-    const profile =
-      raw.profile &&
-      typeof raw.profile === "object"
-        ? raw.profile
-        : {};
-
-    const settings =
-      raw.settings &&
-      typeof raw.settings === "object"
-        ? raw.settings
-        : {};
-
+    const profile = raw.profile && typeof raw.profile === "object" ? raw.profile : {};
     const trips = asArray(raw.trips);
+    const expenses = asArray(
+      firstDefined(raw.expenses, raw.budget?.expenses, raw.budgets?.expenses, raw.finance?.expenses, [])
+    );
 
     const annualBudget = nonNegative(
       firstDefined(
         raw.budget?.annualBudget,
+        raw.budgets?.annualBudget,
         profile.annualTravelBudget,
-        settings.annualTravelBudget,
         Config.profile?.annualTravelBudget,
         30000
       )
     );
 
+    const totalSpent = expenses.length
+      ? expenses.reduce((total, item) => total + nonNegative(firstDefined(item.amount, item.total, item.value, 0)), 0)
+      : trips.reduce((total, trip) => total + nonNegative(firstDefined(trip.spent, trip.totalSpent, 0)), 0);
+
+    const savingsRoot = raw.savings || {};
+    const savingEntries = asArray(
+      savingsRoot.entries || savingsRoot.transactions || savingsRoot.contributions
+    );
+
+    const balance = nonNegative(
+      firstDefined(
+        savingsRoot.balance,
+        savingsRoot.currentBalance,
+        raw.budgets?.savingsBalance,
+        savingEntries.reduce((total, item) => total + nonNegative(item.amount), 0),
+        0
+      )
+    );
+
     const monthlySaving = nonNegative(
       firstDefined(
-        raw.savings?.monthlySaving,
+        savingsRoot.monthlySaving,
+        raw.budgets?.monthlySavingTarget,
         profile.monthlySaving,
-        settings.monthlySaving,
-        Config.profile?.monthlySaving,
+        profile.monthlyTravelSaving,
         1500
       )
     );
 
-    const expenses = asArray(
-      firstDefined(
-        raw.expenses,
-        raw.budget?.expenses,
-        raw.finance?.expenses,
-        []
-      )
-    );
+    const tripItems = trips.map((trip, index) => {
+      const planned = nonNegative(firstDefined(trip.budget, trip.plannedBudget, 0));
+      const spent = nonNegative(firstDefined(trip.spent, trip.totalSpent, 0));
 
-    const totalSpent = expenses.length
-      ? expenses.reduce(
-          (total, item) =>
-            total +
-            nonNegative(
-              firstDefined(
-                item.amount,
-                item.total,
-                item.value,
-                0
-              )
-            ),
-          0
-        )
-      : trips.reduce(
-          (total, trip) =>
-            total + nonNegative(trip.spent),
-          0
-        );
-
-    const totalTripBudget = trips.reduce(
-      (total, trip) =>
-        total +
-        nonNegative(
-          firstDefined(
-            trip.budget,
-            trip.plannedBudget,
-            0
-          )
-        ),
-      0
-    );
-
-    const savingsRoot = raw.savings;
-    const savingsEntries = Array.isArray(
-      savingsRoot
-    )
-      ? savingsRoot
-      : asArray(
-          savingsRoot?.entries ||
-          savingsRoot?.transactions
-        );
-
-    const totalSavings = nonNegative(
-      firstDefined(
-        savingsRoot?.balance,
-        savingsRoot?.currentBalance,
-        savingsEntries.reduce(
-          (total, item) =>
-            total +
-            nonNegative(
-              typeof item === "number"
-                ? item
-                : item.amount
-            ),
-          0
-        )
-      )
-    );
+      return {
+        id: String(firstDefined(trip.id, `trip_${index}`)),
+        title: trip.title || trip.destination || "رحلة",
+        destination: trip.destination || trip.country || "",
+        planned,
+        spent,
+        remaining: planned - spent,
+        usagePercent: percentage(spent, planned),
+        expenseCount: expenses.filter((expense) => String(expense.tripId) === String(trip.id)).length
+      };
+    });
 
     const remaining = annualBudget - totalSpent;
-    const usagePercent = percentage(
-      totalSpent,
-      annualBudget
-    );
+    const usagePercent = percentage(totalSpent, annualBudget);
 
     return {
-      generatedAt: new Date().toISOString(),
-      currency: firstDefined(
-        raw.budget?.currency,
-        profile.currency,
-        settings.currency,
-        "AED"
-      ),
+      currency: profile.currency || "AED",
       annualBudget,
       totalSpent,
       remaining,
       usagePercent,
-      expenseCount: expenses.length,
-      averageExpense:
-        expenses.length > 0
-          ? totalSpent / expenses.length
-          : 0,
       expenses,
       savings: {
-        balance: totalSavings,
+        balance,
         monthlySaving,
-        coveragePercent: percentage(
-          totalSavings,
-          annualBudget
-        ),
-        remainingToFund: Math.max(
-          0,
-          annualBudget - totalSavings
-        )
+        coveragePercent: percentage(balance, annualBudget),
+        remainingToFund: Math.max(0, annualBudget - balance)
       },
       trips: {
-        items: trips.map((trip, index) => {
-          const planned = nonNegative(
-            firstDefined(
-              trip.budget,
-              trip.plannedBudget,
-              0
-            )
-          );
-
-          const spent = nonNegative(
-            firstDefined(
-              trip.spent,
-              trip.totalSpent,
-              0
-            )
-          );
-
-          return {
-            id: String(
-              firstDefined(
-                trip.id,
-                `trip_${index}`
-              )
-            ),
-            title:
-              trip.title ||
-              trip.destination ||
-              "رحلة",
-            destination:
-              trip.destination || "",
-            planned,
-            spent,
-            remaining: planned - spent,
-            usagePercent:
-              percentage(spent, planned),
-            expenseCount: 0
-          };
-        }),
-        totalTrips: trips.length,
-        totalPlanned: totalTripBudget,
+        items: tripItems,
+        totalTrips: tripItems.length,
+        totalPlanned: tripItems.reduce((total, trip) => total + trip.planned, 0),
         totalSpent,
-        tripsOverBudget: trips.filter(
-          (trip) =>
-            nonNegative(trip.spent) >
-            nonNegative(trip.budget)
-        ).length,
-        tripsNearLimit: trips.filter(
-          (trip) => {
-            const usage = percentage(
-              trip.spent,
-              trip.budget
-            );
-
-            return (
-              usage >= 85 &&
-              usage <= 100
-            );
-          }
-        ).length
+        tripsOverBudget: tripItems.filter((trip) => trip.planned > 0 && trip.spent > trip.planned).length,
+        tripsNearLimit: tripItems.filter((trip) => trip.usagePercent >= 85 && trip.usagePercent <= 100).length
       },
-      categories: {
-        items: []
-      },
-      monthly: {
-        items: [],
-        averageMonthlySpend:
-          totalSpent / 12
-      },
+      categories: { items: [] },
+      monthly: { items: [] },
       forecast: {
         projectedSpend: totalSpent,
-        likelyToExceed:
-          totalSpent > annualBudget,
-        expectedOverrun: Math.max(
-          0,
-          totalSpent - annualBudget
-        ),
+        likelyToExceed: totalSpent > annualBudget,
+        expectedOverrun: Math.max(0, totalSpent - annualBudget),
         recommendedMonthlyLimit:
-          Math.max(
-            0,
-            annualBudget - totalSpent
-          ) / Math.max(
-            1,
-            12 - new Date().getMonth()
-          )
+          Math.max(0, annualBudget - totalSpent) /
+          Math.max(1, 12 - new Date().getMonth())
       },
       health: {
-        score: Math.max(
-          0,
-          Math.min(
-            100,
-            100 - Math.max(
-              0,
-              usagePercent - 50
-            )
-          )
-        ),
+        score: Math.max(0, Math.min(100, 100 - Math.max(0, usagePercent - 50))),
         status:
           usagePercent > 100
             ? "critical"
             : usagePercent >= 85
               ? "warning"
               : "healthy"
-      },
-      anomalies: {
-        items: [],
-        count: 0
-      },
-      insights: [],
-      charts: {},
-      raw
+      }
     };
   };
 
@@ -582,139 +312,66 @@
     const raw = getStoreState();
     const modules = engines();
 
-    const integrationDashboard =
-      callEngine(
-        modules.integration,
-        [
-          "getUnifiedDashboard",
-          "getDashboard"
-        ],
-        [{ store: getStore() }]
-      );
+    const integrated =
+      callEngine(modules.integration, ["getUnifiedDashboard", "getDashboard"], [
+        { store: getStore() }
+      ]) || {};
 
     const analytics =
-      integrationDashboard?.analytics ||
-      callEngine(
-        modules.analytics,
-        [
-          "getDashboard",
-          "getSnapshot",
-          "generate"
-        ],
-        [{ store: getStore() }]
-      ) ||
+      integrated.analytics ||
+      callEngine(modules.analytics, ["getDashboard", "getSnapshot", "generate"], [
+        { store: getStore() }
+      ]) ||
       fallbackSnapshot(raw);
 
     const ai =
-      integrationDashboard?.ai ||
-      callEngine(
-        modules.ai,
-        [
-          "getDashboard",
-          "generateDashboard"
-        ],
-        [{ store: getStore() }]
-      ) ||
-      {
-        recommendations: [],
-        summary: {}
-      };
+      integrated.ai ||
+      callEngine(modules.ai, ["getDashboard", "generateDashboard"], [
+        { store: getStore() }
+      ]) ||
+      { recommendations: [], summary: {} };
 
     const payments =
-      integrationDashboard?.payments ||
-      callEngine(
-        modules.payments,
-        [
-          "getDashboard",
-          "buildDashboard"
-        ],
-        [{ store: getStore() }]
-      ) ||
-      {
-        payments: [],
-        upcoming: [],
-        overdue: [],
-        alerts: [],
-        summary: {}
-      };
+      integrated.payments ||
+      callEngine(modules.payments, ["getDashboard", "buildDashboard"], [
+        { store: getStore() }
+      ]) ||
+      { payments: [], upcoming: [], summary: {} };
 
     const alerts =
-      integrationDashboard?.alerts ||
-      callEngine(
-        modules.alerts,
-        [
-          "getDashboard",
-          "buildDashboard"
-        ],
-        [{ store: getStore() }]
-      ) ||
-      {
-        alerts: [],
-        activeAlerts: [],
-        summary: {}
-      };
+      integrated.alerts ||
+      callEngine(modules.alerts, ["getDashboard", "buildDashboard"], [
+        { store: getStore() }
+      ]) ||
+      { alerts: [], activeAlerts: [], summary: {} };
 
     const notifications =
-      integrationDashboard?.notifications ||
-      callEngine(
-        modules.notifications,
-        [
-          "getDashboard",
-          "buildDashboard"
-        ],
-        [{ store: getStore() }]
-      ) ||
-      {
-        notifications: [],
-        unread: [],
-        summary: {}
-      };
+      integrated.notifications ||
+      callEngine(modules.notifications, ["getDashboard", "buildDashboard"], [
+        { store: getStore() }
+      ]) ||
+      { notifications: [], unread: [], summary: {} };
 
     const integrationHealth =
-      callEngine(
-        modules.integration,
-        ["getHealth"],
-        []
-      ) ||
-      integrationDashboard?.integration ||
+      callEngine(modules.integration, ["getHealth"], []) ||
+      integrated.integration ||
       null;
 
-    const expenses = (() => {
-      const fromAnalytics = asArray(
-        analytics.expenses
-      );
-
-      if (fromAnalytics.length) {
-        return fromAnalytics;
-      }
-
-      const fromEngine = callEngine(
-        modules.expense,
-        [
-          "listExpenses",
-          "getExpenses",
-          "getAll",
-          "list"
-        ],
-        [{
-          store: getStore(),
-          includeDeleted: false
-        }]
-      );
-
-      if (Array.isArray(fromEngine)) {
-        return fromEngine;
-      }
-
-      return asArray(
-        raw.expenses ||
-        raw.budget?.expenses ||
-        raw.finance?.expenses
-      );
-    })();
+    const expenseList =
+      asArray(analytics.expenses).length
+        ? asArray(analytics.expenses)
+        : asArray(
+            callEngine(
+              modules.expense,
+              ["listExpenses", "getExpenses", "getAll", "list"],
+              [{ store: getStore(), includeDeleted: false }]
+            ) ||
+            raw.expenses ||
+            raw.budget?.expenses ||
+            raw.budgets?.expenses
+          );
 
     const snapshot = {
-      generatedAt: new Date().toISOString(),
       raw,
       analytics,
       ai,
@@ -722,125 +379,57 @@
       alerts,
       notifications,
       integrationHealth,
-      expenses,
-      currency:
-        analytics.currency ||
-        raw.profile?.currency ||
-        "AED",
-      annualBudget: nonNegative(
-        analytics.annualBudget
-      ),
-      totalSpent: nonNegative(
-        analytics.totalSpent
-      ),
+      expenses: expenseList,
+      currency: analytics.currency || raw.profile?.currency || "AED",
+      annualBudget: nonNegative(analytics.annualBudget),
+      totalSpent: nonNegative(analytics.totalSpent),
       remaining: number(
         analytics.remaining,
-        nonNegative(analytics.annualBudget) -
-        nonNegative(analytics.totalSpent)
+        nonNegative(analytics.annualBudget) - nonNegative(analytics.totalSpent)
       ),
-      usagePercent: nonNegative(
-        analytics.usagePercent
-      ),
-      healthScore: number(
-        analytics.health?.score,
-        0
-      ),
-      healthStatus:
-        analytics.health?.status ||
-        "unknown",
-      savings:
-        analytics.savings || {},
-      trips:
-        analytics.trips || {
-          items: []
-        },
-      categories:
-        analytics.categories || {
-          items: []
-        },
-      monthly:
-        analytics.monthly || {
-          items: []
-        },
-      forecast:
-        analytics.forecast || {},
-      insights: asArray(
-        analytics.insights
-      ),
-      recommendations: asArray(
-        ai.recommendations
-      ),
-      activeAlerts: asArray(
-        alerts.activeAlerts ||
-        alerts.alerts
-      ),
-      unreadNotifications: asArray(
-        notifications.unread
-      )
+      usagePercent: nonNegative(analytics.usagePercent),
+      healthScore: number(analytics.health?.score, 0),
+      healthStatus: analytics.health?.status || "unknown",
+      savings: analytics.savings || {},
+      trips: analytics.trips || { items: [] },
+      categories: analytics.categories || { items: [] },
+      monthly: analytics.monthly || { items: [] },
+      forecast: analytics.forecast || {},
+      recommendations: asArray(ai.recommendations),
+      activeAlerts: asArray(alerts.activeAlerts || alerts.alerts),
+      unreadNotifications: asArray(notifications.unread)
     };
 
     state.lastSnapshot = snapshot;
     return snapshot;
   };
 
-  const currency = (
-    value,
-    snapshot = state.lastSnapshot
-  ) => {
+  const currency = (value, snapshot = state.lastSnapshot) => {
     const ui = getUI();
 
     if (ui?.currency) {
-      return ui.currency(
-        number(value),
-        snapshot?.currency
-      );
+      return ui.currency(number(value), snapshot?.currency);
     }
 
     try {
       return new Intl.NumberFormat("ar-AE", {
         style: "currency",
-        currency:
-          snapshot?.currency || "AED",
+        currency: snapshot?.currency || "AED",
         maximumFractionDigits: 0
       }).format(number(value));
-    } catch (error) {
-      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${
-        snapshot?.currency || "AED"
-      }`;
+    } catch (_) {
+      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${snapshot?.currency || "AED"}`;
     }
   };
 
-  const badge = (label, tone = "info") => {
-    const ui = getUI();
+  const badge = (label, tone = "info") => `
+    <span class="tic-badge tic-badge-${escapeHTML(tone)}">
+      ${escapeHTML(label)}
+    </span>
+  `;
 
-    if (ui?.badge) {
-      return ui.badge(label, tone);
-    }
-
-    return `
-      <span class="tic-badge tic-badge-${escapeHTML(tone)}">
-        ${escapeHTML(label)}
-      </span>
-    `;
-  };
-
-  const progress = (
-    value,
-    label,
-    hint
-  ) => {
-    const ui = getUI();
-    const normalized = Math.max(
-      0,
-      Math.min(100, number(value))
-    );
-
-    if (ui?.progress) {
-      return ui.progress(normalized, {
-        label,
-        hint
-      });
-    }
+  const progress = (value, label, hint) => {
+    const normalized = Math.max(0, Math.min(100, number(value)));
 
     return `
       <div class="tic-budget-progress">
@@ -875,97 +464,22 @@
       data-budget-action="${escapeHTML(action)}"
       ${attrs}
     >
-      ${icon ? `<span>${escapeHTML(icon)}</span>` : ""}
+      ${icon ? `<span aria-hidden="true">${escapeHTML(icon)}</span>` : ""}
       <span>${escapeHTML(label)}</span>
     </button>
   `;
 
-  const renderViewTabs = () => {
-    const tabs = [
-      ["overview", "نظرة عامة"],
-      ["expenses", "المصروفات"],
-      ["savings", "الادخار"],
-      ["payments", "الدفعات"],
-      ["alerts", "التنبيهات"],
-      ["reports", "التقارير"]
-    ];
-
-    return `
-      <nav
-        class="tic-budget-tabs"
-        aria-label="أقسام الميزانية"
-      >
-        ${tabs
-          .map(
-            ([id, label]) => `
-              <button
-                type="button"
-                class="tic-budget-tab ${
-                  state.activeView === id
-                    ? "is-active"
-                    : ""
-                }"
-                data-budget-view="${id}"
-              >
-                ${escapeHTML(label)}
-              </button>
-            `
-          )
-          .join("")}
-      </nav>
-    `;
-  };
-
   const renderHero = (snapshot) => {
-    const ui = getUI();
     const unread =
       snapshot.notifications?.summary?.unread ||
       snapshot.unreadNotifications.length;
 
-    const heroConfig = {
-      badge: "Budget Intelligence",
-      title: "مركز الميزانية الذكي",
-      subtitle:
-        "تحكم في ميزانية السفر والمصروفات والادخار والدفعات والتوقعات من منصة واحدة.",
-      actions: [
-        {
-          label: "إضافة مصروف",
-          action: "budget-add-expense",
-          primary: true,
-          icon: "+"
-        },
-        {
-          label: "اسأل الذكاء المالي",
-          action: "budget-ask-ai",
-          icon: "✦"
-        }
-      ]
-    };
-
-    if (ui?.hero) {
-      return `
-        ${ui.hero(heroConfig)}
-        ${
-          unread > 0
-            ? `
-              <div class="tic-budget-hero-notice">
-                لديك ${escapeHTML(unread)} إشعار مالي غير مقروء.
-              </div>
-            `
-            : ""
-        }
-      `;
-    }
-
     return `
       <section class="tic-budget-hero">
         <div>
-          <span class="tic-chip">Budget Intelligence</span>
+          <span class="tic-hero-badge">Budget Intelligence</span>
           <h1>مركز الميزانية الذكي</h1>
-          <p>
-            تحكم في ميزانية السفر والمصروفات والادخار
-            والدفعات والتوقعات من منصة واحدة.
-          </p>
+          <p>ميزانية السفر والمصروفات والادخار والدفعات في مكان واحد.</p>
         </div>
 
         <div class="tic-budget-hero-actions">
@@ -981,18 +495,117 @@
             icon: "✦"
           })}
         </div>
+
+        ${
+          unread > 0
+            ? `<div class="tic-budget-hero-notice">لديك ${escapeHTML(unread)} إشعار مالي غير مقروء.</div>`
+            : ""
+        }
       </section>
     `;
   };
 
-  const renderFinancialOverview = (snapshot) => {
-    const remaining = snapshot.remaining;
-    const over = remaining < 0;
-    const usage = snapshot.usagePercent;
+  const renderTabs = () => {
+    const tabs = [
+      [VIEWS.OVERVIEW, "نظرة عامة"],
+      [VIEWS.EXPENSES, "المصروفات"],
+      [VIEWS.SAVINGS, "الادخار"],
+      [VIEWS.PAYMENTS, "الدفعات"],
+      [VIEWS.ALERTS, "التنبيهات"],
+      [VIEWS.REPORTS, "التقارير"]
+    ];
+
+    return `
+      <nav class="tic-budget-tabs" aria-label="أقسام الميزانية">
+        ${tabs
+          .map(
+            ([id, label]) => `
+              <button
+                type="button"
+                class="tic-budget-tab ${state.activeView === id ? "is-active" : ""}"
+                data-budget-view="${id}"
+                aria-pressed="${state.activeView === id ? "true" : "false"}"
+              >
+                ${escapeHTML(label)}
+              </button>
+            `
+          )
+          .join("")}
+      </nav>
+    `;
+  };
+
+  const renderRecommendation = (snapshot) => {
+    const item = snapshot.recommendations[0];
+
+    if (!item) {
+      return `
+        <article class="tic-card tic-card-body tic-budget-ai-card">
+          <div class="tic-feature-row">
+            <div>
+              <span class="tic-chip">AI</span>
+              <h3 class="tic-card-title">وضعك المالي منظم</h3>
+              <p class="tic-card-text">لا توجد توصيات عاجلة حالياً.</p>
+            </div>
+            ${badge("ممتاز", "success")}
+          </div>
+        </article>
+      `;
+    }
+
+    const priorityLabel =
+      item.priority === "critical"
+        ? "عاجل"
+        : item.priority === "high"
+          ? "مهم"
+          : "اقتراح";
+
+    const priorityTone =
+      item.priority === "critical"
+        ? "danger"
+        : item.priority === "high"
+          ? "warning"
+          : "info";
+
+    return `
+      <article class="tic-card tic-card-body tic-budget-ai-card">
+        <div class="tic-feature-row">
+          <div>
+            <span class="tic-chip">AI RECOMMENDATION</span>
+            <h3 class="tic-card-title">
+              ${escapeHTML(item.titleAr || item.title || "توصية مالية")}
+            </h3>
+          </div>
+          ${badge(priorityLabel, priorityTone)}
+        </div>
+
+        <p class="tic-card-text">
+          ${escapeHTML(item.messageAr || item.message || "")}
+        </p>
+
+        <div class="tic-budget-inline-actions">
+          ${button({
+            label: item.actionLabelAr || item.actionLabel || "تنفيذ التوصية",
+            action: "run-recommendation",
+            tone: "primary",
+            attrs: `data-recommendation-id="${escapeHTML(item.id)}"`
+          })}
+          ${button({
+            label: "إخفاء",
+            action: "dismiss-recommendation",
+            attrs: `data-recommendation-id="${escapeHTML(item.id)}"`
+          })}
+        </div>
+      </article>
+    `;
+  };
+
+  const renderOverviewCard = (snapshot) => {
+    const over = snapshot.remaining < 0;
     const statusTone =
       over
         ? "danger"
-        : usage >= 85
+        : snapshot.usagePercent >= 85
           ? "warning"
           : "success";
 
@@ -1001,20 +614,12 @@
         <div class="tic-budget-overview-head">
           <div>
             <small>الميزانية السنوية</small>
-            <strong>
-              ${escapeHTML(
-                currency(
-                  snapshot.annualBudget,
-                  snapshot
-                )
-              )}
-            </strong>
+            <strong>${escapeHTML(currency(snapshot.annualBudget, snapshot))}</strong>
           </div>
-
           ${badge(
             over
               ? "متجاوزة"
-              : usage >= 85
+              : snapshot.usagePercent >= 85
                 ? "قريبة من الحد"
                 : "ضمن الخطة",
             statusTone
@@ -1024,73 +629,33 @@
         <p class="tic-budget-overview-copy">
           ${
             over
-              ? `تجاوزت الميزانية بمقدار ${escapeHTML(
-                  currency(
-                    Math.abs(remaining),
-                    snapshot
-                  )
-                )}.`
-              : `استخدمت ${escapeHTML(
-                  Math.round(usage)
-                )}% والمتبقي ${escapeHTML(
-                  currency(
-                    remaining,
-                    snapshot
-                  )
-                )}.`
+              ? `تجاوزت الميزانية بمقدار ${escapeHTML(currency(Math.abs(snapshot.remaining), snapshot))}.`
+              : `استخدمت ${Math.round(snapshot.usagePercent)}% والمتبقي ${escapeHTML(currency(snapshot.remaining, snapshot))}.`
           }
         </p>
 
         ${progress(
-          Math.min(100, usage),
+          Math.min(100, snapshot.usagePercent),
           "استخدام الميزانية",
-          `${Math.round(usage)}%`
+          `${Math.round(snapshot.usagePercent)}%`
         )}
 
         <div class="tic-budget-breakdown">
           <div class="tic-budget-breakdown-item">
             <small>إجمالي المصروف</small>
-            <strong>
-              ${escapeHTML(
-                currency(
-                  snapshot.totalSpent,
-                  snapshot
-                )
-              )}
-            </strong>
+            <strong>${escapeHTML(currency(snapshot.totalSpent, snapshot))}</strong>
           </div>
-
           <div class="tic-budget-breakdown-item">
             <small>رصيد الادخار</small>
-            <strong>
-              ${escapeHTML(
-                currency(
-                  snapshot.savings?.balance,
-                  snapshot
-                )
-              )}
-            </strong>
+            <strong>${escapeHTML(currency(snapshot.savings?.balance, snapshot))}</strong>
           </div>
-
           <div class="tic-budget-breakdown-item">
             <small>الصحة المالية</small>
-            <strong>
-              ${escapeHTML(
-                Math.round(snapshot.healthScore)
-              )}/100
-            </strong>
+            <strong>${Math.round(snapshot.healthScore)}/100</strong>
           </div>
-
           <div class="tic-budget-breakdown-item">
             <small>الإنفاق المتوقع</small>
-            <strong>
-              ${escapeHTML(
-                currency(
-                  snapshot.forecast?.projectedSpend,
-                  snapshot
-                )
-              )}
-            </strong>
+            <strong>${escapeHTML(currency(snapshot.forecast?.projectedSpend, snapshot))}</strong>
           </div>
         </div>
       </article>
@@ -1098,59 +663,32 @@
   };
 
   const renderKpis = (snapshot) => {
-    const ui = getUI();
-
     const items = [
       {
         icon: "◈",
-        value: currency(
-          snapshot.trips?.totalPlanned,
-          snapshot
-        ),
+        value: currency(snapshot.trips?.totalPlanned, snapshot),
         label: "ميزانيات الرحلات",
-        subtitle:
-          `${snapshot.trips?.totalTrips || 0} رحلة`
+        subtitle: `${snapshot.trips?.totalTrips || 0} رحلة`
       },
       {
         icon: "◎",
-        value: currency(
-          snapshot.payments?.summary
-            ?.remainingAmount,
-          snapshot
-        ),
+        value: currency(snapshot.payments?.summary?.remainingAmount, snapshot),
         label: "دفعات متبقية",
-        subtitle:
-          `${snapshot.payments?.summary?.overdueCount || 0} متأخرة`
+        subtitle: `${snapshot.payments?.summary?.overdueCount || 0} متأخرة`
       },
       {
         icon: "!",
-        value:
-          snapshot.alerts?.summary?.active ||
-          snapshot.activeAlerts.length,
+        value: snapshot.alerts?.summary?.active || snapshot.activeAlerts.length,
         label: "تنبيهات نشطة",
-        subtitle:
-          `${snapshot.alerts?.summary?.critical || 0} حرجة`
+        subtitle: `${snapshot.alerts?.summary?.critical || 0} حرجة`
       },
       {
         icon: "✦",
-        value:
-          snapshot.recommendations.length,
+        value: snapshot.recommendations.length,
         label: "توصيات ذكية",
-        subtitle:
-          snapshot.forecast?.likelyToExceed
-            ? "تحتاج إجراء"
-            : "الوضع مستقر"
+        subtitle: snapshot.forecast?.likelyToExceed ? "تحتاج إجراء" : "الوضع مستقر"
       }
     ];
-
-    if (ui?.grid && ui?.stat) {
-      return ui.grid(
-        items
-          .map((item) => ui.stat(item))
-          .join(""),
-        { columns: 4 }
-      );
-    }
 
     return `
       <div class="tic-budget-kpis">
@@ -1170,95 +708,14 @@
     `;
   };
 
-  const renderTopRecommendation = (snapshot) => {
-    const item =
-      snapshot.recommendations[0];
-
-    if (!item) {
-      return `
-        <article class="tic-card tic-card-body">
-          <div class="tic-feature-row">
-            <div>
-              <span class="tic-chip">AI</span>
-              <h3 class="tic-card-title">
-                وضعك المالي منظم
-              </h3>
-              <p class="tic-card-text">
-                لا توجد توصيات عاجلة حالياً.
-              </p>
-            </div>
-            ${badge("ممتاز", "success")}
-          </div>
-        </article>
-      `;
-    }
-
-    return `
-      <article class="tic-card tic-card-body tic-budget-ai-card">
-        <div class="tic-feature-row">
-          <div>
-            <span class="tic-chip">AI RECOMMENDATION</span>
-            <h3 class="tic-card-title">
-              ${escapeHTML(item.titleAr)}
-            </h3>
-          </div>
-
-          ${badge(
-            item.priority === "critical"
-              ? "عاجل"
-              : item.priority === "high"
-                ? "مهم"
-                : "اقتراح",
-            item.priority === "critical"
-              ? "danger"
-              : item.priority === "high"
-                ? "warning"
-                : "info"
-          )}
-        </div>
-
-        <p class="tic-card-text">
-          ${escapeHTML(item.messageAr)}
-        </p>
-
-        <div class="tic-budget-inline-actions">
-          ${button({
-            label:
-              item.actionLabelAr ||
-              "تنفيذ التوصية",
-            action: "run-recommendation",
-            tone: "primary",
-            attrs: `data-recommendation-id="${escapeHTML(
-              item.id
-            )}"`
-          })}
-
-          ${button({
-            label: "إخفاء",
-            action: "dismiss-recommendation",
-            attrs: `data-recommendation-id="${escapeHTML(
-              item.id
-            )}"`
-          })}
-        </div>
-      </article>
-    `;
-  };
-
-  const renderUpcomingPayments = (snapshot) => {
-    const items = asArray(
-      snapshot.payments?.upcoming
-    ).slice(0, 4);
+  const renderUpcoming = (snapshot) => {
+    const items = asArray(snapshot.payments?.upcoming).slice(0, 3);
 
     if (!items.length) {
       return `
         <article class="tic-card tic-card-body">
-          <h3 class="tic-card-title">
-            لا توجد دفعات قريبة
-          </h3>
-          <p class="tic-card-text">
-            جميع دفعات السفر الحالية منظمة.
-          </p>
+          <h3 class="tic-card-title">لا توجد دفعات قريبة</h3>
+          <p class="tic-card-text">جميع دفعات السفر الحالية منظمة.</p>
         </article>
       `;
     }
@@ -1271,16 +728,8 @@
               <article class="tic-card tic-card-body">
                 <div class="tic-feature-row">
                   <div>
-                    <span class="tic-chip">
-                      ${escapeHTML(
-                        item.typeLabelAr ||
-                        item.type ||
-                        "دفعة"
-                      )}
-                    </span>
-                    <h3 class="tic-card-title">
-                      ${escapeHTML(item.title)}
-                    </h3>
+                    <span class="tic-chip">${escapeHTML(item.typeLabelAr || item.type || "دفعة")}</span>
+                    <h3 class="tic-card-title">${escapeHTML(item.title || "دفعة")}</h3>
                     <p class="tic-card-text">
                       ${escapeHTML(
                         item.daysUntilDue === 0
@@ -1289,15 +738,7 @@
                       )}
                     </p>
                   </div>
-
-                  <strong>
-                    ${escapeHTML(
-                      currency(
-                        item.remainingAmount,
-                        snapshot
-                      )
-                    )}
-                  </strong>
+                  <strong>${escapeHTML(currency(item.remainingAmount, snapshot))}</strong>
                 </div>
 
                 <div class="tic-budget-inline-actions">
@@ -1305,16 +746,11 @@
                     label: "تسجيل دفع",
                     action: "pay-payment",
                     tone: "primary",
-                    attrs: `data-payment-id="${escapeHTML(
-                      item.id
-                    )}"`
+                    attrs: `data-payment-id="${escapeHTML(item.id)}"`
                   })}
                   ${button({
-                    label: "التفاصيل",
-                    action: "view-payment",
-                    attrs: `data-payment-id="${escapeHTML(
-                      item.id
-                    )}"`
+                    label: "عرض الكل",
+                    action: "switch-payments"
                   })}
                 </div>
               </article>
@@ -1326,48 +762,22 @@
   };
 
   const renderTripBudgets = (snapshot) => {
-    const items = asArray(
-      snapshot.trips?.items
-    );
+    const trips = asArray(snapshot.trips?.items).slice(0, 4);
 
-    if (!items.length) {
-      const ui = getUI();
-
-      if (ui?.empty) {
-        return ui.empty({
-          icon: "◈",
-          title: "لا توجد ميزانيات رحلات",
-          message:
-            "أنشئ رحلة وحدد ميزانيتها لتظهر هنا.",
-          action: {
-            label: "إنشاء رحلة",
-            route: "trips",
-            primary: true
-          }
-        });
-      }
-
+    if (!trips.length) {
       return `
         <article class="tic-card tic-card-body">
-          <h3 class="tic-card-title">
-            لا توجد ميزانيات رحلات
-          </h3>
-          <p class="tic-card-text">
-            أنشئ رحلة وحدد ميزانيتها لتظهر هنا.
-          </p>
+          <h3 class="tic-card-title">لا توجد ميزانيات رحلات</h3>
+          <p class="tic-card-text">أنشئ رحلة وحدد ميزانيتها لتظهر هنا.</p>
         </article>
       `;
     }
 
     return `
       <div class="tic-settings-list">
-        ${items
-          .slice(0, 6)
+        ${trips
           .map((trip) => {
-            const usage = nonNegative(
-              trip.usagePercent
-            );
-
+            const usage = nonNegative(trip.usagePercent);
             const tone =
               trip.planned <= 0
                 ? "info"
@@ -1381,20 +791,9 @@
               <article class="tic-card tic-card-body">
                 <div class="tic-feature-row">
                   <div>
-                    <span class="tic-chip">
-                      ${escapeHTML(
-                        trip.destination ||
-                        "رحلة"
-                      )}
-                    </span>
-                    <h3 class="tic-card-title">
-                      ${escapeHTML(
-                        trip.title ||
-                        "رحلة بدون اسم"
-                      )}
-                    </h3>
+                    <span class="tic-chip">${escapeHTML(trip.destination || "رحلة")}</span>
+                    <h3 class="tic-card-title">${escapeHTML(trip.title || "رحلة بدون اسم")}</h3>
                   </div>
-
                   ${badge(
                     trip.planned <= 0
                       ? "بدون ميزانية"
@@ -1410,43 +809,19 @@
                 <div class="tic-trip-meta">
                   <div>
                     <small>المخطط</small>
-                    <strong>
-                      ${escapeHTML(
-                        currency(
-                          trip.planned,
-                          snapshot
-                        )
-                      )}
-                    </strong>
+                    <strong>${escapeHTML(currency(trip.planned, snapshot))}</strong>
                   </div>
                   <div>
                     <small>المصروف</small>
-                    <strong>
-                      ${escapeHTML(
-                        currency(
-                          trip.spent,
-                          snapshot
-                        )
-                      )}
-                    </strong>
+                    <strong>${escapeHTML(currency(trip.spent, snapshot))}</strong>
                   </div>
                   <div>
                     <small>المتبقي</small>
-                    <strong>
-                      ${escapeHTML(
-                        currency(
-                          Math.max(
-                            0,
-                            number(trip.remaining)
-                          ),
-                          snapshot
-                        )
-                      )}
-                    </strong>
+                    <strong>${escapeHTML(currency(Math.max(0, number(trip.remaining)), snapshot))}</strong>
                   </div>
                 </div>
 
-                <div style="margin-top:15px">
+                <div style="margin-top:14px">
                   ${progress(
                     Math.min(100, usage),
                     "استخدام ميزانية الرحلة",
@@ -1458,17 +833,13 @@
                   ${button({
                     label: "عرض الرحلة",
                     action: "open-trip",
-                    attrs: `data-trip-id="${escapeHTML(
-                      trip.id
-                    )}"`
+                    attrs: `data-trip-id="${escapeHTML(trip.id)}"`
                   })}
                   ${button({
                     label: "إضافة مصروف",
                     action: "add-expense",
                     tone: "primary",
-                    attrs: `data-trip-id="${escapeHTML(
-                      trip.id
-                    )}"`
+                    attrs: `data-trip-id="${escapeHTML(trip.id)}"`
                   })}
                 </div>
               </article>
@@ -1479,94 +850,66 @@
     `;
   };
 
-  const renderOverviewView = (snapshot) => `
-    <section class="tic-budget-view" data-budget-panel="overview">
-      ${renderFinancialOverview(snapshot)}
+  const renderOverview = (snapshot) => `
+    <section class="tic-budget-view" data-budget-panel="${VIEWS.OVERVIEW}">
+      <section>
+        <div class="tic-budget-section-heading">
+          <div>
+            <small>SMART ACTION</small>
+            <h2>أفضل إجراء الآن</h2>
+            <p>أهم توصية مالية حسب وضعك الحالي.</p>
+          </div>
+          ${button({ label: "اسأل الذكاء", action: "ask-ai" })}
+        </div>
+        ${renderRecommendation(snapshot)}
+      </section>
 
-      <div class="tic-budget-section-gap">
-        ${renderKpis(snapshot)}
-      </div>
+      ${renderOverviewCard(snapshot)}
+      ${renderKpis(snapshot)}
 
       <div class="tic-budget-split">
-        <section>
-          <div class="tic-budget-section-heading">
-            <div>
-              <small>SMART ACTION</small>
-              <h2>أفضل إجراء الآن</h2>
-            </div>
-            ${button({
-              label: "كل التوصيات",
-              action: "show-ai"
-            })}
-          </div>
-          ${renderTopRecommendation(snapshot)}
-        </section>
-
         <section>
           <div class="tic-budget-section-heading">
             <div>
               <small>UPCOMING</small>
               <h2>الدفعات القادمة</h2>
             </div>
-            ${button({
-              label: "عرض الكل",
-              action: "switch-payments"
-            })}
+            ${button({ label: "عرض الكل", action: "switch-payments" })}
           </div>
-          ${renderUpcomingPayments(snapshot)}
+          ${renderUpcoming(snapshot)}
+        </section>
+
+        <section>
+          <div class="tic-budget-section-heading">
+            <div>
+              <small>TRIP BUDGETS</small>
+              <h2>ميزانيات الرحلات</h2>
+            </div>
+            ${button({ label: "عرض الرحلات", action: "open-trips" })}
+          </div>
+          ${renderTripBudgets(snapshot)}
         </section>
       </div>
-
-      <section class="tic-budget-section-gap">
-        <div class="tic-budget-section-heading">
-          <div>
-            <small>TRIP BUDGETS</small>
-            <h2>ميزانيات الرحلات</h2>
-          </div>
-          ${button({
-            label: "عرض الرحلات",
-            action: "open-trips"
-          })}
-        </div>
-        ${renderTripBudgets(snapshot)}
-      </section>
     </section>
   `;
 
-  const renderExpensesView = (snapshot) => {
-    const expenses = asArray(
-      snapshot.expenses
-    ).slice().sort((a, b) =>
-      String(
-        firstDefined(
-          b.date,
-          b.paidAt,
-          b.createdAt,
-          ""
+  const renderExpenses = (snapshot) => {
+    const expenses = asArray(snapshot.expenses)
+      .slice()
+      .sort((a, b) =>
+        String(firstDefined(b.date, b.paidAt, b.createdAt, "")).localeCompare(
+          String(firstDefined(a.date, a.paidAt, a.createdAt, ""))
         )
-      ).localeCompare(
-        String(
-          firstDefined(
-            a.date,
-            a.paidAt,
-            a.createdAt,
-            ""
-          )
-        )
-      )
-    );
+      );
 
     return `
-      <section class="tic-budget-view" data-budget-panel="expenses">
+      <section class="tic-budget-view" data-budget-panel="${VIEWS.EXPENSES}">
         <div class="tic-budget-section-heading">
           <div>
             <small>EXPENSE CENTER</small>
             <h2>المصروفات</h2>
-            <p>
-              سجل مصروفات السفر واربطها بالرحلات والفئات.
-            </p>
+            <p>سجل مصروفات السفر واربطها بالرحلات.</p>
           </div>
-
           ${button({
             label: "إضافة مصروف",
             action: "add-expense",
@@ -1582,74 +925,29 @@
                 ${expenses
                   .slice(0, 40)
                   .map((item) => {
-                    const id = firstDefined(
-                      item.id,
-                      item._id,
-                      ""
-                    );
-
+                    const id = firstDefined(item.id, item._id, "");
                     return `
                       <article class="tic-card tic-card-body">
                         <div class="tic-feature-row">
                           <div>
-                            <span class="tic-chip">
-                              ${escapeHTML(
-                                item.category ||
-                                item.type ||
-                                "أخرى"
-                              )}
-                            </span>
-                            <h3 class="tic-card-title">
-                              ${escapeHTML(
-                                item.title ||
-                                item.name ||
-                                "مصروف"
-                              )}
-                            </h3>
-                            <p class="tic-card-text">
-                              ${escapeHTML(
-                                String(
-                                  firstDefined(
-                                    item.date,
-                                    item.paidAt,
-                                    item.createdAt,
-                                    ""
-                                  )
-                                ).slice(0, 10)
-                              )}
-                            </p>
+                            <span class="tic-chip">${escapeHTML(item.category || item.type || "أخرى")}</span>
+                            <h3 class="tic-card-title">${escapeHTML(item.title || item.name || "مصروف")}</h3>
+                            <p class="tic-card-text">${escapeHTML(String(firstDefined(item.date, item.paidAt, item.createdAt, "")).slice(0, 10))}</p>
                           </div>
-
-                          <strong>
-                            ${escapeHTML(
-                              currency(
-                                firstDefined(
-                                  item.amount,
-                                  item.total,
-                                  item.value,
-                                  0
-                                ),
-                                snapshot
-                              )
-                            )}
-                          </strong>
+                          <strong>${escapeHTML(currency(firstDefined(item.amount, item.total, item.value, 0), snapshot))}</strong>
                         </div>
 
                         <div class="tic-budget-inline-actions">
                           ${button({
                             label: "تعديل",
                             action: "edit-expense",
-                            attrs: `data-expense-id="${escapeHTML(
-                              id
-                            )}"`
+                            attrs: `data-expense-id="${escapeHTML(id)}"`
                           })}
                           ${button({
                             label: "حذف",
                             action: "delete-expense",
                             tone: "danger",
-                            attrs: `data-expense-id="${escapeHTML(
-                              id
-                            )}"`
+                            attrs: `data-expense-id="${escapeHTML(id)}"`
                           })}
                         </div>
                       </article>
@@ -1660,12 +958,8 @@
             `
             : `
               <article class="tic-card tic-card-body">
-                <h3 class="tic-card-title">
-                  لا توجد مصروفات مسجلة
-                </h3>
-                <p class="tic-card-text">
-                  أضف أول مصروف حتى تبدأ التحليلات الذكية.
-                </p>
+                <h3 class="tic-card-title">لا توجد مصروفات مسجلة</h3>
+                <p class="tic-card-text">أضف أول مصروف حتى تبدأ التحليلات الذكية.</p>
               </article>
             `
         }
@@ -1673,124 +967,72 @@
     `;
   };
 
-  const renderSavingsView = (snapshot) => {
+  const renderSavings = (snapshot) => {
     const saving = snapshot.savings || {};
-    const monthly = nonNegative(
-      saving.monthlySaving
-    );
-    const balance = nonNegative(
-      saving.balance
-    );
-    const coverage = nonNegative(
-      saving.coveragePercent
-    );
+    const monthly = nonNegative(saving.monthlySaving);
+    const balance = nonNegative(saving.balance);
+    const coverage = nonNegative(saving.coveragePercent);
 
     return `
-      <section class="tic-budget-view" data-budget-panel="savings">
+      <section class="tic-budget-view" data-budget-panel="${VIEWS.SAVINGS}">
         <div class="tic-budget-section-heading">
           <div>
             <small>SAVINGS CENTER</small>
             <h2>خطة الادخار</h2>
-            <p>
-              تابع صندوق السفر وحدد المبلغ الشهري المناسب.
-            </p>
+            <p>تابع صندوق السفر وحدد المبلغ الشهري المناسب.</p>
           </div>
 
           <div class="tic-budget-inline-actions">
-            ${button({
-              label: "إيداع",
-              action: "add-saving",
-              tone: "primary",
-              icon: "+"
-            })}
-            ${button({
-              label: "تعديل الخطة",
-              action: "edit-saving-plan"
-            })}
+            ${button({ label: "إيداع", action: "add-saving", tone: "primary", icon: "+" })}
+            ${button({ label: "تعديل الخطة", action: "edit-saving-plan" })}
           </div>
         </div>
 
         <div class="tic-budget-savings-grid">
           <article class="tic-card tic-card-body">
             <small>رصيد صندوق السفر</small>
-            <strong class="tic-stat-value">
-              ${escapeHTML(
-                currency(balance, snapshot)
-              )}
-            </strong>
+            <strong class="tic-stat-value">${escapeHTML(currency(balance, snapshot))}</strong>
             <p class="tic-card-text">
               المتبقي لتمويل الميزانية:
-              ${escapeHTML(
-                currency(
-                  saving.remainingToFund,
-                  snapshot
-                )
-              )}
+              ${escapeHTML(currency(saving.remainingToFund, snapshot))}
             </p>
           </article>
 
           <article class="tic-card tic-card-body">
             <small>الادخار الشهري</small>
-            <strong class="tic-stat-value">
-              ${escapeHTML(
-                currency(monthly, snapshot)
-              )}
-            </strong>
-            <p class="tic-card-text">
-              سنوياً:
-              ${escapeHTML(
-                currency(
-                  monthly * 12,
-                  snapshot
-                )
-              )}
-            </p>
+            <strong class="tic-stat-value">${escapeHTML(currency(monthly, snapshot))}</strong>
+            <p class="tic-card-text">سنوياً: ${escapeHTML(currency(monthly * 12, snapshot))}</p>
           </article>
 
           <article class="tic-card tic-card-body">
             <small>تغطية الميزانية</small>
-            <strong class="tic-stat-value">
-              ${escapeHTML(
-                Math.round(coverage)
-              )}%
-            </strong>
-            ${progress(
-              coverage,
-              "تغطية صندوق السفر",
-              `${Math.round(coverage)}%`
-            )}
+            <strong class="tic-stat-value">${Math.round(coverage)}%</strong>
+            ${progress(coverage, "تغطية صندوق السفر", `${Math.round(coverage)}%`)}
           </article>
         </div>
 
-        <div class="tic-budget-section-gap">
-          ${button({
-            label: "إنشاء خطة شهرية ذكية",
-            action: "create-monthly-plan",
-            tone: "primary",
-            block: true,
-            icon: "✦"
-          })}
-        </div>
+        ${button({
+          label: "إنشاء خطة شهرية ذكية",
+          action: "create-monthly-plan",
+          tone: "primary",
+          block: true,
+          icon: "✦"
+        })}
       </section>
     `;
   };
 
-  const renderPaymentsView = (snapshot) => {
-    const payments = asArray(
-      snapshot.payments?.payments
-    );
+  const renderPayments = (snapshot) => {
+    const payments = asArray(snapshot.payments?.payments);
 
     return `
-      <section class="tic-budget-view" data-budget-panel="payments">
+      <section class="tic-budget-view" data-budget-panel="${VIEWS.PAYMENTS}">
         <div class="tic-budget-section-heading">
           <div>
             <small>PAYMENT TRACKER</small>
             <h2>الدفعات والحجوزات</h2>
-            <p>
-              تابع الدفعات المستحقة والأقساط والمدفوعات المكتملة.
-            </p>
+            <p>تابع الدفعات المستحقة والمدفوعات المكتملة.</p>
           </div>
-
           ${button({
             label: "إضافة دفعة",
             action: "add-payment",
@@ -1799,62 +1041,23 @@
           })}
         </div>
 
-        <div class="tic-budget-kpis">
-          <article class="tic-budget-kpi">
-            <span>◎</span>
-            <strong>
-              ${escapeHTML(
-                currency(
-                  snapshot.payments?.summary
-                    ?.totalAmount,
-                  snapshot
-                )
-              )}
-            </strong>
-            <h3>إجمالي الدفعات</h3>
-          </article>
+        ${renderKpis({
+          ...snapshot,
+          trips: { totalPlanned: snapshot.payments?.summary?.totalAmount, totalTrips: 0 },
+          recommendations: [],
+          activeAlerts: [],
+          alerts: { summary: { active: snapshot.payments?.summary?.overdueCount || 0, critical: 0 } },
+          payments: {
+            ...snapshot.payments,
+            summary: {
+              ...snapshot.payments?.summary,
+              remainingAmount: snapshot.payments?.summary?.remainingAmount
+            }
+          },
+          forecast: { likelyToExceed: false }
+        })}
 
-          <article class="tic-budget-kpi">
-            <span>✓</span>
-            <strong>
-              ${escapeHTML(
-                currency(
-                  snapshot.payments?.summary
-                    ?.paidAmount,
-                  snapshot
-                )
-              )}
-            </strong>
-            <h3>تم دفعه</h3>
-          </article>
-
-          <article class="tic-budget-kpi">
-            <span>◈</span>
-            <strong>
-              ${escapeHTML(
-                currency(
-                  snapshot.payments?.summary
-                    ?.remainingAmount,
-                  snapshot
-                )
-              )}
-            </strong>
-            <h3>المتبقي</h3>
-          </article>
-
-          <article class="tic-budget-kpi">
-            <span>!</span>
-            <strong>
-              ${escapeHTML(
-                snapshot.payments?.summary
-                  ?.overdueCount || 0
-              )}
-            </strong>
-            <h3>متأخرة</h3>
-          </article>
-        </div>
-
-        <div class="tic-settings-list tic-budget-section-gap">
+        <div class="tic-settings-list">
           ${
             payments.length
               ? payments
@@ -1864,39 +1067,15 @@
                       <article class="tic-card tic-card-body">
                         <div class="tic-feature-row">
                           <div>
-                            <span class="tic-chip">
-                              ${escapeHTML(
-                                item.typeLabelAr ||
-                                item.type ||
-                                "دفعة"
-                              )}
-                            </span>
-                            <h3 class="tic-card-title">
-                              ${escapeHTML(item.title)}
-                            </h3>
+                            <span class="tic-chip">${escapeHTML(item.typeLabelAr || item.type || "دفعة")}</span>
+                            <h3 class="tic-card-title">${escapeHTML(item.title || "دفعة")}</h3>
                             <p class="tic-card-text">
-                              ${
-                                item.dueDate
-                                  ? `الاستحقاق: ${escapeHTML(
-                                      String(
-                                        item.dueDate
-                                      ).slice(0, 10)
-                                    )}`
-                                  : "بدون تاريخ استحقاق"
-                              }
+                              ${item.dueDate ? `الاستحقاق: ${escapeHTML(String(item.dueDate).slice(0, 10))}` : "بدون تاريخ استحقاق"}
                             </p>
                           </div>
-
-                          <div style="text-align:end">
-                            <strong>
-                              ${escapeHTML(
-                                currency(
-                                  item.remainingAmount,
-                                  snapshot
-                                )
-                              )}
-                            </strong>
-                            <div style="margin-top:8px">
+                          <div>
+                            <strong>${escapeHTML(currency(item.remainingAmount, snapshot))}</strong>
+                            <div style="margin-top:7px">
                               ${badge(
                                 item.status === "paid"
                                   ? "مدفوعة"
@@ -1917,45 +1096,31 @@
                           </div>
                         </div>
 
-                        ${progress(
-                          item.progressPercent,
-                          "نسبة الدفع",
-                          `${Math.round(
-                            nonNegative(
-                              item.progressPercent
-                            )
-                          )}%`
-                        )}
+                        <div style="margin-top:14px">
+                          ${progress(item.progressPercent, "نسبة الدفع", `${Math.round(nonNegative(item.progressPercent))}%`)}
+                        </div>
 
                         <div class="tic-budget-inline-actions">
                           ${
-                            item.status !== "paid" &&
-                            item.status !== "refunded" &&
-                            item.status !== "cancelled"
+                            !["paid", "refunded", "cancelled"].includes(item.status)
                               ? button({
                                   label: "تسجيل دفع",
                                   action: "pay-payment",
                                   tone: "primary",
-                                  attrs: `data-payment-id="${escapeHTML(
-                                    item.id
-                                  )}"`
+                                  attrs: `data-payment-id="${escapeHTML(item.id)}"`
                                 })
                               : ""
                           }
                           ${button({
                             label: "تعديل",
                             action: "edit-payment",
-                            attrs: `data-payment-id="${escapeHTML(
-                              item.id
-                            )}"`
+                            attrs: `data-payment-id="${escapeHTML(item.id)}"`
                           })}
                           ${button({
                             label: "حذف",
                             action: "delete-payment",
                             tone: "danger",
-                            attrs: `data-payment-id="${escapeHTML(
-                              item.id
-                            )}"`
+                            attrs: `data-payment-id="${escapeHTML(item.id)}"`
                           })}
                         </div>
                       </article>
@@ -1964,12 +1129,8 @@
                   .join("")
               : `
                 <article class="tic-card tic-card-body">
-                  <h3 class="tic-card-title">
-                    لا توجد دفعات
-                  </h3>
-                  <p class="tic-card-text">
-                    أضف حجوزات الطيران والفنادق والأقساط لتتبعها.
-                  </p>
+                  <h3 class="tic-card-title">لا توجد دفعات</h3>
+                  <p class="tic-card-text">أضف حجوزات الطيران والفنادق والأقساط لتتبعها.</p>
                 </article>
               `
           }
@@ -1978,307 +1139,173 @@
     `;
   };
 
-  const renderAlertsView = (snapshot) => {
-    const alerts = snapshot.activeAlerts;
+  const renderAlerts = (snapshot) => `
+    <section class="tic-budget-view" data-budget-panel="${VIEWS.ALERTS}">
+      <div class="tic-budget-section-heading">
+        <div>
+          <small>RISK CENTER</small>
+          <h2>التنبيهات المالية</h2>
+          <p>المخاطر والمصروفات غير الاعتيادية والدفعات المتأخرة.</p>
+        </div>
+        ${button({ label: "تحديث التحليل", action: "refresh-alerts" })}
+      </div>
+
+      <div class="tic-settings-list">
+        ${
+          snapshot.activeAlerts.length
+            ? snapshot.activeAlerts
+                .slice(0, 50)
+                .map(
+                  (item) => `
+                    <article class="tic-card tic-card-body">
+                      <div class="tic-feature-row">
+                        <div>
+                          <span class="tic-chip">${escapeHTML(item.type || "تنبيه")}</span>
+                          <h3 class="tic-card-title">${escapeHTML(item.titleAr || item.title || "تنبيه مالي")}</h3>
+                        </div>
+                        ${badge(
+                          item.severity === "critical"
+                            ? "حرج"
+                            : item.severity === "high"
+                              ? "مرتفع"
+                              : item.severity === "medium"
+                                ? "متوسط"
+                                : "معلومة",
+                          item.severity === "critical"
+                            ? "danger"
+                            : item.severity === "high"
+                              ? "warning"
+                              : "info"
+                        )}
+                      </div>
+
+                      <p class="tic-card-text">${escapeHTML(item.messageAr || item.message || "")}</p>
+
+                      <div class="tic-budget-inline-actions">
+                        ${button({
+                          label: item.actionLabelAr || "فتح",
+                          action: "run-alert-action",
+                          tone: "primary",
+                          attrs: `data-alert-id="${escapeHTML(item.id)}"`
+                        })}
+                        ${button({
+                          label: "تمت المراجعة",
+                          action: "acknowledge-alert",
+                          attrs: `data-alert-id="${escapeHTML(item.id)}"`
+                        })}
+                        ${button({
+                          label: "تأجيل",
+                          action: "snooze-alert",
+                          attrs: `data-alert-id="${escapeHTML(item.id)}"`
+                        })}
+                      </div>
+                    </article>
+                  `
+                )
+                .join("")
+            : `
+              <article class="tic-card tic-card-body">
+                <h3 class="tic-card-title">لا توجد تنبيهات نشطة</h3>
+                <p class="tic-card-text">الوضع المالي منظم حالياً.</p>
+              </article>
+            `
+        }
+      </div>
+    </section>
+  `;
+
+  const renderReports = (snapshot) => {
+    const categories = asArray(snapshot.categories?.items).slice(0, 6);
+    const months = asArray(snapshot.monthly?.items).slice(-6);
 
     return `
-      <section class="tic-budget-view" data-budget-panel="alerts">
-        <div class="tic-budget-section-heading">
-          <div>
-            <small>RISK CENTER</small>
-            <h2>التنبيهات المالية</h2>
-            <p>
-              المخاطر والمصروفات غير الاعتيادية والدفعات المتأخرة.
-            </p>
-          </div>
-
-          ${button({
-            label: "تحديث التحليل",
-            action: "refresh-alerts"
-          })}
-        </div>
-
-        <div class="tic-settings-list">
-          ${
-            alerts.length
-              ? alerts
-                  .slice(0, 50)
-                  .map(
-                    (item) => `
-                      <article class="tic-card tic-card-body">
-                        <div class="tic-feature-row">
-                          <div>
-                            <span class="tic-chip">
-                              ${escapeHTML(item.type)}
-                            </span>
-                            <h3 class="tic-card-title">
-                              ${escapeHTML(item.titleAr)}
-                            </h3>
-                          </div>
-
-                          ${badge(
-                            item.severity === "critical"
-                              ? "حرج"
-                              : item.severity === "high"
-                                ? "مرتفع"
-                                : item.severity === "medium"
-                                  ? "متوسط"
-                                  : "معلومة",
-                            item.severity === "critical"
-                              ? "danger"
-                              : item.severity === "high"
-                                ? "warning"
-                                : "info"
-                          )}
-                        </div>
-
-                        <p class="tic-card-text">
-                          ${escapeHTML(item.messageAr)}
-                        </p>
-
-                        <div class="tic-budget-inline-actions">
-                          ${button({
-                            label:
-                              item.actionLabelAr ||
-                              "فتح",
-                            action: "run-alert-action",
-                            tone: "primary",
-                            attrs: `data-alert-id="${escapeHTML(
-                              item.id
-                            )}"`
-                          })}
-                          ${button({
-                            label: "تمت المراجعة",
-                            action: "acknowledge-alert",
-                            attrs: `data-alert-id="${escapeHTML(
-                              item.id
-                            )}"`
-                          })}
-                          ${button({
-                            label: "تأجيل",
-                            action: "snooze-alert",
-                            attrs: `data-alert-id="${escapeHTML(
-                              item.id
-                            )}"`
-                          })}
-                        </div>
-                      </article>
-                    `
-                  )
-                  .join("")
-              : `
-                <article class="tic-card tic-card-body">
-                  <h3 class="tic-card-title">
-                    لا توجد تنبيهات نشطة
-                  </h3>
-                  <p class="tic-card-text">
-                    الوضع المالي منظم حالياً.
-                  </p>
-                </article>
-              `
-          }
-        </div>
-      </section>
-    `;
-  };
-
-  const renderReportsView = (snapshot) => {
-    const categories = asArray(
-      snapshot.categories?.items
-    ).slice(0, 6);
-
-    const months = asArray(
-      snapshot.monthly?.items
-    );
-
-    return `
-      <section class="tic-budget-view" data-budget-panel="reports">
+      <section class="tic-budget-view" data-budget-panel="${VIEWS.REPORTS}">
         <div class="tic-budget-section-heading">
           <div>
             <small>REPORTS & EXPORT</small>
             <h2>التقارير المالية</h2>
-            <p>
-              صدّر البيانات وراجع التوقعات والفئات والاتجاهات.
-            </p>
+            <p>صدّر البيانات وراجع التوقعات والفئات والاتجاهات.</p>
           </div>
 
           <div class="tic-budget-inline-actions">
-            ${button({
-              label: "تصدير CSV",
-              action: "export-csv"
-            })}
-            ${button({
-              label: "تصدير JSON",
-              action: "export-json"
-            })}
-            ${button({
-              label: "طباعة التقرير",
-              action: "print-report",
-              tone: "primary"
-            })}
+            ${button({ label: "CSV", action: "export-csv" })}
+            ${button({ label: "JSON", action: "export-json" })}
+            ${button({ label: "طباعة", action: "print-report", tone: "primary" })}
           </div>
         </div>
 
         <div class="tic-budget-split">
           <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">
-              التوقع السنوي
-            </h3>
-
+            <h3 class="tic-card-title">التوقع السنوي</h3>
             <div class="tic-trip-meta">
               <div>
                 <small>الإنفاق المتوقع</small>
-                <strong>
-                  ${escapeHTML(
-                    currency(
-                      snapshot.forecast?.projectedSpend,
-                      snapshot
-                    )
-                  )}
-                </strong>
+                <strong>${escapeHTML(currency(snapshot.forecast?.projectedSpend, snapshot))}</strong>
               </div>
-
               <div>
                 <small>التجاوز المتوقع</small>
-                <strong>
-                  ${escapeHTML(
-                    currency(
-                      snapshot.forecast?.expectedOverrun,
-                      snapshot
-                    )
-                  )}
-                </strong>
+                <strong>${escapeHTML(currency(snapshot.forecast?.expectedOverrun, snapshot))}</strong>
               </div>
-
               <div>
-                <small>الحد الشهري المقترح</small>
-                <strong>
-                  ${escapeHTML(
-                    currency(
-                      snapshot.forecast
-                        ?.recommendedMonthlyLimit,
-                      snapshot
-                    )
-                  )}
-                </strong>
+                <small>الحد الشهري</small>
+                <strong>${escapeHTML(currency(snapshot.forecast?.recommendedMonthlyLimit, snapshot))}</strong>
               </div>
             </div>
           </article>
 
           <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">
-              صحة النظام
-            </h3>
-
+            <h3 class="tic-card-title">صحة النظام</h3>
             <div class="tic-trip-meta">
               <div>
-                <small>جاهزية المنصة</small>
-                <strong>
-                  ${escapeHTML(
-                    snapshot.integrationHealth?.score ||
-                    0
-                  )}%
-                </strong>
+                <small>الجاهزية</small>
+                <strong>${escapeHTML(snapshot.integrationHealth?.score || 0)}%</strong>
               </div>
-
               <div>
-                <small>المحركات الجاهزة</small>
-                <strong>
-                  ${escapeHTML(
-                    snapshot.integrationHealth
-                      ?.readyModules || 0
-                  )}
-                </strong>
+                <small>المحركات</small>
+                <strong>${escapeHTML(snapshot.integrationHealth?.readyModules || 0)}</strong>
               </div>
-
               <div>
                 <small>آخر مزامنة</small>
-                <strong>
-                  ${escapeHTML(
-                    String(
-                      snapshot.integrationHealth
-                        ?.lastSyncAt || "-"
-                    ).slice(0, 16)
-                  )}
-                </strong>
+                <strong>${escapeHTML(String(snapshot.integrationHealth?.lastSyncAt || "-").slice(0, 16))}</strong>
               </div>
             </div>
           </article>
         </div>
 
-        <div class="tic-budget-split tic-budget-section-gap">
+        <div class="tic-budget-split">
           <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">
-              أعلى فئات الإنفاق
-            </h3>
-
+            <h3 class="tic-card-title">أعلى فئات الإنفاق</h3>
             ${
               categories.length
                 ? categories
                     .map(
                       (item) => `
                         <div class="tic-budget-report-row">
-                          <span>
-                            ${escapeHTML(
-                              item.labelAr ||
-                              item.key
-                            )}
-                          </span>
-                          <strong>
-                            ${escapeHTML(
-                              currency(
-                                item.amount,
-                                snapshot
-                              )
-                            )}
-                          </strong>
+                          <span>${escapeHTML(item.labelAr || item.key || "فئة")}</span>
+                          <strong>${escapeHTML(currency(item.amount, snapshot))}</strong>
                         </div>
                       `
                     )
                     .join("")
-                : `
-                  <p class="tic-card-text">
-                    لا توجد بيانات فئات كافية.
-                  </p>
-                `
+                : `<p class="tic-card-text">لا توجد بيانات فئات كافية.</p>`
             }
           </article>
 
           <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">
-              الإنفاق الشهري
-            </h3>
-
+            <h3 class="tic-card-title">الإنفاق الشهري</h3>
             ${
               months.length
                 ? months
-                    .slice(-6)
                     .map(
                       (item) => `
                         <div class="tic-budget-report-row">
-                          <span>
-                            ${escapeHTML(
-                              item.labelAr ||
-                              item.key
-                            )}
-                          </span>
-                          <strong>
-                            ${escapeHTML(
-                              currency(
-                                item.amount,
-                                snapshot
-                              )
-                            )}
-                          </strong>
+                          <span>${escapeHTML(item.labelAr || item.key || "شهر")}</span>
+                          <strong>${escapeHTML(currency(item.amount, snapshot))}</strong>
                         </div>
                       `
                     )
                     .join("")
-                : `
-                  <p class="tic-card-text">
-                    لا توجد بيانات شهرية كافية.
-                  </p>
-                `
+                : `<p class="tic-card-text">لا توجد بيانات شهرية كافية.</p>`
             }
           </article>
         </div>
@@ -2287,37 +1314,24 @@
   };
 
   const renderActiveView = (snapshot) => {
-    if (state.activeView === VIEWS.EXPENSES) {
-      return renderExpensesView(snapshot);
+    switch (state.activeView) {
+      case VIEWS.EXPENSES: return renderExpenses(snapshot);
+      case VIEWS.SAVINGS: return renderSavings(snapshot);
+      case VIEWS.PAYMENTS: return renderPayments(snapshot);
+      case VIEWS.ALERTS: return renderAlerts(snapshot);
+      case VIEWS.REPORTS: return renderReports(snapshot);
+      default: return renderOverview(snapshot);
     }
-
-    if (state.activeView === VIEWS.SAVINGS) {
-      return renderSavingsView(snapshot);
-    }
-
-    if (state.activeView === VIEWS.PAYMENTS) {
-      return renderPaymentsView(snapshot);
-    }
-
-    if (state.activeView === VIEWS.ALERTS) {
-      return renderAlertsView(snapshot);
-    }
-
-    if (state.activeView === VIEWS.REPORTS) {
-      return renderReportsView(snapshot);
-    }
-
-    return renderOverviewView(snapshot);
   };
 
   const renderPage = (snapshot) => `
     <div
       class="tic-module tic-budget-platform"
-      data-page="budget"
+      data-page="${PAGE_ID}"
       data-page-version="${PAGE_VERSION}"
     >
       ${renderHero(snapshot)}
-      ${renderViewTabs()}
+      ${renderTabs()}
       ${renderActiveView(snapshot)}
       <div data-budget-dialog-root></div>
     </div>
@@ -2328,8 +1342,7 @@
     subtitle = "",
     body = "",
     submitLabel = "حفظ",
-    submitAction = "",
-    danger = false
+    submitAction = ""
   }) => `
     <div class="tic-budget-dialog-backdrop" data-budget-dialog-backdrop>
       <section
@@ -2341,44 +1354,21 @@
         <header class="tic-budget-dialog-head">
           <div>
             <h2>${escapeHTML(title)}</h2>
-            ${
-              subtitle
-                ? `<p>${escapeHTML(subtitle)}</p>`
-                : ""
-            }
+            ${subtitle ? `<p>${escapeHTML(subtitle)}</p>` : ""}
           </div>
-
           <button
             type="button"
             class="tic-budget-dialog-close"
             data-budget-action="close-dialog"
             aria-label="إغلاق"
-          >
-            ×
-          </button>
+          >×</button>
         </header>
 
-        <div class="tic-budget-dialog-body">
-          ${body}
-        </div>
+        <div class="tic-budget-dialog-body">${body}</div>
 
         <footer class="tic-budget-dialog-footer">
-          ${button({
-            label: "إلغاء",
-            action: "close-dialog"
-          })}
-
-          ${
-            submitAction
-              ? button({
-                  label: submitLabel,
-                  action: submitAction,
-                  tone: danger
-                    ? "danger"
-                    : "primary"
-                })
-              : ""
-          }
+          ${button({ label: "إلغاء", action: "close-dialog" })}
+          ${submitAction ? button({ label: submitLabel, action: submitAction, tone: "primary" }) : ""}
         </footer>
       </section>
     </div>
@@ -2397,21 +1387,13 @@
       return `
         <label class="tic-budget-field">
           <span>${escapeHTML(label)}</span>
-          <select
-            name="${escapeHTML(name)}"
-            ${required ? "required" : ""}
-          >
+          <select name="${escapeHTML(name)}" ${required ? "required" : ""}>
             ${options
               .map(
                 (item) => `
                   <option
                     value="${escapeHTML(item.value)}"
-                    ${
-                      String(item.value) ===
-                      String(value)
-                        ? "selected"
-                        : ""
-                    }
+                    ${String(item.value) === String(value) ? "selected" : ""}
                   >
                     ${escapeHTML(item.label)}
                   </option>
@@ -2437,113 +1419,65 @@
     `;
   };
 
-  const openDialog = (
-    name,
-    payload = {}
-  ) => {
+  const openDialog = (name, payload = {}) => {
     if (!state.container) return false;
 
-    const root = state.container.querySelector(
-      "[data-budget-dialog-root]"
-    );
-
+    const root = state.container.querySelector("[data-budget-dialog-root]");
     if (!root) return false;
 
-    const snapshot =
-      state.lastSnapshot ||
-      buildSnapshot();
-
+    const snapshot = state.lastSnapshot || buildSnapshot();
     let html = "";
 
     if (name === "expense") {
       const expense = payload.expense || {};
       const tripOptions = [
-        {
-          value: "",
-          label: "بدون رحلة"
-        },
-        ...asArray(snapshot.trips?.items).map(
-          (trip) => ({
-            value: trip.id,
-            label: trip.title
-          })
-        )
+        { value: "", label: "بدون رحلة" },
+        ...asArray(snapshot.trips?.items).map((trip) => ({
+          value: trip.id,
+          label: trip.title
+        }))
       ];
 
       html = renderDialogShell({
-        title:
-          payload.mode === "edit"
-            ? "تعديل المصروف"
-            : "إضافة مصروف",
-        subtitle:
-          "سجّل تفاصيل المصروف ليظهر في التحليلات والميزانية.",
-        submitLabel:
-          payload.mode === "edit"
-            ? "حفظ التعديل"
-            : "إضافة المصروف",
+        title: payload.mode === "edit" ? "تعديل المصروف" : "إضافة مصروف",
+        subtitle: "سجّل المصروف ليظهر في التحليلات.",
+        submitLabel: payload.mode === "edit" ? "حفظ التعديل" : "إضافة المصروف",
         submitAction: "submit-expense",
         body: `
           <form
             class="tic-budget-form"
             data-budget-form="expense"
-            data-mode="${escapeHTML(
-              payload.mode || "create"
-            )}"
-            data-expense-id="${escapeHTML(
-              firstDefined(
-                expense.id,
-                expense._id,
-                ""
-              )
-            )}"
+            data-mode="${escapeHTML(payload.mode || "create")}"
+            data-expense-id="${escapeHTML(firstDefined(expense.id, expense._id, ""))}"
           >
             ${formField({
               label: "اسم المصروف",
               name: "title",
-              value:
-                expense.title ||
-                expense.name ||
-                "",
-              placeholder:
-                "مثال: تذاكر الطيران",
+              value: expense.title || expense.name || "",
+              placeholder: "مثال: تذاكر الطيران",
               required: true
             })}
-
             <div class="tic-budget-form-grid">
               ${formField({
                 label: "القيمة",
                 name: "amount",
                 type: "number",
-                value: firstDefined(
-                  expense.amount,
-                  expense.total,
-                  ""
-                ),
+                value: firstDefined(expense.amount, expense.total, ""),
                 required: true
               })}
-
               ${formField({
                 label: "التاريخ",
                 name: "date",
                 type: "date",
-                value: String(
-                  firstDefined(
-                    expense.date,
-                    expense.paidAt,
-                    new Date().toISOString()
-                  )
-                ).slice(0, 10),
+                value: String(firstDefined(expense.date, expense.paidAt, new Date().toISOString())).slice(0, 10),
                 required: true
               })}
             </div>
-
             <div class="tic-budget-form-grid">
               ${formField({
                 label: "الفئة",
                 name: "category",
-                value:
-                  expense.category ||
-                  "other",
+                value: expense.category || "other",
                 options: [
                   { value: "flights", label: "الطيران" },
                   { value: "hotels", label: "الفنادق" },
@@ -2557,25 +1491,17 @@
                   { value: "other", label: "أخرى" }
                 ]
               })}
-
               ${formField({
                 label: "الرحلة",
                 name: "tripId",
-                value: firstDefined(
-                  payload.tripId,
-                  expense.tripId,
-                  ""
-                ),
+                value: firstDefined(payload.tripId, expense.tripId, ""),
                 options: tripOptions
               })}
             </div>
-
             ${formField({
               label: "طريقة الدفع",
               name: "paymentMethod",
-              value:
-                expense.paymentMethod ||
-                "card",
+              value: expense.paymentMethod || "card",
               options: [
                 { value: "card", label: "بطاقة" },
                 { value: "cash", label: "نقداً" },
@@ -2592,38 +1518,23 @@
     if (name === "saving") {
       html = renderDialogShell({
         title: "إضافة مبلغ للادخار",
-        subtitle:
-          "أضف إيداعاً جديداً إلى صندوق السفر.",
+        subtitle: "أضف إيداعاً جديداً إلى صندوق السفر.",
         submitLabel: "إضافة الإيداع",
         submitAction: "submit-saving",
         body: `
-          <form
-            class="tic-budget-form"
-            data-budget-form="saving"
-          >
-            ${formField({
-              label: "القيمة",
-              name: "amount",
-              type: "number",
-              required: true
-            })}
-
+          <form class="tic-budget-form" data-budget-form="saving">
+            ${formField({ label: "القيمة", name: "amount", type: "number", required: true })}
             ${formField({
               label: "التاريخ",
               name: "date",
               type: "date",
-              value:
-                new Date()
-                  .toISOString()
-                  .slice(0, 10),
+              value: new Date().toISOString().slice(0, 10),
               required: true
             })}
-
             ${formField({
               label: "ملاحظة",
               name: "notes",
-              placeholder:
-                "مثال: ادخار شهر يوليو"
+              placeholder: "مثال: ادخار شهر يوليو"
             })}
           </form>
         `
@@ -2633,22 +1544,16 @@
     if (name === "saving-plan") {
       html = renderDialogShell({
         title: "تعديل خطة الادخار",
-        subtitle:
-          "حدد المبلغ الشهري الذي تريد تحويله لصندوق السفر.",
+        subtitle: "حدد المبلغ الشهري لصندوق السفر.",
         submitLabel: "حفظ الخطة",
         submitAction: "submit-saving-plan",
         body: `
-          <form
-            class="tic-budget-form"
-            data-budget-form="saving-plan"
-          >
+          <form class="tic-budget-form" data-budget-form="saving-plan">
             ${formField({
               label: "الادخار الشهري",
               name: "monthlySaving",
               type: "number",
-              value:
-                snapshot.savings?.monthlySaving ||
-                0,
+              value: snapshot.savings?.monthlySaving || 0,
               required: true
             })}
           </form>
@@ -2660,65 +1565,45 @@
       const payment = payload.payment || {};
 
       html = renderDialogShell({
-        title:
-          payload.mode === "edit"
-            ? "تعديل الدفعة"
-            : "إضافة دفعة",
-        subtitle:
-          "أضف دفعة حجز أو قسط وتاريخ الاستحقاق.",
-        submitLabel:
-          payload.mode === "edit"
-            ? "حفظ التعديل"
-            : "إضافة الدفعة",
+        title: payload.mode === "edit" ? "تعديل الدفعة" : "إضافة دفعة",
+        subtitle: "أضف دفعة حجز أو قسط وتاريخ الاستحقاق.",
+        submitLabel: payload.mode === "edit" ? "حفظ التعديل" : "إضافة الدفعة",
         submitAction: "submit-payment",
         body: `
           <form
             class="tic-budget-form"
             data-budget-form="payment"
-            data-mode="${escapeHTML(
-              payload.mode || "create"
-            )}"
-            data-payment-id="${escapeHTML(
-              payment.id || ""
-            )}"
+            data-mode="${escapeHTML(payload.mode || "create")}"
+            data-payment-id="${escapeHTML(payment.id || "")}"
           >
             ${formField({
               label: "اسم الدفعة",
               name: "title",
               value: payment.title || "",
-              placeholder:
-                "مثال: دفعة الفندق",
+              placeholder: "مثال: دفعة الفندق",
               required: true
             })}
-
             <div class="tic-budget-form-grid">
               ${formField({
                 label: "القيمة",
                 name: "amount",
                 type: "number",
-                value:
-                  payment.amount || "",
+                value: payment.amount || "",
                 required: true
               })}
-
               ${formField({
                 label: "تاريخ الاستحقاق",
                 name: "dueDate",
                 type: "date",
-                value:
-                  String(
-                    payment.dueDate || ""
-                  ).slice(0, 10),
+                value: String(payment.dueDate || "").slice(0, 10),
                 required: true
               })}
             </div>
-
             <div class="tic-budget-form-grid">
               ${formField({
                 label: "النوع",
                 name: "type",
-                value:
-                  payment.type || "other",
+                value: payment.type || "other",
                 options: [
                   { value: "flight", label: "طيران" },
                   { value: "hotel", label: "فندق" },
@@ -2730,13 +1615,10 @@
                   { value: "other", label: "أخرى" }
                 ]
               })}
-
               ${formField({
                 label: "طريقة الدفع",
                 name: "paymentMethod",
-                value:
-                  payment.paymentMethod ||
-                  "card",
+                value: payment.paymentMethod || "card",
                 options: [
                   { value: "card", label: "بطاقة" },
                   { value: "cash", label: "نقداً" },
@@ -2754,36 +1636,27 @@
     if (name === "pay-payment") {
       html = renderDialogShell({
         title: "تسجيل دفع",
-        subtitle:
-          "أدخل المبلغ المدفوع لهذه الدفعة.",
+        subtitle: "أدخل المبلغ المدفوع لهذه الدفعة.",
         submitLabel: "تسجيل الدفع",
         submitAction: "submit-payment-record",
         body: `
           <form
             class="tic-budget-form"
             data-budget-form="payment-record"
-            data-payment-id="${escapeHTML(
-              payload.paymentId
-            )}"
+            data-payment-id="${escapeHTML(payload.paymentId)}"
           >
             ${formField({
               label: "المبلغ المدفوع",
               name: "amount",
               type: "number",
-              value:
-                payload.payment?.remainingAmount ||
-                "",
+              value: payload.payment?.remainingAmount || "",
               required: true
             })}
-
             ${formField({
               label: "تاريخ الدفع",
               name: "paidAt",
               type: "date",
-              value:
-                new Date()
-                  .toISOString()
-                  .slice(0, 10),
+              value: new Date().toISOString().slice(0, 10),
               required: true
             })}
           </form>
@@ -2794,15 +1667,11 @@
     if (name === "ask-ai") {
       html = renderDialogShell({
         title: "اسأل الذكاء المالي",
-        subtitle:
-          "اسأل عن الميزانية أو الادخار أو التوقعات.",
+        subtitle: "اسأل عن الميزانية أو الادخار أو التوقعات.",
         submitLabel: "إرسال السؤال",
         submitAction: "submit-ai-question",
         body: `
-          <form
-            class="tic-budget-form"
-            data-budget-form="ai-question"
-          >
+          <form class="tic-budget-form" data-budget-form="ai-question">
             <label class="tic-budget-field">
               <span>السؤال</span>
               <textarea
@@ -2812,23 +1681,13 @@
                 placeholder="مثال: وين أقدر أوفر؟"
               ></textarea>
             </label>
-
             <div class="tic-budget-quick-questions">
-              <button type="button" data-ai-question="كم باقي من ميزانيتي؟">
-                كم باقي؟
-              </button>
-              <button type="button" data-ai-question="هل بتجاوز الميزانية؟">
-                هل بتجاوز؟
-              </button>
-              <button type="button" data-ai-question="وين أقدر أوفر؟">
-                وين أوفر؟
-              </button>
-              <button type="button" data-ai-question="سو لي خطة شهرية">
-                خطة شهرية
-              </button>
+              <button type="button" data-ai-question="كم باقي من ميزانيتي؟">كم باقي؟</button>
+              <button type="button" data-ai-question="هل بتجاوز الميزانية؟">هل بتجاوز؟</button>
+              <button type="button" data-ai-question="وين أقدر أوفر؟">وين أوفر؟</button>
+              <button type="button" data-ai-question="سو لي خطة شهرية">خطة شهرية</button>
             </div>
           </form>
-
           <div data-ai-answer></div>
         `
       });
@@ -2839,52 +1698,25 @@
 
       html = renderDialogShell({
         title: "الخطة الشهرية الذكية",
-        subtitle:
-          "توزيع مقترح للمتبقي والادخار والاحتياطي.",
+        subtitle: "توزيع مقترح للمتبقي والادخار والاحتياطي.",
         submitLabel: "إغلاق",
         submitAction: "close-dialog",
         body: `
           <div class="tic-budget-plan-summary">
             <article>
               <small>حد الإنفاق الشهري</small>
-              <strong>
-                ${escapeHTML(
-                  currency(
-                    plan.monthlySpendingLimit,
-                    snapshot
-                  )
-                )}
-              </strong>
+              <strong>${escapeHTML(currency(plan.monthlySpendingLimit, snapshot))}</strong>
             </article>
             <article>
               <small>الادخار الشهري</small>
-              <strong>
-                ${escapeHTML(
-                  currency(
-                    plan.monthlySavingTarget,
-                    snapshot
-                  )
-                )}
-              </strong>
+              <strong>${escapeHTML(currency(plan.monthlySavingTarget, snapshot))}</strong>
             </article>
             <article>
               <small>الاحتياطي</small>
-              <strong>
-                ${escapeHTML(
-                  currency(
-                    plan.reserve,
-                    snapshot
-                  )
-                )}
-              </strong>
+              <strong>${escapeHTML(currency(plan.reserve, snapshot))}</strong>
             </article>
           </div>
-
-          <p class="tic-card-text">
-            ${escapeHTML(
-              plan.summaryAr || ""
-            )}
-          </p>
+          <p class="tic-card-text">${escapeHTML(plan.summaryAr || "")}</p>
         `
       });
     }
@@ -2893,16 +1725,11 @@
 
     root.innerHTML = html;
     state.activeDialog = name;
+    document.body.classList.add("tic-budget-dialog-open");
 
-    document.body.classList.add(
-      "tic-budget-dialog-open"
-    );
-
-    root
-      .querySelector(
-        "input, select, textarea"
-      )
-      ?.focus();
+    window.requestAnimationFrame(() => {
+      root.querySelector("input, select, textarea")?.focus();
+    });
 
     return true;
   };
@@ -2910,44 +1737,156 @@
   const closeDialog = () => {
     if (!state.container) return false;
 
-    const root = state.container.querySelector(
-      "[data-budget-dialog-root]"
-    );
-
-    if (root) {
-      root.innerHTML = "";
-    }
+    const root = state.container.querySelector("[data-budget-dialog-root]");
+    if (root) root.innerHTML = "";
 
     state.activeDialog = null;
-
-    document.body.classList.remove(
-      "tic-budget-dialog-open"
-    );
-
+    document.body.classList.remove("tic-budget-dialog-open");
     return true;
   };
 
-  const formData = (name) => {
-    const form = state.container?.querySelector(
-      `[data-budget-form="${name}"]`
-    );
-
-    if (!form) return null;
-
-    if (!form.reportValidity()) {
-      return null;
-    }
+  const getFormData = (name) => {
+    const form = state.container?.querySelector(`[data-budget-form="${name}"]`);
+    if (!form || !form.reportValidity()) return null;
 
     return {
       form,
-      values: Object.fromEntries(
-        new FormData(form).entries()
-      )
+      values: Object.fromEntries(new FormData(form).entries())
     };
   };
 
+  const signature = (snapshot) => {
+    try {
+      return JSON.stringify({
+        view: state.activeView,
+        annualBudget: snapshot.annualBudget,
+        totalSpent: snapshot.totalSpent,
+        remaining: snapshot.remaining,
+        usagePercent: snapshot.usagePercent,
+        healthScore: snapshot.healthScore,
+        healthStatus: snapshot.healthStatus,
+        savings: snapshot.savings,
+        trips: snapshot.trips,
+        expenses: snapshot.expenses,
+        payments: snapshot.payments,
+        alerts: snapshot.alerts,
+        notifications: snapshot.notifications,
+        recommendations: snapshot.recommendations,
+        integrationHealth: snapshot.integrationHealth
+      });
+    } catch (error) {
+      return `${Date.now()}`;
+    }
+  };
+
+  const markScrollActivity = () => {
+    if (!state.mounted || state.activeDialog) {
+      return;
+    }
+
+    state.isUserScrolling = true;
+    state.lastKnownScrollY = window.scrollY;
+
+    if (state.scrollIdleTimer) {
+      window.clearTimeout(state.scrollIdleTimer);
+    }
+
+    state.scrollIdleTimer = window.setTimeout(() => {
+      state.scrollIdleTimer = null;
+      state.isUserScrolling = false;
+      state.lastKnownScrollY = window.scrollY;
+
+      if (state.pendingRefresh) {
+        state.pendingRefresh = false;
+        scheduleRefresh({
+          force: false,
+          delay: 220
+        });
+      }
+    }, 420);
+  };
+
+  const bindScrollStability = () => {
+    if (
+      state.eventBindings.some(
+        (binding) => binding.name === "budget-scroll"
+      )
+    ) {
+      return;
+    }
+
+    const scrollHandler = () => {
+      markScrollActivity();
+    };
+
+    const touchStartHandler = () => {
+      if (!state.mounted || state.activeDialog) {
+        return;
+      }
+
+      state.isUserScrolling = true;
+      state.lastKnownScrollY = window.scrollY;
+    };
+
+    const touchEndHandler = () => {
+      markScrollActivity();
+    };
+
+    window.addEventListener(
+      "scroll",
+      scrollHandler,
+      { passive: true }
+    );
+
+    window.addEventListener(
+      "touchstart",
+      touchStartHandler,
+      { passive: true }
+    );
+
+    window.addEventListener(
+      "touchmove",
+      scrollHandler,
+      { passive: true }
+    );
+
+    window.addEventListener(
+      "touchend",
+      touchEndHandler,
+      { passive: true }
+    );
+
+    state.eventBindings.push(
+      {
+        name: "budget-scroll",
+        eventName: "scroll",
+        handler: scrollHandler,
+        target: window
+      },
+      {
+        name: "budget-touchstart",
+        eventName: "touchstart",
+        handler: touchStartHandler,
+        target: window
+      },
+      {
+        name: "budget-touchmove",
+        eventName: "touchmove",
+        handler: scrollHandler,
+        target: window
+      },
+      {
+        name: "budget-touchend",
+        eventName: "touchend",
+        handler: touchEndHandler,
+        target: window
+      }
+    );
+  };
+
   const refresh = ({
-    preserveScroll = true
+    preserveScroll = true,
+    force = false
   } = {}) => {
     if (
       !state.container ||
@@ -2957,25 +1896,51 @@
       return false;
     }
 
-    state.refreshing = true;
+    if (
+      !force &&
+      (state.isUserScrolling || state.activeDialog)
+    ) {
+      state.pendingRefresh = true;
+      return false;
+    }
 
-    const scrollTop = preserveScroll
-      ? window.scrollY
-      : 0;
+    state.refreshing = true;
 
     try {
       const snapshot = buildSnapshot();
+      const nextSignature = signature(snapshot);
+
+      if (
+        !force &&
+        nextSignature === state.lastSignature
+      ) {
+        return false;
+      }
 
       state.container.innerHTML =
         renderPage(snapshot);
 
-      if (preserveScroll) {
-        window.requestAnimationFrame(() =>
+      state.lastSignature =
+        nextSignature;
+
+      bindContainerEvents();
+
+      /*
+       * Important:
+       * Do not restore window.scrollY after automatic refresh.
+       * Replacing the page content and immediately calling scrollTo()
+       * during iPhone momentum scrolling is what caused the page jump.
+       */
+      if (!preserveScroll) {
+        window.requestAnimationFrame(() => {
           window.scrollTo({
-            top: scrollTop,
+            top: 0,
             behavior: "auto"
-          })
-        );
+          });
+        });
+      } else {
+        state.lastKnownScrollY =
+          window.scrollY;
       }
 
       emit("refreshed", {
@@ -2995,7 +1960,22 @@
     }
   };
 
-  const scheduleRefresh = () => {
+  const scheduleRefresh = ({
+    force = false,
+    delay = 260
+  } = {}) => {
+    if (!state.mounted) {
+      return false;
+    }
+
+    if (
+      !force &&
+      (state.isUserScrolling || state.activeDialog)
+    ) {
+      state.pendingRefresh = true;
+      return false;
+    }
+
     if (state.refreshTimer) {
       window.clearTimeout(
         state.refreshTimer
@@ -3006,912 +1986,449 @@
       window.setTimeout(() => {
         state.refreshTimer = null;
 
-        if (state.mounted) {
-          refresh();
+        if (!state.mounted) {
+          return;
         }
-      }, 100);
+
+        if (
+          !force &&
+          (state.isUserScrolling || state.activeDialog)
+        ) {
+          state.pendingRefresh = true;
+          return;
+        }
+
+        refresh({
+          preserveScroll: true,
+          force
+        });
+      }, delay);
+
+    return true;
   };
 
-  const executeSourceAction = (
-    sourceItem
-  ) => {
+  const switchView = (view) => {
+    if (!Object.values(VIEWS).includes(view)) return false;
+
+    state.activeView = view;
+    refresh({ preserveScroll: false, force: true });
+
+    window.requestAnimationFrame(() => {
+      const platform = state.container?.querySelector(".tic-budget-platform");
+      if (!platform) return;
+
+      const top = platform.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: Math.max(0, top - 112), behavior: "auto" });
+    });
+
+    return true;
+  };
+
+  const executeSourceAction = (sourceItem) => {
     const action = sourceItem?.action;
+    if (!action?.name) return false;
 
-    if (!action?.name) {
-      return false;
-    }
-
-    const actionName = action.name;
+    const name = action.name;
     const payload = action.payload || {};
 
-    if (
-      actionName.includes("trip") &&
-      payload.tripId
-    ) {
-      getRouter()?.go?.(
-        "trips",
-        {
-          view: "details",
-          tripId: payload.tripId
-        }
-      );
-
+    if (name.includes("trip") && payload.tripId) {
+      getRouter()?.go?.("trips", { view: "details", tripId: payload.tripId });
       return true;
     }
 
-    if (
-      actionName.includes("payment") &&
-      payload.paymentId
-    ) {
-      state.activeView = VIEWS.PAYMENTS;
-      refresh({ preserveScroll: false });
-      return true;
-    }
-
-    if (
-      actionName.includes("expense") &&
-      payload.expenseId
-    ) {
-      state.activeView = VIEWS.EXPENSES;
-      refresh({ preserveScroll: false });
-      return true;
-    }
-
-    if (
-      actionName.includes("saving")
-    ) {
-      state.activeView = VIEWS.SAVINGS;
-      refresh({ preserveScroll: false });
-      return true;
-    }
-
-    if (
-      actionName.includes("report") ||
-      actionName.includes("forecast")
-    ) {
-      state.activeView = VIEWS.REPORTS;
-      refresh({ preserveScroll: false });
-      return true;
-    }
+    if (name.includes("payment")) return switchView(VIEWS.PAYMENTS);
+    if (name.includes("expense")) return switchView(VIEWS.EXPENSES);
+    if (name.includes("saving")) return switchView(VIEWS.SAVINGS);
+    if (name.includes("report") || name.includes("forecast")) return switchView(VIEWS.REPORTS);
 
     return false;
   };
 
-  const handleAction = async (
-    action,
-    target
-  ) => {
+  const handleAction = async (action, target) => {
     const modules = engines();
-    const snapshot =
-      state.lastSnapshot ||
-      buildSnapshot();
+    const snapshot = state.lastSnapshot || buildSnapshot();
 
-    if (action === "close-dialog") {
-      closeDialog();
-      return;
-    }
+    if (action === "close-dialog") return void closeDialog();
+    if (action === "add-expense") return void openDialog("expense", { tripId: target.dataset.tripId || "" });
+    if (action === "add-saving") return void openDialog("saving");
+    if (action === "edit-saving-plan") return void openDialog("saving-plan");
+    if (action === "add-payment") return void openDialog("payment");
+    if (action === "ask-ai") return void openDialog("ask-ai");
+    if (action === "switch-payments") return void switchView(VIEWS.PAYMENTS);
+    if (action === "open-trips") return void getRouter()?.go?.("trips");
 
-    if (action === "add-expense") {
-      openDialog("expense", {
-        tripId:
-          target.dataset.tripId || ""
+    if (action === "open-trip") {
+      return void getRouter()?.go?.("trips", {
+        view: "details",
+        tripId: target.dataset.tripId
       });
-      return;
     }
 
     if (action === "edit-expense") {
-      const id =
-        target.dataset.expenseId;
-
       const expense = snapshot.expenses.find(
-        (item) =>
-          String(
-            firstDefined(
-              item.id,
-              item._id
-            )
-          ) === String(id)
+        (item) => String(firstDefined(item.id, item._id)) === String(target.dataset.expenseId)
       );
-
-      if (expense) {
-        openDialog("expense", {
-          mode: "edit",
-          expense
-        });
-      }
-
+      if (expense) openDialog("expense", { mode: "edit", expense });
       return;
     }
 
     if (action === "submit-expense") {
-      const result = formData("expense");
-
+      const result = getFormData("expense");
       if (!result) return;
 
       const { form, values } = result;
-      const mode = form.dataset.mode;
-      const id = form.dataset.expenseId;
-
       const payload = {
         title: values.title,
         amount: nonNegative(values.amount),
         date: values.date,
         category: values.category,
         tripId: values.tripId || null,
-        paymentMethod:
-          values.paymentMethod,
+        paymentMethod: values.paymentMethod,
         currency: snapshot.currency,
         status: "paid"
       };
 
-      let saved = null;
+      const saved =
+        form.dataset.mode === "edit"
+          ? callEngine(modules.expense, ["updateExpense", "update"], [
+              form.dataset.expenseId,
+              payload,
+              { store: getStore() }
+            ])
+          : callEngine(modules.expense, ["createExpense", "create", "addExpense"], [
+              payload,
+              { store: getStore() }
+            ]);
 
-      if (mode === "edit" && id) {
-        saved = callEngine(
-          modules.expense,
-          ["updateExpense", "update"],
-          [
-            id,
-            payload,
-            { store: getStore() }
-          ]
-        );
-      } else {
-        saved = callEngine(
-          modules.expense,
-          ["createExpense", "create", "addExpense"],
-          [
-            payload,
-            { store: getStore() }
-          ]
-        );
-      }
-
-      if (saved === null) {
-        notify(
-          "تعذر حفظ المصروف عبر المحرك.",
-          "danger"
-        );
-        return;
-      }
+      if (saved === null) return notify("تعذر حفظ المصروف.", "danger");
 
       closeDialog();
-      notify(
-        mode === "edit"
-          ? "تم تعديل المصروف."
-          : "تمت إضافة المصروف.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      notify(form.dataset.mode === "edit" ? "تم تعديل المصروف." : "تمت إضافة المصروف.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "delete-expense") {
-      const id =
-        target.dataset.expenseId;
+      if (!window.confirm("هل تريد حذف هذا المصروف؟")) return;
 
-      if (
-        !window.confirm(
-          "هل تريد حذف هذا المصروف؟"
-        )
-      ) {
-        return;
-      }
+      const result = callEngine(modules.expense, ["deleteExpense", "removeExpense", "delete"], [
+        target.dataset.expenseId,
+        { store: getStore() }
+      ]);
 
-      const result = callEngine(
-        modules.expense,
-        ["deleteExpense", "removeExpense", "delete"],
-        [
-          id,
-          { store: getStore() }
-        ]
-      );
+      if (result === null) return notify("تعذر حذف المصروف.", "danger");
 
-      if (result === null) {
-        notify(
-          "تعذر حذف المصروف.",
-          "danger"
-        );
-        return;
-      }
-
-      notify(
-        "تم حذف المصروف.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
-    }
-
-    if (action === "add-saving") {
-      openDialog("saving");
-      return;
+      notify("تم حذف المصروف.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "submit-saving") {
-      const result = formData("saving");
-
+      const result = getFormData("saving");
       if (!result) return;
 
-      const payload = {
-        amount: nonNegative(
-          result.values.amount
-        ),
-        date: result.values.date,
-        notes: result.values.notes,
-        type: "deposit"
-      };
+      const saved = callEngine(modules.savings, ["addDeposit", "createEntry", "addEntry", "deposit"], [
+        {
+          amount: nonNegative(result.values.amount),
+          date: result.values.date,
+          notes: result.values.notes,
+          type: "deposit"
+        },
+        { store: getStore() }
+      ]);
 
-      const saved = callEngine(
-        modules.savings,
-        [
-          "addDeposit",
-          "createEntry",
-          "addEntry",
-          "deposit"
-        ],
-        [
-          payload,
-          { store: getStore() }
-        ]
-      );
-
-      if (saved === null) {
-        notify(
-          "تعذر إضافة مبلغ الادخار.",
-          "danger"
-        );
-        return;
-      }
+      if (saved === null) return notify("تعذر إضافة مبلغ الادخار.", "danger");
 
       closeDialog();
-      notify(
-        "تمت إضافة مبلغ الادخار.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
-    }
-
-    if (action === "edit-saving-plan") {
-      openDialog("saving-plan");
-      return;
+      notify("تمت إضافة مبلغ الادخار.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "submit-saving-plan") {
-      const result =
-        formData("saving-plan");
-
+      const result = getFormData("saving-plan");
       if (!result) return;
 
-      const monthlySaving =
-        nonNegative(
-          result.values.monthlySaving
-        );
+      const saved = callEngine(modules.savings, ["setMonthlySaving", "updatePlan", "setPlan", "savePlan"], [
+        { monthlySaving: nonNegative(result.values.monthlySaving) },
+        { store: getStore() }
+      ]);
 
-      const saved = callEngine(
-        modules.savings,
-        [
-          "setMonthlySaving",
-          "updatePlan",
-          "setPlan",
-          "savePlan"
-        ],
-        [
-          {
-            monthlySaving
-          },
-          { store: getStore() }
-        ]
-      );
-
-      if (saved === null) {
-        notify(
-          "تعذر حفظ خطة الادخار.",
-          "danger"
-        );
-        return;
-      }
+      if (saved === null) return notify("تعذر حفظ خطة الادخار.", "danger");
 
       closeDialog();
-      notify(
-        "تم تحديث خطة الادخار.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      notify("تم تحديث خطة الادخار.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "create-monthly-plan") {
-      const plan = callEngine(
-        modules.ai,
-        ["createMonthlyPlan"],
-        [{ store: getStore() }]
-      );
+      const plan = callEngine(modules.ai, ["createMonthlyPlan"], [
+        { store: getStore() }
+      ]);
 
-      if (!plan) {
-        notify(
-          "تعذر إنشاء الخطة الذكية.",
-          "danger"
-        );
-        return;
-      }
-
-      openDialog("monthly-plan", {
-        plan
-      });
-      return;
-    }
-
-    if (action === "add-payment") {
-      openDialog("payment");
-      return;
+      if (!plan) return notify("تعذر إنشاء الخطة الذكية.", "danger");
+      return void openDialog("monthly-plan", { plan });
     }
 
     if (action === "edit-payment") {
-      const id =
-        target.dataset.paymentId;
+      const payment = asArray(snapshot.payments?.payments).find(
+        (item) => String(item.id) === String(target.dataset.paymentId)
+      );
 
-      const payment =
-        asArray(
-          snapshot.payments?.payments
-        ).find(
-          (item) =>
-            String(item.id) === String(id)
-        );
-
-      if (payment) {
-        openDialog("payment", {
-          mode: "edit",
-          payment
-        });
-      }
-
+      if (payment) openDialog("payment", { mode: "edit", payment });
       return;
     }
 
     if (action === "submit-payment") {
-      const result = formData("payment");
-
+      const result = getFormData("payment");
       if (!result) return;
 
       const { form, values } = result;
-
       const payload = {
         title: values.title,
-        amount: nonNegative(
-          values.amount
-        ),
+        amount: nonNegative(values.amount),
         dueDate: values.dueDate,
         type: values.type,
-        paymentMethod:
-          values.paymentMethod,
+        paymentMethod: values.paymentMethod,
         currency: snapshot.currency,
         status: "pending"
       };
 
       const saved =
         form.dataset.mode === "edit"
-          ? callEngine(
-              modules.payments,
-              ["updatePayment"],
-              [
-                form.dataset.paymentId,
-                payload,
-                { store: getStore() }
-              ]
-            )
-          : callEngine(
-              modules.payments,
-              ["createPayment"],
-              [
-                payload,
-                { store: getStore() }
-              ]
-            );
+          ? callEngine(modules.payments, ["updatePayment"], [
+              form.dataset.paymentId,
+              payload,
+              { store: getStore() }
+            ])
+          : callEngine(modules.payments, ["createPayment"], [
+              payload,
+              { store: getStore() }
+            ]);
 
-      if (!saved) {
-        notify(
-          "تعذر حفظ الدفعة.",
-          "danger"
-        );
-        return;
-      }
+      if (!saved) return notify("تعذر حفظ الدفعة.", "danger");
 
       closeDialog();
-      notify(
-        "تم حفظ الدفعة.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      notify("تم حفظ الدفعة.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "pay-payment") {
-      const id =
-        target.dataset.paymentId;
+      const id = target.dataset.paymentId;
+      const payment = asArray(snapshot.payments?.payments).find(
+        (item) => String(item.id) === String(id)
+      );
 
-      const payment =
-        asArray(
-          snapshot.payments?.payments
-        ).find(
-          (item) =>
-            String(item.id) === String(id)
-        );
-
-      openDialog("pay-payment", {
-        paymentId: id,
-        payment
-      });
-      return;
+      return void openDialog("pay-payment", { paymentId: id, payment });
     }
 
-    if (
-      action === "submit-payment-record"
-    ) {
-      const result =
-        formData("payment-record");
-
+    if (action === "submit-payment-record") {
+      const result = getFormData("payment-record");
       if (!result) return;
 
-      const saved = callEngine(
-        modules.payments,
-        ["recordPayment", "markPaid"],
-        [
-          result.form.dataset.paymentId,
-          {
-            amount: nonNegative(
-              result.values.amount
-            ),
-            paidAt:
-              result.values.paidAt,
-            createExpense: true
-          },
-          { store: getStore() }
-        ]
-      );
+      const saved = callEngine(modules.payments, ["recordPayment", "markPaid"], [
+        result.form.dataset.paymentId,
+        {
+          amount: nonNegative(result.values.amount),
+          paidAt: result.values.paidAt,
+          createExpense: true
+        },
+        { store: getStore() }
+      ]);
 
-      if (!saved) {
-        notify(
-          "تعذر تسجيل الدفع.",
-          "danger"
-        );
-        return;
-      }
+      if (!saved) return notify("تعذر تسجيل الدفع.", "danger");
 
       closeDialog();
-      notify(
-        "تم تسجيل الدفع وربطه بالمصروفات.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      notify("تم تسجيل الدفع وربطه بالمصروفات.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "delete-payment") {
-      const id =
-        target.dataset.paymentId;
+      if (!window.confirm("هل تريد حذف هذه الدفعة؟")) return;
 
-      if (
-        !window.confirm(
-          "هل تريد حذف هذه الدفعة؟"
-        )
-      ) {
-        return;
-      }
+      const result = callEngine(modules.payments, ["deletePayment"], [
+        target.dataset.paymentId,
+        { store: getStore() }
+      ]);
 
-      const result = callEngine(
-        modules.payments,
-        ["deletePayment"],
-        [
-          id,
-          { store: getStore() }
-        ]
-      );
+      if (!result) return notify("تعذر حذف الدفعة.", "danger");
 
-      if (!result) {
-        notify(
-          "تعذر حذف الدفعة.",
-          "danger"
-        );
-        return;
-      }
-
-      notify(
-        "تم حذف الدفعة.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
-    }
-
-    if (action === "ask-ai") {
-      openDialog("ask-ai");
-      return;
+      notify("تم حذف الدفعة.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "submit-ai-question") {
-      const result =
-        formData("ai-question");
-
+      const result = getFormData("ai-question");
       if (!result) return;
 
-      const answer = callEngine(
-        modules.ai,
-        ["answerQuestion", "ask"],
-        [
-          result.values.question,
-          { store: getStore() }
-        ]
-      );
+      const answer = callEngine(modules.ai, ["answerQuestion", "ask"], [
+        result.values.question,
+        { store: getStore() }
+      ]);
 
-      const output =
-        state.container?.querySelector(
-          "[data-ai-answer]"
-        );
-
-      if (!answer || !output) {
-        notify(
-          "تعذر الحصول على إجابة.",
-          "danger"
-        );
-        return;
-      }
+      const output = state.container?.querySelector("[data-ai-answer]");
+      if (!answer || !output) return notify("تعذر الحصول على إجابة.", "danger");
 
       output.innerHTML = `
         <article class="tic-card tic-card-body tic-budget-ai-answer">
           <span class="tic-chip">AI ANSWER</span>
-          <p>${escapeHTML(answer.answerAr || answer.answer)}</p>
+          <p>${escapeHTML(answer.answerAr || answer.answer || "")}</p>
         </article>
       `;
-
       return;
     }
 
-    if (
-      action === "run-recommendation"
-    ) {
-      const id =
-        target.dataset.recommendationId;
+    if (action === "run-recommendation") {
+      const item = snapshot.recommendations.find(
+        (entry) => String(entry.id) === String(target.dataset.recommendationId)
+      );
 
-      const item =
-        snapshot.recommendations.find(
-          (entry) =>
-            String(entry.id) === String(id)
-        );
-
-      if (
-        !executeSourceAction(item)
-      ) {
-        notify(
-          item?.messageAr ||
-          "تم فتح التوصية.",
-          "info"
-        );
+      if (!executeSourceAction(item)) {
+        notify(item?.messageAr || "تم فتح التوصية.", "info");
       }
-
       return;
     }
 
-    if (
-      action === "dismiss-recommendation"
-    ) {
-      const id =
-        target.dataset.recommendationId;
+    if (action === "dismiss-recommendation") {
+      callEngine(modules.ai, ["dismissRecommendation"], [
+        target.dataset.recommendationId,
+        { store: getStore() }
+      ]);
 
-      callEngine(
-        modules.ai,
-        ["dismissRecommendation"],
-        [
-          id,
-          { store: getStore() }
-        ]
-      );
-
-      notify(
-        "تم إخفاء التوصية.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      notify("تم إخفاء التوصية.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "run-alert-action") {
-      const id =
-        target.dataset.alertId;
-
-      const item =
-        snapshot.activeAlerts.find(
-          (entry) =>
-            String(entry.id) === String(id)
-        );
+      const item = snapshot.activeAlerts.find(
+        (entry) => String(entry.id) === String(target.dataset.alertId)
+      );
 
       if (!executeSourceAction(item)) {
-        notify(
-          item?.messageAr ||
-          "تم فتح التنبيه.",
-          "info"
-        );
+        notify(item?.messageAr || "تم فتح التنبيه.", "info");
       }
-
       return;
     }
 
     if (action === "acknowledge-alert") {
-      const id =
-        target.dataset.alertId;
+      callEngine(modules.alerts, ["acknowledgeAlert"], [
+        target.dataset.alertId,
+        { store: getStore() }
+      ]);
 
-      callEngine(
-        modules.alerts,
-        ["acknowledgeAlert"],
-        [
-          id,
-          { store: getStore() }
-        ]
-      );
-
-      notify(
-        "تمت مراجعة التنبيه.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      notify("تمت مراجعة التنبيه.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "snooze-alert") {
-      const id =
-        target.dataset.alertId;
+      callEngine(modules.alerts, ["snoozeAlert"], [
+        target.dataset.alertId,
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        { store: getStore() }
+      ]);
 
-      callEngine(
-        modules.alerts,
-        ["snoozeAlert"],
-        [
-          id,
-          new Date(
-            Date.now() +
-            24 * 60 * 60 * 1000
-          ).toISOString(),
-          { store: getStore() }
-        ]
-      );
-
-      notify(
-        "تم تأجيل التنبيه ليوم واحد.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      notify("تم تأجيل التنبيه ليوم واحد.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "refresh-alerts") {
-      callEngine(
-        modules.alerts,
-        ["refresh"],
-        [{ store: getStore() }]
-      );
-
-      notify(
-        "تم تحديث التنبيهات.",
-        "success"
-      );
-      scheduleRefresh();
-      return;
+      callEngine(modules.alerts, ["refresh"], [{ store: getStore() }]);
+      notify("تم تحديث التنبيهات.", "success");
+      return void refresh({ preserveScroll: true, force: true });
     }
 
     if (action === "export-csv") {
-      callEngine(
-        modules.export,
-        ["downloadReport"],
-        [{
-          store: getStore(),
-          report: "expenses",
-          format: "csv"
-        }]
-      );
-      return;
+      return void callEngine(modules.export, ["downloadReport"], [
+        { store: getStore(), report: "expenses", format: "csv" }
+      ]);
     }
 
     if (action === "export-json") {
-      callEngine(
-        modules.export,
-        ["downloadReport"],
-        [{
-          store: getStore(),
-          report: "full",
-          format: "json"
-        }]
-      );
-      return;
+      return void callEngine(modules.export, ["downloadReport"], [
+        { store: getStore(), report: "full", format: "json" }
+      ]);
     }
 
     if (action === "print-report") {
-      callEngine(
-        modules.export,
-        ["printReport"],
-        [{
-          store: getStore(),
-          report: "executive",
-          format: "html"
-        }]
-      );
-      return;
-    }
-
-    if (
-      action === "switch-payments"
-    ) {
-      state.activeView = VIEWS.PAYMENTS;
-      refresh({ preserveScroll: false });
-      return;
-    }
-
-    if (action === "show-ai") {
-      openDialog("ask-ai");
-      return;
-    }
-
-    if (action === "open-trips") {
-      getRouter()?.go?.("trips");
-      return;
-    }
-
-    if (action === "open-trip") {
-      getRouter()?.go?.(
-        "trips",
-        {
-          view: "details",
-          tripId: target.dataset.tripId
-        }
-      );
+      return void callEngine(modules.export, ["printReport"], [
+        { store: getStore(), report: "executive", format: "html" }
+      ]);
     }
   };
 
   const onContainerClick = (event) => {
-    const question = event.target.closest(
-      "[data-ai-question]"
-    );
+    const question = event.target.closest("[data-ai-question]");
 
     if (question) {
-      const textarea =
-        state.container?.querySelector(
-          '[data-budget-form="ai-question"] textarea'
-        );
+      const textarea = state.container?.querySelector(
+        '[data-budget-form="ai-question"] textarea'
+      );
 
       if (textarea) {
-        textarea.value =
-          question.dataset.aiQuestion;
+        textarea.value = question.dataset.aiQuestion;
         textarea.focus();
       }
-
       return;
     }
 
-    const view = event.target.closest(
-      "[data-budget-view]"
-    );
+    const view = event.target.closest("[data-budget-view]");
 
     if (view) {
-      state.activeView =
-        view.dataset.budgetView;
-
-      refresh({ preserveScroll: false });
+      switchView(view.dataset.budgetView);
       return;
     }
 
-    const target = event.target.closest(
-      "[data-budget-action]"
-    );
+    const target = event.target.closest("[data-budget-action]");
 
     if (!target) {
-      if (
-        event.target.matches(
-          "[data-budget-dialog-backdrop]"
-        )
-      ) {
-        closeDialog();
-      }
-
+      if (event.target.matches("[data-budget-dialog-backdrop]")) closeDialog();
       return;
     }
 
     event.preventDefault();
 
-    handleAction(
-      target.dataset.budgetAction,
-      target
-    ).catch((error) => {
-      console.error(
-        "TIC Budget action failed:",
-        error
-      );
-
-      notify(
-        "حدث خطأ أثناء تنفيذ العملية.",
-        "danger"
-      );
+    handleAction(target.dataset.budgetAction, target).catch((error) => {
+      console.error("TIC Budget action failed:", error);
+      notify("حدث خطأ أثناء تنفيذ العملية.", "danger");
     });
   };
 
   const bindContainerEvents = () => {
     if (!state.container) return;
 
-    state.container.removeEventListener(
-      "click",
-      onContainerClick
-    );
-
-    state.container.addEventListener(
-      "click",
-      onContainerClick
-    );
+    state.container.removeEventListener("click", onContainerClick);
+    state.container.addEventListener("click", onContainerClick);
   };
 
   const registerActions = () => {
     const ui = getUI();
 
-    if (
-      !ui ||
-      typeof ui.registerAction !== "function"
-    ) {
-      return;
-    }
+    if (!ui || typeof ui.registerAction !== "function") return;
 
     const register = (name, handler) => {
       if (ui.hasAction?.(name)) return;
 
-      const unsubscribe =
-        ui.registerAction(
-          name,
-          handler
-        );
+      const unsubscribe = ui.registerAction(name, handler);
 
-      if (
-        typeof unsubscribe === "function"
-      ) {
-        state.actionUnsubscribers.push(
-          unsubscribe
-        );
+      if (typeof unsubscribe === "function") {
+        state.actionUnsubscribers.push(unsubscribe);
       }
     };
 
-    register(
-      "budget-add-expense",
-      () => openDialog("expense")
-    );
-
-    register(
-      "budget-ask-ai",
-      () => openDialog("ask-ai")
-    );
-
-    register(
-      "budget-open-trips",
-      () => getRouter()?.go?.("trips")
-    );
+    register("budget-add-expense", () => openDialog("expense"));
+    register("budget-ask-ai", () => openDialog("ask-ai"));
+    register("budget-open-trips", () => getRouter()?.go?.("trips"));
   };
 
   const subscribeToStore = () => {
     const store = getStore();
 
-    if (
-      !store ||
-      typeof store.subscribe !== "function" ||
-      state.unsubscribeStore
-    ) {
-      return;
-    }
+    if (!store || typeof store.subscribe !== "function" || state.unsubscribeStore) return;
 
-    state.unsubscribeStore =
-      store.subscribe(() => {
-        if (state.mounted) {
-          scheduleRefresh();
-        }
-      });
+    state.unsubscribeStore = store.subscribe(() => {
+      if (state.mounted && !state.activeDialog) scheduleRefresh();
+    });
   };
 
   const subscribeToIntegration = () => {
-    const integration =
-      engines().integration;
+    const integration = engines().integration;
 
     if (
       !integration ||
@@ -3921,21 +2438,16 @@
       return;
     }
 
-    state.integrationUnsubscribe =
-      integration.subscribe(
-        () => {
-          if (state.mounted) {
-            scheduleRefresh();
-          }
-        },
-        { immediate: false }
-      );
+    state.integrationUnsubscribe = integration.subscribe(
+      () => {
+        if (state.mounted && !state.activeDialog) scheduleRefresh();
+      },
+      { immediate: false }
+    );
   };
 
   const bindGlobalEvents = () => {
-    if (state.eventBindings.length) {
-      return;
-    }
+    if (state.eventBindings.length) return;
 
     [
       "tic:expenses-changed",
@@ -3948,20 +2460,11 @@
       "tic:budget-integration-sync-completed"
     ].forEach((name) => {
       const handler = () => {
-        if (state.mounted) {
-          scheduleRefresh();
-        }
+        if (state.mounted && !state.activeDialog) scheduleRefresh();
       };
 
-      window.addEventListener(
-        name,
-        handler
-      );
-
-      state.eventBindings.push({
-        name,
-        handler
-      });
+      window.addEventListener(name, handler);
+      state.eventBindings.push({ name, handler });
     });
   };
 
@@ -3979,12 +2482,8 @@
           autoSync: true
         });
       } catch (error) {
-        console.warn(
-          "TIC Budget integration bootstrap warning:",
-          error
-        );
+        console.warn("TIC Budget integration bootstrap warning:", error);
       }
-
       return;
     }
 
@@ -4001,14 +2500,9 @@
       if (!method) return;
 
       try {
-        engine[method]({
-          store: getStore()
-        });
+        engine[method]({ store: getStore() });
       } catch (error) {
-        console.warn(
-          "TIC Budget engine bootstrap warning:",
-          error
-        );
+        console.warn("TIC Budget engine bootstrap warning:", error);
       }
     });
   };
@@ -4020,26 +2514,21 @@
     version: PAGE_VERSION,
 
     init() {
-      if (state.initialized) {
-        return this.diagnostics();
-      }
+      if (state.initialized) return this.diagnostics();
 
       bootstrapEngines();
       registerActions();
       subscribeToStore();
       subscribeToIntegration();
       bindGlobalEvents();
+      bindScrollStability();
 
       state.initialized = true;
 
       emit("initialized", {
         version: PAGE_VERSION,
         engines: Object.fromEntries(
-          Object.entries(engines())
-            .map(([key, value]) => [
-              key,
-              Boolean(value)
-            ])
+          Object.entries(engines()).map(([key, value]) => [key, Boolean(value)])
         )
       });
 
@@ -4048,23 +2537,16 @@
 
     render() {
       this.init();
-      return renderPage(
-        buildSnapshot()
-      );
+      return renderPage(buildSnapshot());
     },
 
     mount(context = {}) {
       this.init();
 
-      const container =
-        resolveContainer(
-          context.container
-        );
+      const container = resolveContainer(context.container);
 
       if (!container) {
-        throw new Error(
-          "TIC Budget Error: route container not found."
-        );
+        throw new Error("TIC Budget Error: route container not found.");
       }
 
       state.container = container;
@@ -4072,28 +2554,24 @@
 
       const snapshot = buildSnapshot();
 
-      container.innerHTML =
-        renderPage(snapshot);
+      container.innerHTML = renderPage(snapshot);
+      state.lastSignature = signature(snapshot);
+      state.lastKnownScrollY = window.scrollY;
 
       bindContainerEvents();
+      bindScrollStability();
 
       emit("mounted", {
-        annualBudget:
-          snapshot.annualBudget,
-        totalSpent:
-          snapshot.totalSpent,
-        healthScore:
-          snapshot.healthScore
+        annualBudget: snapshot.annualBudget,
+        totalSpent: snapshot.totalSpent,
+        healthScore: snapshot.healthScore
       });
 
       return container;
     },
 
     afterEnter(context = {}) {
-      const container =
-        resolveContainer(
-          context.container
-        );
+      const container = resolveContainer(context.container);
 
       if (container) {
         state.container = container;
@@ -4101,8 +2579,11 @@
       }
 
       bindContainerEvents();
+      bindScrollStability();
+
       refresh({
-        preserveScroll: false
+        preserveScroll: false,
+        force: true
       });
 
       return true;
@@ -4117,38 +2598,20 @@
       closeDialog();
 
       if (state.container) {
-        state.container.removeEventListener(
-          "click",
-          onContainerClick
-        );
+        state.container.removeEventListener("click", onContainerClick);
       }
 
       state.mounted = false;
       state.container = null;
 
       emit("unmounted");
-
       return true;
     },
 
     refresh,
 
     setView(view) {
-      if (
-        !Object.values(VIEWS).includes(view)
-      ) {
-        return false;
-      }
-
-      state.activeView = view;
-
-      if (state.mounted) {
-        refresh({
-          preserveScroll: false
-        });
-      }
-
-      return true;
+      return switchView(view);
     },
 
     getView() {
@@ -4156,10 +2619,7 @@
     },
 
     getSnapshot() {
-      return clone(
-        state.lastSnapshot ||
-        buildSnapshot()
-      );
+      return clone(state.lastSnapshot || buildSnapshot());
     },
 
     getDashboard() {
@@ -4168,55 +2628,41 @@
 
     subscribe(listener) {
       if (typeof listener !== "function") {
-        throw new TypeError(
-          "TIC Budget subscriber must be a function."
-        );
+        throw new TypeError("TIC Budget subscriber must be a function.");
       }
 
       state.subscribers.add(listener);
-
-      return () =>
-        state.subscribers.delete(listener);
+      return () => state.subscribers.delete(listener);
     },
 
     destroy() {
       this.unmount();
 
-      if (
-        typeof state.unsubscribeStore === "function"
-      ) {
-        state.unsubscribeStore();
-      }
+      if (typeof state.unsubscribeStore === "function") state.unsubscribeStore();
+      if (typeof state.integrationUnsubscribe === "function") state.integrationUnsubscribe();
 
-      if (
-        typeof state.integrationUnsubscribe === "function"
-      ) {
-        state.integrationUnsubscribe();
-      }
+      state.actionUnsubscribers.forEach((unsubscribe) => {
+        if (typeof unsubscribe === "function") unsubscribe();
+      });
 
-      state.actionUnsubscribers.forEach(
-        (unsubscribe) => {
-          if (
-            typeof unsubscribe === "function"
-          ) {
-            unsubscribe();
-          }
-        }
-      );
-
-      state.eventBindings.forEach(
-        ({ name, handler }) => {
-          window.removeEventListener(
-            name,
-            handler
-          );
-        }
-      );
+      state.eventBindings.forEach(({
+        name,
+        eventName,
+        handler,
+        target = window
+      }) => {
+        target.removeEventListener(
+          eventName || name,
+          handler
+        );
+      });
 
       if (state.refreshTimer) {
-        window.clearTimeout(
-          state.refreshTimer
-        );
+        window.clearTimeout(state.refreshTimer);
+      }
+
+      if (state.scrollIdleTimer) {
+        window.clearTimeout(state.scrollIdleTimer);
       }
 
       state.unsubscribeStore = null;
@@ -4224,8 +2670,13 @@
       state.actionUnsubscribers = [];
       state.eventBindings = [];
       state.refreshTimer = null;
+      state.scrollIdleTimer = null;
+      state.isUserScrolling = false;
+      state.pendingRefresh = false;
+      state.lastKnownScrollY = 0;
       state.subscribers.clear();
       state.lastSnapshot = null;
+      state.lastSignature = "";
       state.activeView = VIEWS.OVERVIEW;
       state.initialized = false;
       state.refreshing = false;
@@ -4234,71 +2685,41 @@
     },
 
     diagnostics() {
-      const availableEngines =
-        Object.fromEntries(
-          Object.entries(engines())
-            .map(([key, engine]) => [
-              key,
-              Boolean(engine)
-            ])
-        );
+      const availableEngines = Object.fromEntries(
+        Object.entries(engines()).map(([key, engine]) => [key, Boolean(engine)])
+      );
 
       return {
         id: this.id,
         title: this.title,
         version: this.version,
-        initialized:
-          state.initialized,
-        mounted:
-          state.mounted,
-        activeView:
-          state.activeView,
-        hasContainer:
-          Boolean(state.container),
-        storeAvailable:
-          Boolean(getStore()),
-        routerAvailable:
-          Boolean(getRouter()),
-        uiAvailable:
-          Boolean(getUI()),
-        engines:
-          availableEngines,
-        connectedEngineCount:
-          Object.values(
-            availableEngines
-          ).filter(Boolean).length,
-        actionCount:
-          state.actionUnsubscribers.length,
-        eventBindingCount:
-          state.eventBindings.length,
-        subscriberCount:
-          state.subscribers.size,
-        hasSnapshot:
-          Boolean(state.lastSnapshot),
-        integrationHealth:
-          clone(
-            state.lastSnapshot
-              ?.integrationHealth ||
-            null
-          )
+        initialized: state.initialized,
+        mounted: state.mounted,
+        activeView: state.activeView,
+        activeDialog: state.activeDialog,
+        hasContainer: Boolean(state.container),
+        storeAvailable: Boolean(getStore()),
+        routerAvailable: Boolean(getRouter()),
+        uiAvailable: Boolean(getUI()),
+        engines: availableEngines,
+        connectedEngineCount: Object.values(availableEngines).filter(Boolean).length,
+        actionCount: state.actionUnsubscribers.length,
+        eventBindingCount: state.eventBindings.length,
+        subscriberCount: state.subscribers.size,
+        hasSnapshot: Boolean(state.lastSnapshot),
+        integrationHealth: clone(state.lastSnapshot?.integrationHealth || null)
       };
     }
   };
 
   window.TIC = window.TIC || {};
-  window.TIC.Pages =
-    window.TIC.Pages || {};
-  window.TIC.Pages.budget =
-    BudgetPage;
-  window.TICBudgetPage =
-    BudgetPage;
+  window.TIC.Pages = window.TIC.Pages || {};
+  window.TIC.Pages.budget = BudgetPage;
+  window.TICBudgetPage = BudgetPage;
 
   const router = getRouter();
 
-  if (
-    router &&
-    typeof router.register === "function"
-  ) {
+  if (router && typeof router.register === "function") {
     if (!router.has?.("budget")) {
       router.register("budget", {
         id: "budget",
@@ -4310,13 +2731,8 @@
       });
     }
 
-    if (
-      typeof router.registerPage === "function"
-    ) {
-      router.registerPage(
-        "budget",
-        BudgetPage
-      );
+    if (typeof router.registerPage === "function") {
+      router.registerPage("budget", BudgetPage);
     }
   }
 
