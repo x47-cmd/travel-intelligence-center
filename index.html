@@ -12,7 +12,7 @@
 
   <meta
     name="description"
-    content="منصة شخصية ذكية لتنظيم الرحلات، الوجهات، الميزانيات، المصروفات، الادخار، الدفعات، التجهيز، المستندات، الذكريات، وقائمة الأمنيات في مكان واحد."
+    content="منصة شخصية ذكية لتنظيم الرحلات، الرحلات المخططة، الوجهات، الميزانيات، المصروفات، الادخار، الدفعات، التجهيز، المستندات، الذكريات، وقائمة الأمنيات في مكان واحد."
   />
 
   <meta name="theme-color" content="#0f766e" />
@@ -34,7 +34,7 @@
   />
 
   <!-- =====================================================
-       Travel Intelligence Center V4.0.0
+       Travel Intelligence Center V4.1.0
 
        Premium iPhone-first interface
        Smart next-trip summary V2.4.0
@@ -45,6 +45,9 @@
        Guide Engine + Travel AI + Planner Engine
        Passport and Guide country-code integration
        Budget Intelligence Platform preserved
+       Budget Travel Intelligence enabled
+       Planned Trips lifecycle and checklist workflow
+       Automatic planned-trip promotion when ready
        Expense, savings and payment intelligence
        Budget analytics, AI, alerts and notifications
   ====================================================== -->
@@ -77,8 +80,13 @@
        Required order:
        Store → Router → UI
 
-       Store V2.2.0 includes:
+       Store V2.3.0 includes:
        - Complete trip persistence
+       - Planned Trips persistence
+       - Planned-trip checklist persistence
+       - Planned-trip lifecycle synchronization
+       - Planned-trip to ready-trip promotion
+       - Duplicate-conversion protection
        - Travel Passport lifecycle
        - Guide wishlist persistence
        - Annual travel-plan persistence
@@ -93,7 +101,7 @@
 
   <script
     defer
-    src="js/store.js?v=2.2.0"
+    src="js/store.js?v=2.3.0"
   ></script>
 
   <script
@@ -246,11 +254,18 @@
        → Export Engine
        → Notification Engine
        → Integration Engine
+       → Budget Travel Intelligence
 
-       Important:
-       Budget Travel Intelligence remains deferred.
-       Existing stable Budget Platform files remain enabled.
-       Integration Engine must load after all other Budget engines.
+       Budget Travel Intelligence:
+       - Reads the user's available travel budget
+       - Generates realistic destination suggestions
+       - Uses WorldGuideData and Guide Engine country records
+       - Saves accepted suggestions as plannedTrips
+       - Preserves the original budget recommendation snapshot
+       - Links the Budget page with the Trips planning workflow
+
+       Integration Engine must load after the core Budget engines.
+       Budget Travel Intelligence must load after Guide and Budget engines.
   ====================================================== -->
 
   <script
@@ -303,18 +318,37 @@
     src="js/features/budget-integration-engine.js?v=1.0.0"
   ></script>
 
+  <script
+    defer
+    src="js/features/budget-travel-intelligence.js?v=1.0.0"
+  ></script>
+
   <!-- =====================================================
        8. Application Pages
 
        All core services, data layers and feature engines
        must load before the page modules.
 
-       Current stable page versions:
+       Current page versions:
        - Home V2.4.0
-       - Trips V3.6.0
+       - Trips V3.7.0
        - Guide V4.0.0
-       - Budget V3.1.1
+       - Budget V3.2.0
        - More V2.0.0
+
+       Trips V3.7.0:
+       - Active and upcoming journeys
+       - Planned Trips planning area
+       - Flight and hotel checklist
+       - Planned-trip editing and deletion
+       - Automatic promotion into ready trips
+       - Passport and previous-trip history
+
+       Budget V3.2.0:
+       - Existing Budget Intelligence preserved
+       - Travel suggestions based on available budget
+       - Save recommendation to plannedTrips
+       - Direct navigation to Trips planning workflow
   ====================================================== -->
 
   <script
@@ -324,7 +358,7 @@
 
   <script
     defer
-    src="js/pages/trips.js?v=3.6.0"
+    src="js/pages/trips.js?v=3.7.0"
   ></script>
 
   <script
@@ -334,7 +368,7 @@
 
   <script
     defer
-    src="js/pages/budget.js?v=3.1.1"
+    src="js/pages/budget.js?v=3.2.0"
   ></script>
 
   <script
@@ -345,16 +379,20 @@
   <!-- =====================================================
        9. Application Bootstrap
 
-       Application Bootstrap V4.0.0:
+       Application Bootstrap V4.1.0:
        - Initializes WorldGuideData
        - Initializes PlannerEngine
        - Initializes TravelAI
        - Initializes GuideEngine
-       - Preserves Budget Intelligence engines
+       - Initializes all Budget Intelligence engines
+       - Initializes Budget Travel Intelligence
        - Registers all pages
        - Starts the Router
        - Synchronizes Trip Passport lifecycle
-       - Provides runtime diagnostics
+       - Synchronizes plannedTrips lifecycle
+       - Automatically promotes ready planned trips
+       - Refreshes Trips after planned-trip changes
+       - Provides Guide, Budget and Planned Trips diagnostics
        - Supports async page and feature initialization
 
        This must remain the final JavaScript file.
@@ -362,7 +400,7 @@
 
   <script
     defer
-    src="js/app.js?v=4.0.0"
+    src="js/app.js?v=4.1.0"
   ></script>
 </head>
 
@@ -420,8 +458,9 @@
         </h2>
 
         <p>
-          يتم تجهيز الرحلات، جواز السفر، دليل 195 دولة،
-          الاقتراحات الذكية، الجداول السياحية، الميزانيات،
+          يتم تجهيز الرحلات، الرحلات المخططة، جواز السفر،
+          دليل 195 دولة، الاقتراحات الذكية، الجداول السياحية،
+          الميزانيات، اقتراحات السفر حسب الميزانية،
           المصروفات، الادخار، الدفعات، المستندات،
           التجهيز، الذكريات، وقائمة الأمنيات.
         </p>
