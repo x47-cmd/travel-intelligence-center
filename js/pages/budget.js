@@ -1,31 +1,25 @@
 /* =========================================================
    Travel Intelligence Center
-   Simple Travel Budget Advisor V4.0.0
+   Simple Travel Budget Advisor V4.1.0
 
    File Path:
    js/pages/budget.js
 
    Purpose:
-   - Rebuilds the Budget page as a simple travel-money advisor.
-   - Starts the travel balance from zero unless saved data exists.
-   - Supports:
-     1) Add balance.
-     2) Withdraw balance.
-     3) Add travel expense.
-     4) Automatic smart destination suggestions.
-     5) Upgrade suggestions when a little more money is needed.
-     6) Multi-trip suggestions for larger balances.
-     7) Recent transaction history.
-     8) Adding a suggested destination to planned trips.
+   - Keeps the Budget page light, calm and iPhone-first.
+   - Uses one clear balance action: Add Balance.
+   - Keeps withdrawal as the secondary balance action.
+   - Preserves legacy expense records and public expense APIs.
+   - Displays destination suggestions as a horizontal swipe row.
    - Preserves Router, Store and UI compatibility.
-   - Keeps the page stable while scrolling on iPhone.
+   - Prevents page refresh while the user is scrolling or swiping.
 ========================================================= */
 
 (function (window, document) {
   "use strict";
 
   const PAGE_ID = "budget";
-  const PAGE_VERSION = "4.0.0";
+  const PAGE_VERSION = "4.1.0";
   const STORAGE_KEY = "tic_simple_travel_budget_v4";
 
   const TRANSACTION_TYPES = Object.freeze({
@@ -37,7 +31,6 @@
   const DIALOGS = Object.freeze({
     DEPOSIT: "deposit",
     WITHDRAWAL: "withdrawal",
-    EXPENSE: "expense",
     HISTORY: "history",
     DESTINATION: "destination"
   });
@@ -172,11 +165,13 @@
     refreshTimer: null,
     refreshing: false,
 
-    // iPhone scroll stability
     isUserScrolling: false,
+    isSuggestionSwiping: false,
     scrollIdleTimer: null,
+    swipeIdleTimer: null,
     pendingRefresh: false,
-    lastKnownScrollY: 0
+    lastKnownScrollY: 0,
+    suggestionScrollLeft: 0
   };
 
   /* =========================================================
@@ -200,11 +195,7 @@
   };
 
   const text = (value, fallback = "") =>
-    String(
-      value === undefined || value === null
-        ? fallback
-        : value
-    ).trim();
+    String(value === undefined || value === null ? fallback : value).trim();
 
   const number = (value, fallback = 0) => {
     const parsed = Number(value);
@@ -230,15 +221,10 @@
       .replace(/'/g, "&#039;");
 
   const createId = (prefix = "item") =>
-    `${prefix}_${Date.now()}_${Math.random()
-      .toString(36)
-      .slice(2, 9)}`;
+    `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-  const nowISO = () =>
-    new Date().toISOString();
-
-  const todayISO = () =>
-    nowISO().slice(0, 10);
+  const nowISO = () => new Date().toISOString();
+  const todayISO = () => nowISO().slice(0, 10);
 
   const getStore = () =>
     window.TIC?.Store ||
@@ -258,13 +244,8 @@
     null;
 
   const resolveContainer = (container) => {
-    if (container instanceof window.Element) {
-      return container;
-    }
-
-    if (typeof container === "string") {
-      return document.querySelector(container);
-    }
+    if (container instanceof window.Element) return container;
+    if (typeof container === "string") return document.querySelector(container);
 
     return (
       document.querySelector("[data-router-view]") ||
@@ -306,27 +287,18 @@
     });
 
     window.dispatchEvent(
-      new CustomEvent(
-        `tic:page:${PAGE_ID}:${type}`,
-        { detail: payload }
-      )
+      new CustomEvent(`tic:page:${PAGE_ID}:${type}`, { detail: payload })
     );
 
     return payload;
   };
 
-  const formatCurrency = (
-    value,
-    currencyCode = "AED"
-  ) => {
+  const formatCurrency = (value, currencyCode = "AED") => {
     const ui = getUI();
 
     if (typeof ui?.currency === "function") {
       try {
-        return ui.currency(
-          number(value),
-          currencyCode
-        );
+        return ui.currency(number(value), currencyCode);
       } catch (_) {}
     }
 
@@ -376,17 +348,11 @@
             : tone === "ghost"
               ? "tic-btn-ghost"
               : "tic-btn-secondary"
-      } ${block ? "tic-btn-block" : ""} ${
-        small ? "tic-btn-small" : ""
-      }"
+      } ${block ? "tic-btn-block" : ""} ${small ? "tic-btn-small" : ""}"
       data-budget-action="${escapeHTML(action)}"
       ${attrs}
     >
-      ${
-        icon
-          ? `<span aria-hidden="true">${escapeHTML(icon)}</span>`
-          : ""
-      }
+      ${icon ? `<span aria-hidden="true">${escapeHTML(icon)}</span>` : ""}
       <span>${escapeHTML(label)}</span>
     </button>
   `;
@@ -432,46 +398,26 @@
 
   const readLocalWallet = () => {
     try {
-      const raw = window.localStorage.getItem(
-        STORAGE_KEY
-      );
-
+      const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
 
       const parsed = JSON.parse(raw);
-
-      return parsed && typeof parsed === "object"
-        ? parsed
-        : null;
+      return parsed && typeof parsed === "object" ? parsed : null;
     } catch (error) {
-      console.warn(
-        "TIC Budget local wallet read failed:",
-        error
-      );
+      console.warn("TIC Budget local wallet read failed:", error);
       return null;
     }
   };
 
-  const normalizeTransaction = (
-    item,
-    index = 0
-  ) => {
-    const typeValue = text(
-      item?.type,
-      TRANSACTION_TYPES.DEPOSIT
-    );
+  const normalizeTransaction = (item, index = 0) => {
+    const typeValue = text(item?.type, TRANSACTION_TYPES.DEPOSIT);
 
-    const type = Object.values(
-      TRANSACTION_TYPES
-    ).includes(typeValue)
+    const type = Object.values(TRANSACTION_TYPES).includes(typeValue)
       ? typeValue
       : TRANSACTION_TYPES.DEPOSIT;
 
     return {
-      id: text(
-        item?.id,
-        `budget_tx_${index}`
-      ),
+      id: text(item?.id, `budget_tx_${index}`),
       type,
       amount: nonNegative(item?.amount),
       title: text(
@@ -484,130 +430,67 @@
       ),
       category: text(
         item?.category,
-        type === TRANSACTION_TYPES.EXPENSE
-          ? "other"
-          : ""
+        type === TRANSACTION_TYPES.EXPENSE ? "other" : ""
       ),
       notes: text(item?.notes),
-      date: text(
-        item?.date,
-        todayISO()
-      ),
-      createdAt: text(
-        item?.createdAt,
-        nowISO()
-      ),
-      source: text(
-        item?.source,
-        "budget-page"
-      )
+      date: text(item?.date, todayISO()),
+      createdAt: text(item?.createdAt, nowISO()),
+      source: text(item?.source, "budget-page")
     };
   };
 
-  const calculateBalance = (
-    transactions,
-    openingBalance = 0
-  ) =>
-    asArray(transactions).reduce(
-      (total, item) => {
-        const amount = nonNegative(item.amount);
+  const calculateBalance = (transactions, openingBalance = 0) =>
+    asArray(transactions).reduce((total, item) => {
+      const amount = nonNegative(item.amount);
 
-        if (
-          item.type ===
-          TRANSACTION_TYPES.DEPOSIT
-        ) {
-          return total + amount;
-        }
+      if (item.type === TRANSACTION_TYPES.DEPOSIT) {
+        return total + amount;
+      }
 
-        return total - amount;
-      },
-      nonNegative(openingBalance)
-    );
+      return total - amount;
+    }, nonNegative(openingBalance));
 
-  const normalizeWallet = (
-    wallet,
-    currencyCode = "AED"
-  ) => {
-    const source =
-      wallet &&
-      typeof wallet === "object"
-        ? wallet
-        : {};
+  const normalizeWallet = (wallet, currencyCode = "AED") => {
+    const source = wallet && typeof wallet === "object" ? wallet : {};
 
-    const transactions = asArray(
-      source.transactions
-    )
+    const transactions = asArray(source.transactions)
       .map(normalizeTransaction)
       .filter((item) => item.amount > 0)
       .sort((a, b) =>
-        String(b.createdAt).localeCompare(
-          String(a.createdAt)
-        )
+        String(b.createdAt).localeCompare(String(a.createdAt))
       );
 
-    const openingBalance = nonNegative(
-      source.openingBalance
-    );
-
+    const openingBalance = nonNegative(source.openingBalance);
     const calculatedBalance = Math.max(
       0,
-      calculateBalance(
-        transactions,
-        openingBalance
-      )
+      calculateBalance(transactions, openingBalance)
     );
 
     return {
       version: PAGE_VERSION,
-      currency: text(
-        source.currency,
-        currencyCode || "AED"
-      ),
+      currency: text(source.currency, currencyCode || "AED"),
       openingBalance,
       balance: calculatedBalance,
       transactions,
-      createdAt: text(
-        source.createdAt,
-        nowISO()
-      ),
-      updatedAt: text(
-        source.updatedAt,
-        nowISO()
-      )
+      createdAt: text(source.createdAt, nowISO()),
+      updatedAt: text(source.updatedAt, nowISO())
     };
   };
 
   const getWallet = () => {
     const raw = readStoreState();
-    const currencyCode = text(
-      raw.profile?.currency,
-      "AED"
-    );
+    const currencyCode = text(raw.profile?.currency, "AED");
 
-    if (
-      raw.budgetWallet &&
-      typeof raw.budgetWallet === "object"
-    ) {
-      return normalizeWallet(
-        raw.budgetWallet,
-        currencyCode
-      );
+    if (raw.budgetWallet && typeof raw.budgetWallet === "object") {
+      return normalizeWallet(raw.budgetWallet, currencyCode);
     }
 
     const localWallet = readLocalWallet();
 
     if (localWallet) {
-      return normalizeWallet(
-        localWallet,
-        currencyCode
-      );
+      return normalizeWallet(localWallet, currencyCode);
     }
 
-    /*
-     * Migration:
-     * Read older savings balance only when it is a real saved value.
-     * Do not use the previous 30,000 annual budget as a balance.
-     */
     const oldSavingsBalance = nonNegative(
       raw.savings?.balance ??
       raw.savings?.currentBalance ??
@@ -615,10 +498,9 @@
       0
     );
 
-    const migratedWallet = normalizeWallet(
+    return normalizeWallet(
       {
-        openingBalance:
-          oldSavingsBalance,
+        openingBalance: oldSavingsBalance,
         currency: currencyCode,
         transactions: [],
         createdAt: nowISO(),
@@ -626,28 +508,21 @@
       },
       currencyCode
     );
-
-    return migratedWallet;
   };
 
   const writeLocalWallet = (wallet) => {
     try {
-      window.localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(wallet)
-      );
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(wallet));
       return true;
     } catch (error) {
-      console.warn(
-        "TIC Budget local wallet write failed:",
-        error
-      );
+      console.warn("TIC Budget local wallet write failed:", error);
       return false;
     }
   };
 
   const saveWallet = (wallet) => {
     const store = getStore();
+
     const normalized = normalizeWallet(
       {
         ...wallet,
@@ -659,71 +534,36 @@
     let savedToStore = false;
 
     try {
-      if (
-        typeof store?.setBudgetWallet ===
-        "function"
-      ) {
-        store.setBudgetWallet(
-          clone(normalized)
-        );
+      if (typeof store?.setBudgetWallet === "function") {
+        store.setBudgetWallet(clone(normalized));
         savedToStore = true;
-      } else if (
-        typeof store?.saveBudgetWallet ===
-        "function"
-      ) {
-        store.saveBudgetWallet(
-          clone(normalized)
-        );
+      } else if (typeof store?.saveBudgetWallet === "function") {
+        store.saveBudgetWallet(clone(normalized));
         savedToStore = true;
-      } else if (
-        typeof store?.set === "function"
-      ) {
-        store.set(
-          "budgetWallet",
-          clone(normalized),
-          { immediate: true }
-        );
+      } else if (typeof store?.set === "function") {
+        store.set("budgetWallet", clone(normalized), { immediate: true });
         savedToStore = true;
-      } else if (
-        typeof store?.dispatch === "function"
-      ) {
-        const result = store.dispatch(
-          "budgetWallet/set",
-          clone(normalized)
-        );
+      } else if (typeof store?.dispatch === "function") {
+        const result = store.dispatch("budgetWallet/set", clone(normalized));
         savedToStore = result !== false;
       }
     } catch (error) {
-      console.warn(
-        "TIC Budget Store wallet save failed:",
-        error
-      );
+      console.warn("TIC Budget Store wallet save failed:", error);
     }
 
-    /*
-     * Local copy is intentionally kept as a resilience fallback.
-     * The next Store update can adopt budgetWallet as the main branch.
-     */
-    const savedLocally =
-      writeLocalWallet(normalized);
+    const savedLocally = writeLocalWallet(normalized);
 
     window.dispatchEvent(
-      new CustomEvent(
-        "tic:budget-wallet-changed",
-        {
-          detail: {
-            wallet: clone(normalized),
-            savedToStore,
-            savedLocally
-          }
+      new CustomEvent("tic:budget-wallet-changed", {
+        detail: {
+          wallet: clone(normalized),
+          savedToStore,
+          savedLocally
         }
-      )
+      })
     );
 
-    return (
-      savedToStore ||
-      savedLocally
-    );
+    return savedToStore || savedLocally;
   };
 
   const addTransaction = ({
@@ -735,8 +575,7 @@
     date = todayISO()
   }) => {
     const wallet = getWallet();
-    const normalizedAmount =
-      nonNegative(amount);
+    const normalizedAmount = nonNegative(amount);
 
     if (normalizedAmount <= 0) {
       return {
@@ -746,10 +585,7 @@
     }
 
     if (
-      [
-        TRANSACTION_TYPES.WITHDRAWAL,
-        TRANSACTION_TYPES.EXPENSE
-      ].includes(type) &&
+      [TRANSACTION_TYPES.WITHDRAWAL, TRANSACTION_TYPES.EXPENSE].includes(type) &&
       normalizedAmount > wallet.balance
     ) {
       return {
@@ -759,33 +595,28 @@
       };
     }
 
-    const transaction =
-      normalizeTransaction({
-        id: createId("budget_tx"),
-        type,
-        amount: normalizedAmount,
-        title,
-        category,
-        notes,
-        date,
-        createdAt: nowISO(),
-        source: "simple-budget-page"
-      });
+    const transaction = normalizeTransaction({
+      id: createId("budget_tx"),
+      type,
+      amount: normalizedAmount,
+      title,
+      category,
+      notes,
+      date,
+      createdAt: nowISO(),
+      source: "simple-budget-page"
+    });
 
     const nextWallet = normalizeWallet(
       {
         ...wallet,
-        transactions: [
-          transaction,
-          ...wallet.transactions
-        ],
+        transactions: [transaction, ...wallet.transactions],
         updatedAt: nowISO()
       },
       wallet.currency
     );
 
-    const saved =
-      saveWallet(nextWallet);
+    const saved = saveWallet(nextWallet);
 
     return {
       ok: saved,
@@ -799,104 +630,60 @@
   ========================================================= */
 
   const getDestination = (id) =>
-    DESTINATIONS.find(
-      (item) =>
-        String(item.id) === String(id)
-    ) || null;
+    DESTINATIONS.find((item) => String(item.id) === String(id)) || null;
 
   const buildAffordable = (balance) =>
-    DESTINATIONS.filter(
-      (item) => item.cost <= balance
-    ).sort(
-      (a, b) => b.cost - a.cost
-    );
+    DESTINATIONS.filter((item) => item.cost <= balance)
+      .sort((a, b) => b.cost - a.cost);
 
   const buildUpcoming = (balance) =>
-    DESTINATIONS.filter(
-      (item) => item.cost > balance
-    ).sort(
-      (a, b) => a.cost - b.cost
-    );
+    DESTINATIONS.filter((item) => item.cost > balance)
+      .sort((a, b) => a.cost - b.cost);
 
-  const buildMultiTripOptions = (
-    balance
-  ) => {
+  const buildMultiTripOptions = (balance) => {
     const pairs = [];
 
-    for (
-      let firstIndex = 0;
-      firstIndex < DESTINATIONS.length;
-      firstIndex += 1
-    ) {
+    for (let firstIndex = 0; firstIndex < DESTINATIONS.length; firstIndex += 1) {
       for (
-        let secondIndex =
-          firstIndex + 1;
-        secondIndex <
-        DESTINATIONS.length;
+        let secondIndex = firstIndex + 1;
+        secondIndex < DESTINATIONS.length;
         secondIndex += 1
       ) {
-        const first =
-          DESTINATIONS[firstIndex];
-        const second =
-          DESTINATIONS[secondIndex];
-
-        const total =
-          first.cost + second.cost;
+        const first = DESTINATIONS[firstIndex];
+        const second = DESTINATIONS[secondIndex];
+        const total = first.cost + second.cost;
 
         if (total <= balance) {
           pairs.push({
             id: `${first.id}_${second.id}`,
             trips: [first, second],
             total,
-            remaining:
-              balance - total,
-            score:
-              total -
-              Math.abs(
-                first.cost -
-                second.cost
-              ) * 0.08
+            remaining: balance - total,
+            score: total - Math.abs(first.cost - second.cost) * 0.08
           });
         }
       }
     }
 
-    return pairs
-      .sort(
-        (a, b) => b.score - a.score
-      )
-      .slice(0, 2);
+    return pairs.sort((a, b) => b.score - a.score).slice(0, 2);
   };
 
-  const buildTravelAdvice = (
-    balance
-  ) => {
-    const affordable =
-      buildAffordable(balance);
-
-    const upcoming =
-      buildUpcoming(balance);
-
-    const bestNow =
-      affordable[0] || null;
-
-    const nextUpgrade =
-      upcoming[0] || null;
-
-    const multiTripOptions =
-      buildMultiTripOptions(balance);
+  const buildTravelAdvice = (balance) => {
+    const affordable = buildAffordable(balance);
+    const upcoming = buildUpcoming(balance);
+    const bestNow = affordable[0] || null;
+    const nextUpgrade = upcoming[0] || null;
+    const multiTripOptions = buildMultiTripOptions(balance);
 
     if (balance <= 0) {
       return {
         tone: "empty",
         eyebrow: "ابدأ من الصفر",
-        title:
-          "أضف أول مبلغ لصندوق السفر",
+        title: "أضف أول مبلغ لصندوق السفر",
         message:
           "كل مبلغ تضيفه سيغيّر الاقتراحات تلقائياً ويقرّبك من وجهة مناسبة.",
         bestNow: null,
-        nextUpgrade:
-          DESTINATIONS[0],
+        nextUpgrade: DESTINATIONS[0],
         affordable: [],
         multiTripOptions: []
       };
@@ -906,33 +693,25 @@
       return {
         tone: "building",
         eyebrow: "صندوقك بدأ يكبر",
-        title:
-          `باقي لك ${formatCurrency(
-            DESTINATIONS[0].cost -
-              balance
-          )} لرحلة باكو`,
+        title: `باقي لك ${formatCurrency(
+          DESTINATIONS[0].cost - balance
+        )} لرحلة باكو`,
         message:
           "استمر في إضافة الرصيد، وأول خيار مناسب سيفتح لك تلقائياً.",
         bestNow: null,
-        nextUpgrade:
-          DESTINATIONS[0],
+        nextUpgrade: DESTINATIONS[0],
         affordable: [],
         multiTripOptions: []
       };
     }
 
-    if (
-      multiTripOptions.length
-    ) {
-      const bestPair =
-        multiTripOptions[0];
+    if (multiTripOptions.length) {
+      const bestPair = multiTripOptions[0];
 
       return {
         tone: "multi",
-        eyebrow:
-          "رصيدك يفتح أكثر من خيار",
-        title:
-          "تقدر ترتب سفرتين بدل سفرة واحدة",
+        eyebrow: "رصيدك يفتح أكثر من خيار",
+        title: "تقدر ترتب سفرتين بدل سفرة واحدة",
         message:
           `${bestPair.trips[0].title} و${bestPair.trips[1].title} ضمن رصيدك الحالي.`,
         bestNow,
@@ -945,15 +724,11 @@
     if (nextUpgrade) {
       return {
         tone: "ready",
-        eyebrow:
-          "تقدر تسافر الحين",
-        title:
-          `تقدر ترتب ${bestNow.title} لمدة ${bestNow.days} أيام`,
-        message:
-          `ولو زدت ${formatCurrency(
-            nextUpgrade.cost -
-              balance
-          )} تقدر تنتقل إلى ${nextUpgrade.title}.`,
+        eyebrow: "تقدر تسافر الحين",
+        title: `تقدر ترتب ${bestNow.title} لمدة ${bestNow.days} أيام`,
+        message: `ولو زدت ${formatCurrency(
+          nextUpgrade.cost - balance
+        )} تقدر تنتقل إلى ${nextUpgrade.title}.`,
         bestNow,
         nextUpgrade,
         affordable,
@@ -963,10 +738,8 @@
 
     return {
       tone: "premium",
-      eyebrow:
-        "ميزانيتك ممتازة",
-      title:
-        `تقدر ترتب ${bestNow.title} براحة`,
+      eyebrow: "ميزانيتك ممتازة",
+      title: `تقدر ترتب ${bestNow.title} براحة`,
       message:
         "رصيدك الحالي يغطي أعلى خيار موجود، وتقدر تختار بين رحلة فاخرة أو أكثر من سفرة.",
       bestNow,
@@ -979,68 +752,33 @@
   const buildSnapshot = () => {
     const raw = readStoreState();
     const wallet = getWallet();
-    const analysis =
-      buildTravelAdvice(
-        wallet.balance
-      );
+    const analysis = buildTravelAdvice(wallet.balance);
 
-    const deposits =
-      wallet.transactions
-        .filter(
-          (item) =>
-            item.type ===
-            TRANSACTION_TYPES.DEPOSIT
-        )
-        .reduce(
-          (total, item) =>
-            total + item.amount,
-          wallet.openingBalance
-        );
+    const deposits = wallet.transactions
+      .filter((item) => item.type === TRANSACTION_TYPES.DEPOSIT)
+      .reduce((total, item) => total + item.amount, wallet.openingBalance);
 
-    const withdrawals =
-      wallet.transactions
-        .filter(
-          (item) =>
-            item.type ===
-            TRANSACTION_TYPES.WITHDRAWAL
-        )
-        .reduce(
-          (total, item) =>
-            total + item.amount,
-          0
-        );
+    const withdrawals = wallet.transactions
+      .filter((item) => item.type === TRANSACTION_TYPES.WITHDRAWAL)
+      .reduce((total, item) => total + item.amount, 0);
 
-    const expenses =
-      wallet.transactions
-        .filter(
-          (item) =>
-            item.type ===
-            TRANSACTION_TYPES.EXPENSE
-        )
-        .reduce(
-          (total, item) =>
-            total + item.amount,
-          0
-        );
+    const expenses = wallet.transactions
+      .filter((item) => item.type === TRANSACTION_TYPES.EXPENSE)
+      .reduce((total, item) => total + item.amount, 0);
 
     const snapshot = {
       raw,
       wallet,
       analysis,
-      currency:
-        wallet.currency ||
-        raw.profile?.currency ||
-        "AED",
+      currency: wallet.currency || raw.profile?.currency || "AED",
       balance: wallet.balance,
       totals: {
         deposits,
         withdrawals,
         expenses
       },
-      recentTransactions:
-        wallet.transactions.slice(0, 5),
-      plannedTrips:
-        asArray(raw.plannedTrips)
+      recentTransactions: wallet.transactions.slice(0, 5),
+      plannedTrips: asArray(raw.plannedTrips)
     };
 
     state.snapshot = snapshot;
@@ -1057,7 +795,9 @@
         <span class="tic-budget-simple-eyebrow">
           TRAVEL MONEY ADVISOR
         </span>
+
         <h1>ميزانية سفرك</h1>
+
         <p>
           أضف رصيدك، واسحب منه عند الحاجة، وخلك تعرف مباشرة وين تقدر تسافر.
         </p>
@@ -1065,13 +805,9 @@
 
       <div class="tic-budget-balance-card">
         <small>رصيد السفر الحالي</small>
+
         <strong>
-          ${escapeHTML(
-            formatCurrency(
-              snapshot.balance,
-              snapshot.currency
-            )
-          )}
+          ${escapeHTML(formatCurrency(snapshot.balance, snapshot.currency))}
         </strong>
 
         <div class="tic-budget-primary-actions">
@@ -1080,12 +816,6 @@
             action: "open-deposit",
             tone: "primary",
             icon: "+"
-          })}
-
-          ${button({
-            label: "إضافة مصروف",
-            action: "open-expense",
-            icon: "−"
           })}
         </div>
 
@@ -1100,11 +830,8 @@
     </section>
   `;
 
-  const renderAdvice = (
-    snapshot
-  ) => {
-    const analysis =
-      snapshot.analysis;
+  const renderAdvice = (snapshot) => {
+    const analysis = snapshot.analysis;
 
     return `
       <section class="tic-budget-simple-section">
@@ -1121,22 +848,11 @@
           )}"
         >
           <span class="tic-budget-advice-eyebrow">
-            ${escapeHTML(
-              analysis.eyebrow
-            )}
+            ${escapeHTML(analysis.eyebrow)}
           </span>
 
-          <h3>
-            ${escapeHTML(
-              analysis.title
-            )}
-          </h3>
-
-          <p>
-            ${escapeHTML(
-              analysis.message
-            )}
-          </p>
+          <h3>${escapeHTML(analysis.title)}</h3>
+          <p>${escapeHTML(analysis.message)}</p>
 
           ${
             analysis.bestNow
@@ -1144,23 +860,19 @@
                 <div class="tic-budget-advice-actions">
                   ${button({
                     label: "رتب الرحلة",
-                    action:
-                      "add-planned-trip",
+                    action: "add-planned-trip",
                     tone: "primary",
-                    attrs:
-                      `data-destination-id="${escapeHTML(
-                        analysis.bestNow.id
-                      )}"`
+                    attrs: `data-destination-id="${escapeHTML(
+                      analysis.bestNow.id
+                    )}"`
                   })}
 
                   ${button({
                     label: "عرض التفاصيل",
-                    action:
-                      "open-destination",
-                    attrs:
-                      `data-destination-id="${escapeHTML(
-                        analysis.bestNow.id
-                      )}"`
+                    action: "open-destination",
+                    attrs: `data-destination-id="${escapeHTML(
+                      analysis.bestNow.id
+                    )}"`
                   })}
                 </div>
               `
@@ -1168,8 +880,7 @@
                 <div class="tic-budget-advice-actions">
                   ${button({
                     label: "أضف أول مبلغ",
-                    action:
-                      "open-deposit",
+                    action: "open-deposit",
                     tone: "primary"
                   })}
                 </div>
@@ -1185,17 +896,14 @@
     snapshot,
     mode = "available"
   ) => {
-    const missing = Math.max(
-      0,
-      destination.cost -
-        snapshot.balance
-    );
-
-    const available =
-      mode === "available";
+    const missing = Math.max(0, destination.cost - snapshot.balance);
+    const available = mode === "available";
 
     return `
-      <article class="tic-budget-destination-card">
+      <article
+        class="tic-budget-destination-card"
+        data-destination-card="${escapeHTML(destination.id)}"
+      >
         <div class="tic-budget-destination-head">
           <div>
             <span class="tic-budget-destination-label">
@@ -1203,33 +911,21 @@
                 available
                   ? "مناسبة الآن"
                   : `زد ${escapeHTML(
-                      formatCurrency(
-                        missing,
-                        snapshot.currency
-                      )
+                      formatCurrency(missing, snapshot.currency)
                     )}`
               }
             </span>
 
-            <h3>
-              ${escapeHTML(
-                destination.title
-              )}
-            </h3>
+            <h3>${escapeHTML(destination.title)}</h3>
 
             <p>
-              ${escapeHTML(
-                `${destination.country} • ${destination.days} أيام`
-              )}
+              ${escapeHTML(`${destination.country} • ${destination.days} أيام`)}
             </p>
           </div>
 
           <strong>
             ${escapeHTML(
-              formatCurrency(
-                destination.cost,
-                snapshot.currency
-              )
+              formatCurrency(destination.cost, snapshot.currency)
             )}
           </strong>
         </div>
@@ -1237,12 +933,7 @@
         <div class="tic-budget-destination-tags">
           ${destination.tags
             .slice(0, 3)
-            .map(
-              (tag) =>
-                `<span>${escapeHTML(
-                  tag
-                )}</span>`
-            )
+            .map((tag) => `<span>${escapeHTML(tag)}</span>`)
             .join("")}
         </div>
 
@@ -1250,53 +941,32 @@
           ${
             available
               ? button({
-                  label: "إضافة إلى رحلاتي",
-                  action:
-                    "add-planned-trip",
+                  label: "أضف الرحلة",
+                  action: "add-planned-trip",
                   tone: "primary",
-                  attrs:
-                    `data-destination-id="${escapeHTML(
-                      destination.id
-                    )}"`
+                  attrs: `data-destination-id="${escapeHTML(destination.id)}"`
                 })
               : button({
                   label: "أضف الفرق",
-                  action:
-                    "quick-add-difference",
+                  action: "quick-add-difference",
                   tone: "primary",
-                  attrs:
-                    `data-destination-id="${escapeHTML(
-                      destination.id
-                    )}"`
+                  attrs: `data-destination-id="${escapeHTML(destination.id)}"`
                 })
           }
 
           ${button({
             label: "التفاصيل",
-            action:
-              "open-destination",
-            attrs:
-              `data-destination-id="${escapeHTML(
-                destination.id
-              )}"`
+            action: "open-destination",
+            attrs: `data-destination-id="${escapeHTML(destination.id)}"`
           })}
         </div>
       </article>
     `;
   };
 
-  const renderSuggestions = (
-    snapshot
-  ) => {
-    const available =
-      snapshot.analysis.affordable
-        .slice(0, 2);
-
-    const upcoming =
-      buildUpcoming(
-        snapshot.balance
-      ).slice(0, 2);
-
+  const renderSuggestions = (snapshot) => {
+    const available = snapshot.analysis.affordable.slice(0, 2);
+    const upcoming = buildUpcoming(snapshot.balance).slice(0, 2);
     const suggestions = [];
 
     available.forEach((item) => {
@@ -1309,9 +979,7 @@
     upcoming.forEach((item) => {
       if (
         !suggestions.some(
-          (entry) =>
-            entry.destination.id ===
-            item.id
+          (entry) => entry.destination.id === item.id
         )
       ) {
         suggestions.push({
@@ -1321,8 +989,7 @@
       }
     });
 
-    const finalSuggestions =
-      suggestions.slice(0, 3);
+    const finalSuggestions = suggestions.slice(0, 3);
 
     return `
       <section class="tic-budget-simple-section">
@@ -1330,13 +997,17 @@
           <div>
             <small>BEST OPTIONS</small>
             <h2>أفضل الخيارات لك</h2>
-            <p>
-              ثلاث اختيارات فقط حتى تكون المقارنة واضحة وسريعة.
-            </p>
+            <p>اسحب بين الخيارات للمقارنة بشكل أسرع.</p>
           </div>
         </div>
 
-        <div class="tic-budget-destination-list">
+        <div
+          class="tic-budget-destination-list"
+          data-budget-suggestion-track
+          role="region"
+          aria-label="أفضل خيارات السفر"
+          tabindex="0"
+        >
           ${finalSuggestions
             .map((entry) =>
               renderDestinationCard(
@@ -1351,13 +1022,8 @@
     `;
   };
 
-  const renderMultiTripPlan = (
-    snapshot
-  ) => {
-    const option =
-      snapshot.analysis
-        .multiTripOptions[0];
-
+  const renderMultiTripPlan = (snapshot) => {
+    const option = snapshot.analysis.multiTripOptions[0];
     if (!option) return "";
 
     return `
@@ -1366,9 +1032,7 @@
           <div>
             <small>MULTI TRIP OPTION</small>
             <h2>تقدر ترتب سفرتين</h2>
-            <p>
-              خيار ذكي لتقسيم الرصيد بدل صرفه كله على رحلة واحدة.
-            </p>
+            <p>خيار ذكي لتقسيم الرصيد بدل صرفه كله على رحلة واحدة.</p>
           </div>
         </div>
 
@@ -1378,22 +1042,11 @@
               .map(
                 (trip) => `
                   <div>
-                    <small>
-                      ${escapeHTML(
-                        trip.level
-                      )}
-                    </small>
-                    <strong>
-                      ${escapeHTML(
-                        trip.title
-                      )}
-                    </strong>
+                    <small>${escapeHTML(trip.level)}</small>
+                    <strong>${escapeHTML(trip.title)}</strong>
                     <span>
                       ${escapeHTML(
-                        formatCurrency(
-                          trip.cost,
-                          snapshot.currency
-                        )
+                        formatCurrency(trip.cost, snapshot.currency)
                       )}
                     </span>
                   </div>
@@ -1404,21 +1057,15 @@
 
           <div class="tic-budget-multi-summary">
             <span>الإجمالي</span>
+
             <strong>
-              ${escapeHTML(
-                formatCurrency(
-                  option.total,
-                  snapshot.currency
-                )
-              )}
+              ${escapeHTML(formatCurrency(option.total, snapshot.currency))}
             </strong>
+
             <small>
               المتبقي بعد الرحلتين:
               ${escapeHTML(
-                formatCurrency(
-                  option.remaining,
-                  snapshot.currency
-                )
+                formatCurrency(option.remaining, snapshot.currency)
               )}
             </small>
           </div>
@@ -1426,13 +1073,9 @@
           <div class="tic-budget-multi-actions">
             ${button({
               label: "إضافة الرحلتين",
-              action:
-                "add-multi-trip",
+              action: "add-multi-trip",
               tone: "primary",
-              attrs:
-                `data-multi-trip-id="${escapeHTML(
-                  option.id
-                )}"`
+              attrs: `data-multi-trip-id="${escapeHTML(option.id)}"`
             })}
           </div>
         </article>
@@ -1440,91 +1083,48 @@
     `;
   };
 
-  const transactionIcon = (
-    type
-  ) => {
-    if (
-      type ===
-      TRANSACTION_TYPES.DEPOSIT
-    ) {
-      return "+";
-    }
-
-    if (
-      type ===
-      TRANSACTION_TYPES.WITHDRAWAL
-    ) {
-      return "↘";
-    }
-
+  const transactionIcon = (type) => {
+    if (type === TRANSACTION_TYPES.DEPOSIT) return "+";
+    if (type === TRANSACTION_TYPES.WITHDRAWAL) return "↘";
     return "−";
   };
 
-  const transactionTone = (
-    type
-  ) =>
-    type ===
-    TRANSACTION_TYPES.DEPOSIT
+  const transactionTone = (type) =>
+    type === TRANSACTION_TYPES.DEPOSIT
       ? "positive"
-      : type ===
-          TRANSACTION_TYPES.WITHDRAWAL
+      : type === TRANSACTION_TYPES.WITHDRAWAL
         ? "neutral"
         : "expense";
 
-  const renderTransaction = (
-    item,
-    snapshot
-  ) => `
+  const renderTransaction = (item, snapshot) => `
     <article class="tic-budget-transaction">
       <span
         class="tic-budget-transaction-icon tic-budget-transaction-${escapeHTML(
           transactionTone(item.type)
         )}"
       >
-        ${escapeHTML(
-          transactionIcon(item.type)
-        )}
+        ${escapeHTML(transactionIcon(item.type))}
       </span>
 
       <div>
-        <strong>
-          ${escapeHTML(
-            item.title
-          )}
-        </strong>
+        <strong>${escapeHTML(item.title)}</strong>
+
         <small>
           ${escapeHTML(
-            [
-              formatDate(
-                item.date
-              ),
-              item.notes
-            ]
-              .filter(Boolean)
-              .join(" • ")
+            [formatDate(item.date), item.notes].filter(Boolean).join(" • ")
           )}
         </small>
       </div>
 
       <b>
-        ${
-          item.type ===
-          TRANSACTION_TYPES.DEPOSIT
-            ? "+"
-            : "−"
-        }${escapeHTML(
-          formatCurrency(
-            item.amount,
-            snapshot.currency
-          )
+        ${item.type === TRANSACTION_TYPES.DEPOSIT ? "+" : "−"}${escapeHTML(
+          formatCurrency(item.amount, snapshot.currency)
         )}
       </b>
     </article>
   `;
 
-  const renderRecentActivity = (
-    snapshot
-  ) => `
+  const renderRecentActivity = (snapshot) => `
     <section class="tic-budget-simple-section">
       <div class="tic-budget-simple-heading tic-budget-heading-row">
         <div>
@@ -1533,12 +1133,10 @@
         </div>
 
         ${
-          snapshot.wallet.transactions
-            .length > 5
+          snapshot.wallet.transactions.length > 5
             ? button({
                 label: "عرض الكل",
-                action:
-                  "open-history",
+                action: "open-history",
                 small: true
               })
             : ""
@@ -1546,17 +1144,11 @@
       </div>
 
       ${
-        snapshot.recentTransactions
-          .length
+        snapshot.recentTransactions.length
           ? `
             <div class="tic-budget-transactions">
               ${snapshot.recentTransactions
-                .map((item) =>
-                  renderTransaction(
-                    item,
-                    snapshot
-                  )
-                )
+                .map((item) => renderTransaction(item, snapshot))
                 .join("")}
             </div>
           `
@@ -1572,19 +1164,13 @@
     </section>
   `;
 
-  const renderMiniSummary = (
-    snapshot
-  ) => `
+  const renderMiniSummary = (snapshot) => `
     <section class="tic-budget-mini-summary">
       <article>
         <small>إجمالي الإضافات</small>
         <strong>
           ${escapeHTML(
-            formatCurrency(
-              snapshot.totals
-                .deposits,
-              snapshot.currency
-            )
+            formatCurrency(snapshot.totals.deposits, snapshot.currency)
           )}
         </strong>
       </article>
@@ -1593,11 +1179,7 @@
         <small>إجمالي السحب</small>
         <strong>
           ${escapeHTML(
-            formatCurrency(
-              snapshot.totals
-                .withdrawals,
-              snapshot.currency
-            )
+            formatCurrency(snapshot.totals.withdrawals, snapshot.currency)
           )}
         </strong>
       </article>
@@ -1606,20 +1188,14 @@
         <small>مصروفات السفر</small>
         <strong>
           ${escapeHTML(
-            formatCurrency(
-              snapshot.totals
-                .expenses,
-              snapshot.currency
-            )
+            formatCurrency(snapshot.totals.expenses, snapshot.currency)
           )}
         </strong>
       </article>
     </section>
   `;
 
-  const renderPage = (
-    snapshot
-  ) => `
+  const renderPage = (snapshot) => `
     <div
       class="tic-module tic-budget-simple"
       data-page="${PAGE_ID}"
@@ -1660,13 +1236,7 @@
         <header class="tic-budget-dialog-head">
           <div>
             <h2>${escapeHTML(title)}</h2>
-            ${
-              subtitle
-                ? `<p>${escapeHTML(
-                    subtitle
-                  )}</p>`
-                : ""
-            }
+            ${subtitle ? `<p>${escapeHTML(subtitle)}</p>` : ""}
           </div>
 
           <button
@@ -1686,17 +1256,14 @@
         <footer class="tic-budget-dialog-footer">
           ${button({
             label: "إلغاء",
-            action:
-              "close-dialog"
+            action: "close-dialog"
           })}
 
           ${
             submitAction
               ? button({
-                  label:
-                    submitLabel,
-                  action:
-                    submitAction,
+                  label: submitLabel,
+                  action: submitAction,
                   tone: "primary"
                 })
               : ""
@@ -1717,9 +1284,7 @@
     step = "",
     options = null
   }) => {
-    if (
-      Array.isArray(options)
-    ) {
+    if (Array.isArray(options)) {
       return `
         <label class="tic-budget-field">
           <span>${escapeHTML(label)}</span>
@@ -1732,21 +1297,14 @@
               .map(
                 (item) => `
                   <option
-                    value="${escapeHTML(
-                      item.value
-                    )}"
+                    value="${escapeHTML(item.value)}"
                     ${
-                      String(
-                        item.value
-                      ) ===
-                      String(value)
+                      String(item.value) === String(value)
                         ? "selected"
                         : ""
                     }
                   >
-                    ${escapeHTML(
-                      item.label
-                    )}
+                    ${escapeHTML(item.label)}
                   </option>
                 `
               )
@@ -1766,58 +1324,28 @@
           value="${escapeHTML(value)}"
           placeholder="${escapeHTML(placeholder)}"
           ${required ? "required" : ""}
-          ${
-            min !== ""
-              ? `min="${escapeHTML(
-                  min
-                )}"`
-              : ""
-          }
-          ${
-            step !== ""
-              ? `step="${escapeHTML(
-                  step
-                )}"`
-              : ""
-          }
+          ${min !== "" ? `min="${escapeHTML(min)}"` : ""}
+          ${step !== "" ? `step="${escapeHTML(step)}"` : ""}
         >
       </label>
     `;
   };
 
-  const openDialog = (
-    name,
-    payload = {}
-  ) => {
-    if (!state.container) {
-      return false;
-    }
+  const openDialog = (name, payload = {}) => {
+    if (!state.container) return false;
 
-    const root =
-      state.container.querySelector(
-        "[data-budget-dialog-root]"
-      );
-
+    const root = state.container.querySelector("[data-budget-dialog-root]");
     if (!root) return false;
 
-    const snapshot =
-      state.snapshot ||
-      buildSnapshot();
-
+    const snapshot = state.snapshot || buildSnapshot();
     let html = "";
 
-    if (
-      name === DIALOGS.DEPOSIT
-    ) {
+    if (name === DIALOGS.DEPOSIT) {
       html = renderDialogShell({
-        title:
-          "إضافة رصيد للسفر",
-        subtitle:
-          "أضف أي مبلغ خصصته للسفر.",
-        submitLabel:
-          "إضافة الرصيد",
-        submitAction:
-          "submit-deposit",
+        title: "إضافة رصيد للسفر",
+        subtitle: "أضف أي مبلغ خصصته للسفر.",
+        submitLabel: "إضافة الرصيد",
+        submitAction: "submit-deposit",
         body: `
           <form
             class="tic-budget-form"
@@ -1829,22 +1357,16 @@
               type: "number",
               min: "1",
               step: "1",
-              value:
-                payload.amount ||
-                "",
-              placeholder:
-                "مثال: 2000",
+              value: payload.amount || "",
+              placeholder: "مثال: 2000",
               required: true
             })}
 
             ${formField({
               label: "المصدر",
               name: "title",
-              value:
-                payload.title ||
-                "إضافة رصيد",
-              placeholder:
-                "مثال: ادخار شهر يوليو"
+              value: payload.title || "إضافة رصيد",
+              placeholder: "مثال: ادخار شهر يوليو"
             })}
 
             ${formField({
@@ -1858,30 +1380,22 @@
             ${formField({
               label: "ملاحظة اختيارية",
               name: "notes",
-              placeholder:
-                "مثال: من الراتب"
+              placeholder: "مثال: من الراتب"
             })}
           </form>
         `
       });
     }
 
-    if (
-      name ===
-      DIALOGS.WITHDRAWAL
-    ) {
+    if (name === DIALOGS.WITHDRAWAL) {
       html = renderDialogShell({
-        title:
-          "سحب من رصيد السفر",
-        subtitle:
-          `رصيدك الحالي ${formatCurrency(
-            snapshot.balance,
-            snapshot.currency
-          )}.`,
-        submitLabel:
-          "تأكيد السحب",
-        submitAction:
-          "submit-withdrawal",
+        title: "سحب من رصيد السفر",
+        subtitle: `رصيدك الحالي ${formatCurrency(
+          snapshot.balance,
+          snapshot.currency
+        )}.`,
+        submitLabel: "تأكيد السحب",
+        submitAction: "submit-withdrawal",
         body: `
           <form
             class="tic-budget-form"
@@ -1893,18 +1407,15 @@
               type: "number",
               min: "1",
               step: "1",
-              placeholder:
-                "مثال: 500",
+              placeholder: "مثال: 500",
               required: true
             })}
 
             ${formField({
               label: "سبب السحب",
               name: "title",
-              value:
-                "سحب من صندوق السفر",
-              placeholder:
-                "مثال: ظرف طارئ"
+              value: "سحب من صندوق السفر",
+              placeholder: "مثال: حجز تذكرة أو فندق"
             })}
 
             ${formField({
@@ -1918,138 +1429,28 @@
             ${formField({
               label: "ملاحظة اختيارية",
               name: "notes",
-              placeholder:
-                "سبب السحب"
+              placeholder: "تفاصيل السحب"
             })}
           </form>
         `
       });
     }
 
-    if (
-      name === DIALOGS.EXPENSE
-    ) {
+    if (name === DIALOGS.HISTORY) {
       html = renderDialogShell({
-        title:
-          "إضافة مصروف سفر",
-        subtitle:
-          "هذا المبلغ ينخصم من رصيد السفر ويسجل كمصروف.",
-        submitLabel:
-          "إضافة المصروف",
-        submitAction:
-          "submit-expense",
-        body: `
-          <form
-            class="tic-budget-form"
-            data-budget-form="expense"
-          >
-            ${formField({
-              label: "المبلغ",
-              name: "amount",
-              type: "number",
-              min: "1",
-              step: "1",
-              placeholder:
-                "مثال: 1200",
-              required: true
-            })}
-
-            ${formField({
-              label: "اسم المصروف",
-              name: "title",
-              value:
-                "مصروف سفر",
-              placeholder:
-                "مثال: تذكرة الطيران",
-              required: true
-            })}
-
-            ${formField({
-              label: "الفئة",
-              name: "category",
-              value: "other",
-              options: [
-                {
-                  value: "flights",
-                  label: "طيران"
-                },
-                {
-                  value: "hotels",
-                  label: "فندق"
-                },
-                {
-                  value: "transport",
-                  label: "مواصلات"
-                },
-                {
-                  value: "food",
-                  label: "مطاعم"
-                },
-                {
-                  value: "activities",
-                  label: "أنشطة"
-                },
-                {
-                  value: "visa",
-                  label: "تأشيرة"
-                },
-                {
-                  value: "insurance",
-                  label: "تأمين"
-                },
-                {
-                  value: "other",
-                  label: "أخرى"
-                }
-              ]
-            })}
-
-            ${formField({
-              label: "التاريخ",
-              name: "date",
-              type: "date",
-              value: todayISO(),
-              required: true
-            })}
-
-            ${formField({
-              label: "ملاحظة اختيارية",
-              name: "notes",
-              placeholder:
-                "تفاصيل إضافية"
-            })}
-          </form>
-        `
-      });
-    }
-
-    if (
-      name === DIALOGS.HISTORY
-    ) {
-      html = renderDialogShell({
-        title:
-          "سجل الحركات",
-        subtitle:
-          "جميع إضافات وسحوبات ومصروفات صندوق السفر.",
+        title: "سجل الحركات",
+        subtitle: "جميع إضافات وسحوبات صندوق السفر والحركات السابقة.",
         body: `
           <div class="tic-budget-history-list">
             ${
-              snapshot.wallet
-                .transactions.length
+              snapshot.wallet.transactions.length
                 ? snapshot.wallet.transactions
-                    .map((item) =>
-                      renderTransaction(
-                        item,
-                        snapshot
-                      )
-                    )
+                    .map((item) => renderTransaction(item, snapshot))
                     .join("")
                 : `
                   <article class="tic-budget-empty-card">
                     <h3>لا توجد حركات</h3>
-                    <p>
-                      أضف أول مبلغ حتى يبدأ السجل.
-                    </p>
+                    <p>أضف أول مبلغ حتى يبدأ السجل.</p>
                   </article>
                 `
             }
@@ -2058,34 +1459,16 @@
       });
     }
 
-    if (
-      name ===
-      DIALOGS.DESTINATION
-    ) {
-      const destination =
-        getDestination(
-          payload.destinationId
-        );
+    if (name === DIALOGS.DESTINATION) {
+      const destination = getDestination(payload.destinationId);
+      if (!destination) return false;
 
-      if (!destination) {
-        return false;
-      }
-
-      const missing = Math.max(
-        0,
-        destination.cost -
-          snapshot.balance
-      );
+      const missing = Math.max(0, destination.cost - snapshot.balance);
 
       html = renderDialogShell({
-        title:
-          destination.title,
-        subtitle:
-          `${destination.country} • ${destination.days} أيام`,
-        submitLabel:
-          missing > 0
-            ? "أضف الفرق"
-            : "إضافة إلى رحلاتي",
+        title: destination.title,
+        subtitle: `${destination.country} • ${destination.days} أيام`,
+        submitLabel: missing > 0 ? "أضف الفرق" : "إضافة إلى رحلاتي",
         submitAction:
           missing > 0
             ? "submit-destination-difference"
@@ -2093,39 +1476,21 @@
         body: `
           <article
             class="tic-budget-destination-detail"
-            data-dialog-destination-id="${escapeHTML(
-              destination.id
-            )}"
+            data-dialog-destination-id="${escapeHTML(destination.id)}"
           >
-            <span>
-              ${escapeHTML(
-                destination.bestFor
-              )}
-            </span>
+            <span>${escapeHTML(destination.bestFor)}</span>
 
             <h3>
               ${escapeHTML(
-                formatCurrency(
-                  destination.cost,
-                  snapshot.currency
-                )
+                formatCurrency(destination.cost, snapshot.currency)
               )}
             </h3>
 
-            <p>
-              ${escapeHTML(
-                destination.summary
-              )}
-            </p>
+            <p>${escapeHTML(destination.summary)}</p>
 
             <div class="tic-budget-destination-tags">
               ${destination.tags
-                .map(
-                  (tag) =>
-                    `<span>${escapeHTML(
-                      tag
-                    )}</span>`
-                )
+                .map((tag) => `<span>${escapeHTML(tag)}</span>`)
                 .join("")}
             </div>
 
@@ -2133,15 +1498,10 @@
               missing > 0
                 ? `
                   <div class="tic-budget-difference-box">
-                    <small>
-                      تحتاج زيادة
-                    </small>
+                    <small>تحتاج زيادة</small>
                     <strong>
                       ${escapeHTML(
-                        formatCurrency(
-                          missing,
-                          snapshot.currency
-                        )
+                        formatCurrency(missing, snapshot.currency)
                       )}
                     </strong>
                   </div>
@@ -2156,8 +1516,7 @@
         `
       });
 
-      state.selectedDestinationId =
-        destination.id;
+      state.selectedDestinationId = destination.id;
     }
 
     if (!html) return false;
@@ -2165,42 +1524,28 @@
     root.innerHTML = html;
     state.activeDialog = name;
 
-    document.body.classList.add(
-      "tic-budget-dialog-open"
-    );
+    document.body.classList.add("tic-budget-dialog-open");
 
-    window.requestAnimationFrame(
-      () => {
-        root.querySelector(
-          "input, select, textarea"
-        )?.focus();
-      }
-    );
+    window.requestAnimationFrame(() => {
+      root.querySelector("input, select, textarea")?.focus();
+    });
 
     return true;
   };
 
   const closeDialog = () => {
-    if (!state.container) {
-      return false;
-    }
+    if (!state.container) return false;
 
-    const root =
-      state.container.querySelector(
-        "[data-budget-dialog-root]"
-      );
+    const root = state.container.querySelector("[data-budget-dialog-root]");
 
     if (root) {
       root.innerHTML = "";
     }
 
     state.activeDialog = null;
-    state.selectedDestinationId =
-      null;
+    state.selectedDestinationId = null;
 
-    document.body.classList.remove(
-      "tic-budget-dialog-open"
-    );
+    document.body.classList.remove("tic-budget-dialog-open");
 
     if (state.pendingRefresh) {
       state.pendingRefresh = false;
@@ -2213,26 +1558,16 @@
     return true;
   };
 
-  const getFormData = (
-    name
-  ) => {
-    const form =
-      state.container?.querySelector(
-        `[data-budget-form="${name}"]`
-      );
+  const getFormData = (name) => {
+    const form = state.container?.querySelector(
+      `[data-budget-form="${name}"]`
+    );
 
-    if (
-      !form ||
-      !form.reportValidity()
-    ) {
-      return null;
-    }
+    if (!form || !form.reportValidity()) return null;
 
     return {
       form,
-      values: Object.fromEntries(
-        new FormData(form).entries()
-      )
+      values: Object.fromEntries(new FormData(form).entries())
     };
   };
 
@@ -2240,68 +1575,38 @@
      Planned trips integration
   ========================================================= */
 
-  const isDestinationPlanned = (
-    destination
-  ) => {
+  const isDestinationPlanned = (destination) => {
     const raw = readStoreState();
 
-    return asArray(
-      raw.plannedTrips
-    ).some(
+    return asArray(raw.plannedTrips).some(
       (trip) =>
         String(
           trip.sourceRecommendationId ||
           trip.destinationId ||
           ""
-        ) ===
-          String(destination.id) &&
-        ![
-          "archived",
-          "cancelled"
-        ].includes(trip.status)
+        ) === String(destination.id) &&
+        !["archived", "cancelled"].includes(trip.status)
     );
   };
 
-  const createPlannedTripPayload = (
-    destination
-  ) => ({
-    id: createId(
-      "planned_trip"
-    ),
+  const createPlannedTripPayload = (destination) => ({
+    id: createId("planned_trip"),
     title: destination.title,
-    destination:
-      destination.city,
-    destinationId:
-      destination.id,
-    country:
-      destination.country,
-    countryCode:
-      destination.countryCode,
-    city:
-      destination.city,
-    durationDays:
-      destination.days,
-    estimatedBudget:
-      destination.cost,
-    budget:
-      destination.cost,
-    currency:
-      state.snapshot?.currency ||
-      "AED",
-    planningStatus:
-      "planned",
-    status:
-      "planned",
-    sourceRecommendationId:
-      destination.id,
-    source:
-      "simple-budget-advisor",
-    notes:
-      destination.summary,
-    highlights:
-      clone(
-        destination.tags
-      ),
+    destination: destination.city,
+    destinationId: destination.id,
+    country: destination.country,
+    countryCode: destination.countryCode,
+    city: destination.city,
+    durationDays: destination.days,
+    estimatedBudget: destination.cost,
+    budget: destination.cost,
+    currency: state.snapshot?.currency || "AED",
+    planningStatus: "planned",
+    status: "planned",
+    sourceRecommendationId: destination.id,
+    source: "simple-budget-advisor",
+    notes: destination.summary,
+    highlights: clone(destination.tags),
     checklist: {
       destinationApproved: true,
       budgetApproved: true,
@@ -2313,41 +1618,22 @@
       activitiesPlanned: false,
       packingReady: false
     },
-    createdAt:
-      nowISO(),
-    updatedAt:
-      nowISO()
+    createdAt: nowISO(),
+    updatedAt: nowISO()
   });
 
-  const addPlannedTrip = (
-    destinationId,
-    silent = false
-  ) => {
-    const destination =
-      getDestination(
-        destinationId
-      );
-
+  const addPlannedTrip = (destinationId, silent = false) => {
+    const destination = getDestination(destinationId);
     const store = getStore();
 
-    if (
-      !destination ||
-      !store
-    ) {
+    if (!destination || !store) {
       if (!silent) {
-        notify(
-          "تعذر إضافة الرحلة حالياً.",
-          "danger"
-        );
+        notify("تعذر إضافة الرحلة حالياً.", "danger");
       }
       return false;
     }
 
-    if (
-      isDestinationPlanned(
-        destination
-      )
-    ) {
+    if (isDestinationPlanned(destination)) {
       if (!silent) {
         notify(
           "هذه الرحلة موجودة بالفعل ضمن الرحلات المخطط لها.",
@@ -2357,75 +1643,27 @@
       return true;
     }
 
-    const payload =
-      createPlannedTripPayload(
-        destination
-      );
-
+    const payload = createPlannedTripPayload(destination);
     let result = null;
 
     try {
-      if (
-        typeof store.createPlannedTripFromRecommendation ===
-        "function"
-      ) {
-        result =
-          store.createPlannedTripFromRecommendation(
-            payload
-          );
-      } else if (
-        typeof store.createPlannedTrip ===
-        "function"
-      ) {
-        result =
-          store.createPlannedTrip(
-            payload
-          );
-      } else if (
-        typeof store.addPlannedTrip ===
-        "function"
-      ) {
-        result =
-          store.addPlannedTrip(
-            payload
-          );
-      } else if (
-        typeof store.dispatch ===
-        "function"
-      ) {
-        result =
-          store.dispatch(
-            "plannedTrips/add",
-            payload
-          );
-      } else if (
-        typeof store.set ===
-        "function"
-      ) {
-        const raw =
-          readStoreState();
+      if (typeof store.createPlannedTripFromRecommendation === "function") {
+        result = store.createPlannedTripFromRecommendation(payload);
+      } else if (typeof store.createPlannedTrip === "function") {
+        result = store.createPlannedTrip(payload);
+      } else if (typeof store.addPlannedTrip === "function") {
+        result = store.addPlannedTrip(payload);
+      } else if (typeof store.dispatch === "function") {
+        result = store.dispatch("plannedTrips/add", payload);
+      } else if (typeof store.set === "function") {
+        const raw = readStoreState();
+        const next = [...asArray(raw.plannedTrips), payload];
 
-        const next =
-          [
-            ...asArray(
-              raw.plannedTrips
-            ),
-            payload
-          ];
-
-        store.set(
-          "plannedTrips",
-          next,
-          { immediate: true }
-        );
-
+        store.set("plannedTrips", next, { immediate: true });
         result = payload;
       }
     } catch (error) {
-      console.error(
-        "TIC Budget planned trip creation failed:",
-        error
-      );
+      console.error("TIC Budget planned trip creation failed:", error);
     }
 
     if (!result) {
@@ -2446,16 +1684,12 @@
     }
 
     window.dispatchEvent(
-      new CustomEvent(
-        "tic:budget-planned-trip-created",
-        {
-          detail: {
-            destinationId,
-            plannedTrip:
-              clone(result)
-          }
+      new CustomEvent("tic:budget-planned-trip-created", {
+        detail: {
+          destinationId,
+          plannedTrip: clone(result)
         }
-      )
+      })
     );
 
     return true;
@@ -2465,108 +1699,50 @@
      Actions
   ========================================================= */
 
-  const handleAction = async (
-    action,
-    target
-  ) => {
-    const snapshot =
-      state.snapshot ||
-      buildSnapshot();
+  const handleAction = async (action, target) => {
+    const snapshot = state.snapshot || buildSnapshot();
 
-    if (
-      action ===
-      "close-dialog"
-    ) {
+    if (action === "close-dialog") {
       closeDialog();
       return;
     }
 
-    if (
-      action ===
-      "open-deposit"
-    ) {
-      openDialog(
-        DIALOGS.DEPOSIT
-      );
+    if (action === "open-deposit") {
+      openDialog(DIALOGS.DEPOSIT);
       return;
     }
 
-    if (
-      action ===
-      "open-withdrawal"
-    ) {
-      openDialog(
-        DIALOGS.WITHDRAWAL
-      );
+    if (action === "open-withdrawal") {
+      openDialog(DIALOGS.WITHDRAWAL);
       return;
     }
 
-    if (
-      action ===
-      "open-expense"
-    ) {
-      openDialog(
-        DIALOGS.EXPENSE
-      );
+    if (action === "open-history") {
+      openDialog(DIALOGS.HISTORY);
       return;
     }
 
-    if (
-      action ===
-      "open-history"
-    ) {
-      openDialog(
-        DIALOGS.HISTORY
-      );
+    if (action === "open-destination") {
+      openDialog(DIALOGS.DESTINATION, {
+        destinationId: target.dataset.destinationId
+      });
       return;
     }
 
-    if (
-      action ===
-      "open-destination"
-    ) {
-      openDialog(
-        DIALOGS.DESTINATION,
-        {
-          destinationId:
-            target.dataset
-              .destinationId
-        }
-      );
-      return;
-    }
-
-    if (
-      action ===
-      "submit-deposit"
-    ) {
-      const result =
-        getFormData(
-          "deposit"
-        );
-
+    if (action === "submit-deposit") {
+      const result = getFormData("deposit");
       if (!result) return;
 
-      const saved =
-        addTransaction({
-          type:
-            TRANSACTION_TYPES.DEPOSIT,
-          amount:
-            result.values.amount,
-          title:
-            result.values.title ||
-            "إضافة رصيد",
-          notes:
-            result.values.notes,
-          date:
-            result.values.date
-        });
+      const saved = addTransaction({
+        type: TRANSACTION_TYPES.DEPOSIT,
+        amount: result.values.amount,
+        title: result.values.title || "إضافة رصيد",
+        notes: result.values.notes,
+        date: result.values.date
+      });
 
       if (!saved.ok) {
-        notify(
-          "تعذر إضافة الرصيد.",
-          "danger"
-        );
+        notify("تعذر إضافة الرصيد.", "danger");
         return;
       }
 
@@ -2585,37 +1761,19 @@
       return;
     }
 
-    if (
-      action ===
-      "submit-withdrawal"
-    ) {
-      const result =
-        getFormData(
-          "withdrawal"
-        );
-
+    if (action === "submit-withdrawal") {
+      const result = getFormData("withdrawal");
       if (!result) return;
 
-      const saved =
-        addTransaction({
-          type:
-            TRANSACTION_TYPES.WITHDRAWAL,
-          amount:
-            result.values.amount,
-          title:
-            result.values.title ||
-            "سحب من الرصيد",
-          notes:
-            result.values.notes,
-          date:
-            result.values.date
-        });
+      const saved = addTransaction({
+        type: TRANSACTION_TYPES.WITHDRAWAL,
+        amount: result.values.amount,
+        title: result.values.title || "سحب من الرصيد",
+        notes: result.values.notes,
+        date: result.values.date
+      });
 
-      if (
-        !saved.ok &&
-        saved.reason ===
-          "insufficient-balance"
-      ) {
+      if (!saved.ok && saved.reason === "insufficient-balance") {
         notify(
           `المبلغ أكبر من رصيدك الحالي ${formatCurrency(
             saved.balance,
@@ -2627,19 +1785,13 @@
       }
 
       if (!saved.ok) {
-        notify(
-          "تعذر سحب المبلغ.",
-          "danger"
-        );
+        notify("تعذر سحب المبلغ.", "danger");
         return;
       }
 
       closeDialog();
 
-      notify(
-        "تم سحب المبلغ وتحديث الرصيد.",
-        "success"
-      );
+      notify("تم سحب المبلغ وتحديث الرصيد.", "success");
 
       refresh({
         force: true,
@@ -2649,112 +1801,25 @@
       return;
     }
 
-    if (
-      action ===
-      "submit-expense"
-    ) {
-      const result =
-        getFormData(
-          "expense"
-        );
-
-      if (!result) return;
-
-      const saved =
-        addTransaction({
-          type:
-            TRANSACTION_TYPES.EXPENSE,
-          amount:
-            result.values.amount,
-          title:
-            result.values.title ||
-            "مصروف سفر",
-          category:
-            result.values.category,
-          notes:
-            result.values.notes,
-          date:
-            result.values.date
-        });
-
-      if (
-        !saved.ok &&
-        saved.reason ===
-          "insufficient-balance"
-      ) {
-        notify(
-          `المصروف أكبر من رصيدك الحالي ${formatCurrency(
-            saved.balance,
-            snapshot.currency
-          )}.`,
-          "danger"
-        );
-        return;
-      }
-
-      if (!saved.ok) {
-        notify(
-          "تعذر إضافة المصروف.",
-          "danger"
-        );
-        return;
-      }
-
-      closeDialog();
-
-      notify(
-        "تم تسجيل المصروف وتحديث الرصيد.",
-        "success"
-      );
-
-      refresh({
-        force: true,
-        preserveScroll: true
-      });
-
-      return;
-    }
-
-    if (
-      action ===
-      "quick-add-difference"
-    ) {
-      const destination =
-        getDestination(
-          target.dataset
-            .destinationId
-        );
-
+    if (action === "quick-add-difference") {
+      const destination = getDestination(target.dataset.destinationId);
       if (!destination) return;
 
-      const difference =
-        Math.max(
-          0,
-          destination.cost -
-            snapshot.balance
-        );
-
-      openDialog(
-        DIALOGS.DEPOSIT,
-        {
-          amount:
-            difference,
-          title:
-            `إكمال ميزانية ${destination.title}`
-        }
+      const difference = Math.max(
+        0,
+        destination.cost - snapshot.balance
       );
+
+      openDialog(DIALOGS.DEPOSIT, {
+        amount: difference,
+        title: `إكمال ميزانية ${destination.title}`
+      });
 
       return;
     }
 
-    if (
-      action ===
-      "add-planned-trip"
-    ) {
-      addPlannedTrip(
-        target.dataset
-          .destinationId
-      );
+    if (action === "add-planned-trip") {
+      addPlannedTrip(target.dataset.destinationId);
 
       refresh({
         force: true,
@@ -2764,33 +1829,18 @@
       return;
     }
 
-    if (
-      action ===
-      "add-multi-trip"
-    ) {
-      const option =
-        snapshot.analysis
-          .multiTripOptions.find(
-            (item) =>
-              item.id ===
-              target.dataset
-                .multiTripId
-          );
+    if (action === "add-multi-trip") {
+      const option = snapshot.analysis.multiTripOptions.find(
+        (item) => item.id === target.dataset.multiTripId
+      );
 
       if (!option) return;
 
-      const results =
-        option.trips.map(
-          (trip) =>
-            addPlannedTrip(
-              trip.id,
-              true
-            )
-        );
+      const results = option.trips.map((trip) =>
+        addPlannedTrip(trip.id, true)
+      );
 
-      if (
-        results.every(Boolean)
-      ) {
+      if (results.every(Boolean)) {
         notify(
           "تمت إضافة الرحلتين إلى الرحلات المخطط لها.",
           "success"
@@ -2810,51 +1860,30 @@
       return;
     }
 
-    if (
-      action ===
-      "submit-destination-difference"
-    ) {
-      const destination =
-        getDestination(
-          state.selectedDestinationId
-        );
-
+    if (action === "submit-destination-difference") {
+      const destination = getDestination(state.selectedDestinationId);
       if (!destination) return;
 
-      const difference =
-        Math.max(
-          0,
-          destination.cost -
-            snapshot.balance
-        );
+      const difference = Math.max(
+        0,
+        destination.cost - snapshot.balance
+      );
 
       closeDialog();
 
-      openDialog(
-        DIALOGS.DEPOSIT,
-        {
-          amount:
-            difference,
-          title:
-            `إكمال ميزانية ${destination.title}`
-        }
-      );
+      openDialog(DIALOGS.DEPOSIT, {
+        amount: difference,
+        title: `إكمال ميزانية ${destination.title}`
+      });
 
       return;
     }
 
-    if (
-      action ===
-      "submit-destination-trip"
-    ) {
-      const destinationId =
-        state.selectedDestinationId;
+    if (action === "submit-destination-trip") {
+      const destinationId = state.selectedDestinationId;
 
       closeDialog();
-
-      addPlannedTrip(
-        destinationId
-      );
+      addPlannedTrip(destinationId);
 
       refresh({
         force: true,
@@ -2863,20 +1892,11 @@
     }
   };
 
-  const onContainerClick = (
-    event
-  ) => {
-    const target =
-      event.target.closest(
-        "[data-budget-action]"
-      );
+  const onContainerClick = (event) => {
+    const target = event.target.closest("[data-budget-action]");
 
     if (!target) {
-      if (
-        event.target.matches(
-          "[data-budget-dialog-backdrop]"
-        )
-      ) {
+      if (event.target.matches("[data-budget-dialog-backdrop]")) {
         closeDialog();
       }
       return;
@@ -2884,256 +1904,203 @@
 
     event.preventDefault();
 
-    handleAction(
-      target.dataset
-        .budgetAction,
-      target
-    ).catch((error) => {
-      console.error(
-        "TIC Budget action failed:",
-        error
-      );
-
-      notify(
-        "حدث خطأ أثناء تنفيذ العملية.",
-        "danger"
-      );
+    handleAction(target.dataset.budgetAction, target).catch((error) => {
+      console.error("TIC Budget action failed:", error);
+      notify("حدث خطأ أثناء تنفيذ العملية.", "danger");
     });
   };
 
-  const bindContainerEvents =
-    () => {
-      if (!state.container) {
-        return;
+  const markSuggestionActivity = (track) => {
+    if (!track || !state.mounted || state.activeDialog) return;
+
+    state.isSuggestionSwiping = true;
+    state.suggestionScrollLeft = track.scrollLeft;
+
+    if (state.swipeIdleTimer) {
+      window.clearTimeout(state.swipeIdleTimer);
+    }
+
+    state.swipeIdleTimer = window.setTimeout(() => {
+      state.swipeIdleTimer = null;
+      state.isSuggestionSwiping = false;
+      state.suggestionScrollLeft = track.scrollLeft;
+
+      if (state.pendingRefresh && !state.isUserScrolling) {
+        state.pendingRefresh = false;
+        scheduleRefresh({
+          force: false,
+          delay: 180
+        });
       }
+    }, 360);
+  };
 
-      state.container.removeEventListener(
-        "click",
-        onContainerClick
-      );
+  const onContainerScroll = (event) => {
+    const track = event.target.closest?.("[data-budget-suggestion-track]");
+    if (!track) return;
 
-      state.container.addEventListener(
-        "click",
-        onContainerClick
-      );
-    };
+    markSuggestionActivity(track);
+  };
+
+  const onContainerTouchStart = (event) => {
+    const track = event.target.closest?.("[data-budget-suggestion-track]");
+    if (!track) return;
+
+    state.isSuggestionSwiping = true;
+    state.suggestionScrollLeft = track.scrollLeft;
+  };
+
+  const onContainerTouchEnd = (event) => {
+    const track = event.target.closest?.("[data-budget-suggestion-track]");
+    if (!track) return;
+
+    markSuggestionActivity(track);
+  };
+
+  const bindContainerEvents = () => {
+    if (!state.container) return;
+
+    state.container.removeEventListener("click", onContainerClick);
+    state.container.removeEventListener("scroll", onContainerScroll, true);
+    state.container.removeEventListener("touchstart", onContainerTouchStart);
+    state.container.removeEventListener("touchend", onContainerTouchEnd);
+
+    state.container.addEventListener("click", onContainerClick);
+    state.container.addEventListener("scroll", onContainerScroll, true);
+    state.container.addEventListener("touchstart", onContainerTouchStart, {
+      passive: true
+    });
+    state.container.addEventListener("touchend", onContainerTouchEnd, {
+      passive: true
+    });
+  };
+
+  const restoreSuggestionPosition = () => {
+    const track = state.container?.querySelector(
+      "[data-budget-suggestion-track]"
+    );
+
+    if (!track || !state.suggestionScrollLeft) return;
+
+    track.scrollLeft = state.suggestionScrollLeft;
+  };
 
   /* =========================================================
      Scroll stability and refresh
   ========================================================= */
 
-  const signature = (
-    snapshot
-  ) => {
+  const signature = (snapshot) => {
     try {
       return JSON.stringify({
-        balance:
-          snapshot.balance,
-        currency:
-          snapshot.currency,
-        totals:
-          snapshot.totals,
-        transactions:
-          snapshot.wallet.transactions.map(
-            (item) => [
-              item.id,
-              item.type,
-              item.amount,
-              item.createdAt
-            ]
-          ),
+        balance: snapshot.balance,
+        currency: snapshot.currency,
+        totals: snapshot.totals,
+        transactions: snapshot.wallet.transactions.map((item) => [
+          item.id,
+          item.type,
+          item.amount,
+          item.createdAt
+        ]),
         advice: {
-          tone:
-            snapshot.analysis.tone,
-          bestNow:
-            snapshot.analysis
-              .bestNow?.id ||
-            null,
-          nextUpgrade:
-            snapshot.analysis
-              .nextUpgrade?.id ||
-            null,
-          multi:
-            snapshot.analysis
-              .multiTripOptions.map(
-                (item) =>
-                  item.id
-              )
+          tone: snapshot.analysis.tone,
+          bestNow: snapshot.analysis.bestNow?.id || null,
+          nextUpgrade: snapshot.analysis.nextUpgrade?.id || null,
+          multi: snapshot.analysis.multiTripOptions.map((item) => item.id)
         }
       });
     } catch (_) {
-      return String(
-        Date.now()
-      );
+      return String(Date.now());
     }
   };
 
-  const markScrollActivity =
-    () => {
-      if (
-        !state.mounted ||
-        state.activeDialog
-      ) {
-        return;
+  const markScrollActivity = () => {
+    if (!state.mounted || state.activeDialog) return;
+
+    state.isUserScrolling = true;
+    state.lastKnownScrollY = window.scrollY;
+
+    if (state.scrollIdleTimer) {
+      window.clearTimeout(state.scrollIdleTimer);
+    }
+
+    state.scrollIdleTimer = window.setTimeout(() => {
+      state.scrollIdleTimer = null;
+      state.isUserScrolling = false;
+      state.lastKnownScrollY = window.scrollY;
+
+      if (state.pendingRefresh && !state.isSuggestionSwiping) {
+        state.pendingRefresh = false;
+
+        scheduleRefresh({
+          force: false,
+          delay: 180
+        });
       }
+    }, 420);
+  };
 
-      state.isUserScrolling =
-        true;
+  const bindScrollStability = () => {
+    if (
+      state.eventBindings.some(
+        (binding) => binding.name === "budget-scroll"
+      )
+    ) {
+      return;
+    }
 
-      state.lastKnownScrollY =
-        window.scrollY;
-
-      if (
-        state.scrollIdleTimer
-      ) {
-        window.clearTimeout(
-          state.scrollIdleTimer
-        );
-      }
-
-      state.scrollIdleTimer =
-        window.setTimeout(
-          () => {
-            state.scrollIdleTimer =
-              null;
-
-            state.isUserScrolling =
-              false;
-
-            state.lastKnownScrollY =
-              window.scrollY;
-
-            if (
-              state.pendingRefresh
-            ) {
-              state.pendingRefresh =
-                false;
-
-              scheduleRefresh({
-                force: false,
-                delay: 180
-              });
-            }
-          },
-          420
-        );
+    const scrollHandler = () => {
+      markScrollActivity();
     };
 
-  const bindScrollStability =
-    () => {
-      if (
-        state.eventBindings.some(
-          (binding) =>
-            binding.name ===
-            "budget-scroll"
-        )
-      ) {
-        return;
-      }
+    const touchStartHandler = () => {
+      if (!state.mounted || state.activeDialog) return;
 
-      const scrollHandler =
-        () => {
-          markScrollActivity();
-        };
-
-      const touchStartHandler =
-        () => {
-          if (
-            !state.mounted ||
-            state.activeDialog
-          ) {
-            return;
-          }
-
-          state.isUserScrolling =
-            true;
-
-          state.lastKnownScrollY =
-            window.scrollY;
-        };
-
-      const touchEndHandler =
-        () => {
-          markScrollActivity();
-        };
-
-      window.addEventListener(
-        "scroll",
-        scrollHandler,
-        { passive: true }
-      );
-
-      window.addEventListener(
-        "touchstart",
-        touchStartHandler,
-        { passive: true }
-      );
-
-      window.addEventListener(
-        "touchmove",
-        scrollHandler,
-        { passive: true }
-      );
-
-      window.addEventListener(
-        "touchend",
-        touchEndHandler,
-        { passive: true }
-      );
-
-      state.eventBindings.push(
-        {
-          name:
-            "budget-scroll",
-          eventName:
-            "scroll",
-          handler:
-            scrollHandler,
-          target:
-            window
-        },
-        {
-          name:
-            "budget-touchstart",
-          eventName:
-            "touchstart",
-          handler:
-            touchStartHandler,
-          target:
-            window
-        },
-        {
-          name:
-            "budget-touchmove",
-          eventName:
-            "touchmove",
-          handler:
-            scrollHandler,
-          target:
-            window
-        },
-        {
-          name:
-            "budget-touchend",
-          eventName:
-            "touchend",
-          handler:
-            touchEndHandler,
-          target:
-            window
-        }
-      );
+      state.isUserScrolling = true;
+      state.lastKnownScrollY = window.scrollY;
     };
+
+    const touchEndHandler = () => {
+      markScrollActivity();
+    };
+
+    window.addEventListener("scroll", scrollHandler, { passive: true });
+    window.addEventListener("touchstart", touchStartHandler, { passive: true });
+    window.addEventListener("touchmove", scrollHandler, { passive: true });
+    window.addEventListener("touchend", touchEndHandler, { passive: true });
+
+    state.eventBindings.push(
+      {
+        name: "budget-scroll",
+        eventName: "scroll",
+        handler: scrollHandler,
+        target: window
+      },
+      {
+        name: "budget-touchstart",
+        eventName: "touchstart",
+        handler: touchStartHandler,
+        target: window
+      },
+      {
+        name: "budget-touchmove",
+        eventName: "touchmove",
+        handler: scrollHandler,
+        target: window
+      },
+      {
+        name: "budget-touchend",
+        eventName: "touchend",
+        handler: touchEndHandler,
+        target: window
+      }
+    );
+  };
 
   const refresh = ({
     preserveScroll = true,
     force = false
   } = {}) => {
-    if (
-      !state.container ||
-      !state.mounted ||
-      state.refreshing
-    ) {
+    if (!state.container || !state.mounted || state.refreshing) {
       return false;
     }
 
@@ -3141,63 +2108,56 @@
       !force &&
       (
         state.isUserScrolling ||
+        state.isSuggestionSwiping ||
         state.activeDialog
       )
     ) {
-      state.pendingRefresh =
-        true;
+      state.pendingRefresh = true;
       return false;
     }
 
     state.refreshing = true;
 
+    const previousScrollY = window.scrollY;
+    const previousSuggestionScroll =
+      state.container
+        .querySelector("[data-budget-suggestion-track]")
+        ?.scrollLeft || state.suggestionScrollLeft;
+
     try {
-      const snapshot =
-        buildSnapshot();
+      const snapshot = buildSnapshot();
+      const nextSignature = signature(snapshot);
 
-      const nextSignature =
-        signature(snapshot);
-
-      if (
-        !force &&
-        nextSignature ===
-          state.lastSignature
-      ) {
+      if (!force && nextSignature === state.lastSignature) {
         return false;
       }
 
-      state.container.innerHTML =
-        renderPage(snapshot);
-
-      state.lastSignature =
-        nextSignature;
+      state.suggestionScrollLeft = previousSuggestionScroll;
+      state.container.innerHTML = renderPage(snapshot);
+      state.lastSignature = nextSignature;
 
       bindContainerEvents();
 
-      if (!preserveScroll) {
-        window.requestAnimationFrame(
-          () => {
-            window.scrollTo({
-              top: 0,
-              behavior: "auto"
-            });
-          }
-        );
-      } else {
-        state.lastKnownScrollY =
-          window.scrollY;
-      }
+      window.requestAnimationFrame(() => {
+        restoreSuggestionPosition();
+
+        if (!preserveScroll) {
+          window.scrollTo({
+            top: 0,
+            behavior: "auto"
+          });
+        } else {
+          window.scrollTo({
+            top: previousScrollY,
+            behavior: "auto"
+          });
+        }
+      });
 
       emit("refreshed", {
-        balance:
-          snapshot.balance,
-        transactionCount:
-          snapshot.wallet
-            .transactions.length,
-        bestDestination:
-          snapshot.analysis
-            .bestNow?.id ||
-          null
+        balance: snapshot.balance,
+        transactionCount: snapshot.wallet.transactions.length,
+        bestDestination: snapshot.analysis.bestNow?.id || null
       });
 
       return true;
@@ -3210,57 +2170,46 @@
     force = false,
     delay = 220
   } = {}) => {
-    if (!state.mounted) {
-      return false;
-    }
+    if (!state.mounted) return false;
 
     if (
       !force &&
       (
         state.isUserScrolling ||
+        state.isSuggestionSwiping ||
         state.activeDialog
       )
     ) {
-      state.pendingRefresh =
-        true;
+      state.pendingRefresh = true;
       return false;
     }
 
     if (state.refreshTimer) {
-      window.clearTimeout(
-        state.refreshTimer
-      );
+      window.clearTimeout(state.refreshTimer);
     }
 
-    state.refreshTimer =
-      window.setTimeout(
-        () => {
-          state.refreshTimer =
-            null;
+    state.refreshTimer = window.setTimeout(() => {
+      state.refreshTimer = null;
 
-          if (!state.mounted) {
-            return;
-          }
+      if (!state.mounted) return;
 
-          if (
-            !force &&
-            (
-              state.isUserScrolling ||
-              state.activeDialog
-            )
-          ) {
-            state.pendingRefresh =
-              true;
-            return;
-          }
+      if (
+        !force &&
+        (
+          state.isUserScrolling ||
+          state.isSuggestionSwiping ||
+          state.activeDialog
+        )
+      ) {
+        state.pendingRefresh = true;
+        return;
+      }
 
-          refresh({
-            preserveScroll: true,
-            force
-          });
-        },
-        delay
-      );
+      refresh({
+        preserveScroll: true,
+        force
+      });
+    }, delay);
 
     return true;
   };
@@ -3272,64 +2221,32 @@
   const registerActions = () => {
     const ui = getUI();
 
-    if (
-      !ui ||
-      typeof ui.registerAction !==
-        "function"
-    ) {
-      return;
-    }
+    if (!ui || typeof ui.registerAction !== "function") return;
 
-    const register = (
-      name,
-      handler
-    ) => {
-      if (
-        typeof ui.hasAction ===
-          "function" &&
-        ui.hasAction(name)
-      ) {
+    const register = (name, handler) => {
+      if (typeof ui.hasAction === "function" && ui.hasAction(name)) {
         return;
       }
 
-      const unsubscribe =
-        ui.registerAction(
-          name,
-          handler
-        );
+      const unsubscribe = ui.registerAction(name, handler);
 
-      if (
-        typeof unsubscribe ===
-        "function"
-      ) {
-        state.actionUnsubscribers.push(
-          unsubscribe
-        );
+      if (typeof unsubscribe === "function") {
+        state.actionUnsubscribers.push(unsubscribe);
       }
     };
 
-    register(
-      "budget-add-balance",
-      () =>
-        openDialog(
-          DIALOGS.DEPOSIT
-        )
+    register("budget-add-balance", () => openDialog(DIALOGS.DEPOSIT));
+    register("budget-withdraw-balance", () =>
+      openDialog(DIALOGS.WITHDRAWAL)
     );
 
-    register(
-      "budget-withdraw-balance",
-      () =>
-        openDialog(
-          DIALOGS.WITHDRAWAL
-        )
-    );
-
-    register(
-      "budget-add-expense",
-      () =>
-        openDialog(
-          DIALOGS.EXPENSE
-        )
+    /*
+     * Kept as a compatibility alias for older modules.
+     * It now opens withdrawal because the page no longer exposes
+     * a separate Add Expense flow.
+     */
+    register("budget-add-expense", () =>
+      openDialog(DIALOGS.WITHDRAWAL)
     );
   };
 
@@ -3338,22 +2255,17 @@
 
     if (
       !store ||
-      typeof store.subscribe !==
-        "function" ||
+      typeof store.subscribe !== "function" ||
       state.unsubscribeStore
     ) {
       return;
     }
 
-    state.unsubscribeStore =
-      store.subscribe(() => {
-        if (
-          state.mounted &&
-          !state.activeDialog
-        ) {
-          scheduleRefresh();
-        }
-      });
+    state.unsubscribeStore = store.subscribe(() => {
+      if (state.mounted && !state.activeDialog) {
+        scheduleRefresh();
+      }
+    });
   };
 
   const bindGlobalEvents = () => {
@@ -3365,42 +2277,30 @@
       "tic:page:trips:refreshed"
     ];
 
-    events.forEach(
-      (eventName) => {
-        if (
-          state.eventBindings.some(
-            (binding) =>
-              binding.name ===
-              eventName
-          )
-        ) {
-          return;
-        }
-
-        const handler = () => {
-          if (
-            state.mounted &&
-            !state.activeDialog
-          ) {
-            scheduleRefresh();
-          }
-        };
-
-        window.addEventListener(
-          eventName,
-          handler
-        );
-
-        state.eventBindings.push({
-          name:
-            eventName,
-          eventName,
-          handler,
-          target:
-            window
-        });
+    events.forEach((eventName) => {
+      if (
+        state.eventBindings.some(
+          (binding) => binding.name === eventName
+        )
+      ) {
+        return;
       }
-    );
+
+      const handler = () => {
+        if (state.mounted && !state.activeDialog) {
+          scheduleRefresh();
+        }
+      };
+
+      window.addEventListener(eventName, handler);
+
+      state.eventBindings.push({
+        name: eventName,
+        eventName,
+        handler,
+        target: window
+      });
+    });
   };
 
   /* =========================================================
@@ -3426,14 +2326,10 @@
       state.initialized = true;
 
       emit("initialized", {
-        version:
-          PAGE_VERSION,
-        storeAvailable:
-          Boolean(getStore()),
-        routerAvailable:
-          Boolean(getRouter()),
-        uiAvailable:
-          Boolean(getUI())
+        version: PAGE_VERSION,
+        storeAvailable: Boolean(getStore()),
+        routerAvailable: Boolean(getRouter()),
+        uiAvailable: Boolean(getUI())
       });
 
       return this.diagnostics();
@@ -3441,18 +2337,13 @@
 
     render() {
       this.init();
-      return renderPage(
-        buildSnapshot()
-      );
+      return renderPage(buildSnapshot());
     },
 
     mount(context = {}) {
       this.init();
 
-      const container =
-        resolveContainer(
-          context.container
-        );
+      const container = resolveContainer(context.container);
 
       if (!container) {
         throw new Error(
@@ -3460,53 +2351,34 @@
         );
       }
 
-      state.container =
-        container;
+      state.container = container;
+      state.mounted = true;
 
-      state.mounted =
-        true;
+      const snapshot = buildSnapshot();
 
-      const snapshot =
-        buildSnapshot();
-
-      container.innerHTML =
-        renderPage(snapshot);
-
-      state.lastSignature =
-        signature(snapshot);
-
-      state.lastKnownScrollY =
-        window.scrollY;
+      container.innerHTML = renderPage(snapshot);
+      state.lastSignature = signature(snapshot);
+      state.lastKnownScrollY = window.scrollY;
+      state.suggestionScrollLeft = 0;
 
       bindContainerEvents();
       bindScrollStability();
 
       emit("mounted", {
-        balance:
-          snapshot.balance,
-        transactionCount:
-          snapshot.wallet
-            .transactions.length,
-        bestDestination:
-          snapshot.analysis
-            .bestNow?.id ||
-          null
+        balance: snapshot.balance,
+        transactionCount: snapshot.wallet.transactions.length,
+        bestDestination: snapshot.analysis.bestNow?.id || null
       });
 
       return container;
     },
 
     afterEnter(context = {}) {
-      const container =
-        resolveContainer(
-          context.container
-        );
+      const container = resolveContainer(context.container);
 
       if (container) {
-        state.container =
-          container;
-        state.mounted =
-          true;
+        state.container = container;
+        state.mounted = true;
       }
 
       bindContainerEvents();
@@ -3529,17 +2401,17 @@
       closeDialog();
 
       if (state.container) {
+        state.container.removeEventListener("click", onContainerClick);
+        state.container.removeEventListener("scroll", onContainerScroll, true);
         state.container.removeEventListener(
-          "click",
-          onContainerClick
+          "touchstart",
+          onContainerTouchStart
         );
+        state.container.removeEventListener("touchend", onContainerTouchEnd);
       }
 
-      state.mounted =
-        false;
-
-      state.container =
-        null;
+      state.mounted = false;
+      state.container = null;
 
       emit("unmounted");
       return true;
@@ -3548,16 +2420,11 @@
     refresh,
 
     getSnapshot() {
-      return clone(
-        state.snapshot ||
-        buildSnapshot()
-      );
+      return clone(state.snapshot || buildSnapshot());
     },
 
     getWallet() {
-      return clone(
-        getWallet()
-      );
+      return clone(getWallet());
     },
 
     getBalance() {
@@ -3565,26 +2432,15 @@
     },
 
     addBalance(payload = {}) {
-      const result =
-        addTransaction({
-          type:
-            TRANSACTION_TYPES.DEPOSIT,
-          amount:
-            payload.amount,
-          title:
-            payload.title ||
-            "إضافة رصيد",
-          notes:
-            payload.notes,
-          date:
-            payload.date ||
-            todayISO()
-        });
+      const result = addTransaction({
+        type: TRANSACTION_TYPES.DEPOSIT,
+        amount: payload.amount,
+        title: payload.title || "إضافة رصيد",
+        notes: payload.notes,
+        date: payload.date || todayISO()
+      });
 
-      if (
-        result.ok &&
-        state.mounted
-      ) {
+      if (result.ok && state.mounted) {
         refresh({
           force: true,
           preserveScroll: true
@@ -3595,26 +2451,15 @@
     },
 
     withdrawBalance(payload = {}) {
-      const result =
-        addTransaction({
-          type:
-            TRANSACTION_TYPES.WITHDRAWAL,
-          amount:
-            payload.amount,
-          title:
-            payload.title ||
-            "سحب من الرصيد",
-          notes:
-            payload.notes,
-          date:
-            payload.date ||
-            todayISO()
-        });
+      const result = addTransaction({
+        type: TRANSACTION_TYPES.WITHDRAWAL,
+        amount: payload.amount,
+        title: payload.title || "سحب من الرصيد",
+        notes: payload.notes,
+        date: payload.date || todayISO()
+      });
 
-      if (
-        result.ok &&
-        state.mounted
-      ) {
+      if (result.ok && state.mounted) {
         refresh({
           force: true,
           preserveScroll: true
@@ -3624,30 +2469,21 @@
       return clone(result);
     },
 
+    /*
+     * Preserved for backward compatibility and imported data.
+     * The current page UI intentionally does not expose this action.
+     */
     addExpense(payload = {}) {
-      const result =
-        addTransaction({
-          type:
-            TRANSACTION_TYPES.EXPENSE,
-          amount:
-            payload.amount,
-          title:
-            payload.title ||
-            "مصروف سفر",
-          category:
-            payload.category ||
-            "other",
-          notes:
-            payload.notes,
-          date:
-            payload.date ||
-            todayISO()
-        });
+      const result = addTransaction({
+        type: TRANSACTION_TYPES.EXPENSE,
+        amount: payload.amount,
+        title: payload.title || "مصروف سفر",
+        category: payload.category || "other",
+        notes: payload.notes,
+        date: payload.date || todayISO()
+      });
 
-      if (
-        result.ok &&
-        state.mounted
-      ) {
+      if (result.ok && state.mounted) {
         refresh({
           force: true,
           preserveScroll: true
@@ -3658,58 +2494,38 @@
     },
 
     getSuggestions() {
-      const snapshot =
-        state.snapshot ||
-        buildSnapshot();
+      const snapshot = state.snapshot || buildSnapshot();
 
       return clone({
-        advice:
-          snapshot.analysis,
-        destinations:
-          DESTINATIONS
+        advice: snapshot.analysis,
+        destinations: DESTINATIONS
       });
     },
 
     subscribe(listener) {
-      if (
-        typeof listener !==
-        "function"
-      ) {
+      if (typeof listener !== "function") {
         throw new TypeError(
           "TIC Budget subscriber must be a function."
         );
       }
 
-      state.subscribers.add(
-        listener
-      );
+      state.subscribers.add(listener);
 
-      return () =>
-        state.subscribers.delete(
-          listener
-        );
+      return () => state.subscribers.delete(listener);
     },
 
     destroy() {
       this.unmount();
 
-      if (
-        typeof state.unsubscribeStore ===
-        "function"
-      ) {
+      if (typeof state.unsubscribeStore === "function") {
         state.unsubscribeStore();
       }
 
-      state.actionUnsubscribers.forEach(
-        (unsubscribe) => {
-          if (
-            typeof unsubscribe ===
-            "function"
-          ) {
-            unsubscribe();
-          }
+      state.actionUnsubscribers.forEach((unsubscribe) => {
+        if (typeof unsubscribe === "function") {
+          unsubscribe();
         }
-      );
+      });
 
       state.eventBindings.forEach(
         ({
@@ -3718,120 +2534,64 @@
           handler,
           target = window
         }) => {
-          target.removeEventListener(
-            eventName || name,
-            handler
-          );
+          target.removeEventListener(eventName || name, handler);
         }
       );
 
-      if (
-        state.refreshTimer
-      ) {
-        window.clearTimeout(
-          state.refreshTimer
-        );
+      if (state.refreshTimer) {
+        window.clearTimeout(state.refreshTimer);
       }
 
-      if (
-        state.scrollIdleTimer
-      ) {
-        window.clearTimeout(
-          state.scrollIdleTimer
-        );
+      if (state.scrollIdleTimer) {
+        window.clearTimeout(state.scrollIdleTimer);
       }
 
-      state.unsubscribeStore =
-        null;
+      if (state.swipeIdleTimer) {
+        window.clearTimeout(state.swipeIdleTimer);
+      }
 
-      state.actionUnsubscribers =
-        [];
-
-      state.eventBindings =
-        [];
-
-      state.refreshTimer =
-        null;
-
-      state.scrollIdleTimer =
-        null;
-
-      state.isUserScrolling =
-        false;
-
-      state.pendingRefresh =
-        false;
-
-      state.lastKnownScrollY =
-        0;
-
+      state.unsubscribeStore = null;
+      state.actionUnsubscribers = [];
+      state.eventBindings = [];
+      state.refreshTimer = null;
+      state.scrollIdleTimer = null;
+      state.swipeIdleTimer = null;
+      state.isUserScrolling = false;
+      state.isSuggestionSwiping = false;
+      state.pendingRefresh = false;
+      state.lastKnownScrollY = 0;
+      state.suggestionScrollLeft = 0;
       state.subscribers.clear();
-
-      state.snapshot =
-        null;
-
-      state.lastSignature =
-        "";
-
-      state.activeDialog =
-        null;
-
-      state.selectedDestinationId =
-        null;
-
-      state.initialized =
-        false;
-
-      state.refreshing =
-        false;
+      state.snapshot = null;
+      state.lastSignature = "";
+      state.activeDialog = null;
+      state.selectedDestinationId = null;
+      state.initialized = false;
+      state.refreshing = false;
 
       return true;
     },
 
     diagnostics() {
-      const wallet =
-        getWallet();
+      const wallet = getWallet();
 
       return {
-        id:
-          this.id,
-        title:
-          this.title,
-        version:
-          this.version,
-        initialized:
-          state.initialized,
-        mounted:
-          state.mounted,
-        activeDialog:
-          state.activeDialog,
-        hasContainer:
-          Boolean(
-            state.container
-          ),
-        storeAvailable:
-          Boolean(
-            getStore()
-          ),
-        routerAvailable:
-          Boolean(
-            getRouter()
-          ),
-        uiAvailable:
-          Boolean(
-            getUI()
-          ),
-        balance:
-          wallet.balance,
-        transactionCount:
-          wallet.transactions
-            .length,
-        destinationCount:
-          DESTINATIONS.length,
-        subscriberCount:
-          state.subscribers.size,
-        eventBindingCount:
-          state.eventBindings.length
+        id: this.id,
+        title: this.title,
+        version: this.version,
+        initialized: state.initialized,
+        mounted: state.mounted,
+        activeDialog: state.activeDialog,
+        hasContainer: Boolean(state.container),
+        storeAvailable: Boolean(getStore()),
+        routerAvailable: Boolean(getRouter()),
+        uiAvailable: Boolean(getUI()),
+        balance: wallet.balance,
+        transactionCount: wallet.transactions.length,
+        destinationCount: DESTINATIONS.length,
+        subscriberCount: state.subscribers.size,
+        eventBindingCount: state.eventBindings.length,
+        suggestionSwiping: state.isSuggestionSwiping
       };
     }
   };
@@ -3840,52 +2600,27 @@
      Global registration
   ========================================================= */
 
-  window.TIC =
-    window.TIC || {};
+  window.TIC = window.TIC || {};
+  window.TIC.Pages = window.TIC.Pages || {};
+  window.TIC.Pages.budget = BudgetPage;
+  window.TICBudgetPage = BudgetPage;
 
-  window.TIC.Pages =
-    window.TIC.Pages || {};
+  const router = getRouter();
 
-  window.TIC.Pages.budget =
-    BudgetPage;
-
-  window.TICBudgetPage =
-    BudgetPage;
-
-  const router =
-    getRouter();
-
-  if (
-    router &&
-    typeof router.register ===
-      "function"
-  ) {
-    if (
-      typeof router.has !==
-        "function" ||
-      !router.has("budget")
-    ) {
-      router.register(
-        "budget",
-        {
-          id: "budget",
-          title: "الميزانية",
-          module: "budget",
-          icon: "◈",
-          visible: true,
-          order: 4
-        }
-      );
+  if (router && typeof router.register === "function") {
+    if (typeof router.has !== "function" || !router.has("budget")) {
+      router.register("budget", {
+        id: "budget",
+        title: "الميزانية",
+        module: "budget",
+        icon: "◈",
+        visible: true,
+        order: 4
+      });
     }
 
-    if (
-      typeof router.registerPage ===
-      "function"
-    ) {
-      router.registerPage(
-        "budget",
-        BudgetPage
-      );
+    if (typeof router.registerPage === "function") {
+      router.registerPage("budget", BudgetPage);
     }
   }
 
