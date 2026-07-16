@@ -1,14 +1,16 @@
 /* =========================================================
    Travel Intelligence Center
-   Simple Travel Budget Advisor V4.1.0
+   Simple Travel Budget Advisor V5.1.0
 
    File Path:
    js/pages/budget.js
 
    Purpose:
-   - Keeps the Budget page light, calm and iPhone-first.
-   - Uses one clear balance action: Add Balance.
-   - Keeps withdrawal as the secondary balance action.
+   - Aligns the Budget page opening with Home, Trips and Guide.
+   - Starts immediately with one premium green hero card.
+   - Moves the page title, description, balance and actions into the hero.
+   - Uses the approved Home hero proportions as the visual baseline.
+   - Keeps one clear balance action and withdrawal as the secondary action.
    - Preserves legacy expense records and public expense APIs.
    - Displays destination suggestions as a horizontal swipe row.
    - Preserves Router, Store and UI compatibility.
@@ -19,7 +21,7 @@
   "use strict";
 
   const PAGE_ID = "budget";
-  const PAGE_VERSION = "4.1.0";
+  const PAGE_VERSION = "5.1.0";
   const STORAGE_KEY = "tic_simple_travel_budget_v4";
 
   const TRANSACTION_TYPES = Object.freeze({
@@ -790,25 +792,61 @@
   ========================================================= */
 
   const renderHero = (snapshot) => `
-    <section class="tic-budget-simple-hero">
-      <div class="tic-budget-simple-hero-copy">
-        <span class="tic-budget-simple-eyebrow">
-          TRAVEL MONEY ADVISOR
-        </span>
+    <section class="tic-budget-simple-hero tic-budget-wallet-hero">
+      <article class="tic-budget-balance-card tic-budget-balance-card-featured">
+        <div class="tic-budget-hero-main">
+          <div class="tic-budget-hero-copy">
+            <span class="tic-budget-simple-eyebrow">
+              BUDGET CENTER
+            </span>
 
-        <h1>ميزانية سفرك</h1>
+            <h1>ميزانية سفرك</h1>
 
-        <p>
-          أضف رصيدك، واسحب منه عند الحاجة، وخلك تعرف مباشرة وين تقدر تسافر.
-        </p>
-      </div>
+            <p>
+              أضف رصيدك، وخلك تعرف مباشرة وين تقدر تسافر.
+            </p>
+          </div>
 
-      <div class="tic-budget-balance-card">
-        <small>رصيد السفر الحالي</small>
+          <div
+            class="tic-budget-hero-icon"
+            aria-hidden="true"
+          >
+            ◈
+          </div>
+        </div>
 
-        <strong>
-          ${escapeHTML(formatCurrency(snapshot.balance, snapshot.currency))}
-        </strong>
+        <div class="tic-budget-wallet-summary">
+          <div class="tic-budget-wallet-balance">
+            <small>رصيد السفر الحالي</small>
+
+            <strong>
+              ${escapeHTML(
+                formatCurrency(
+                  snapshot.balance,
+                  snapshot.currency
+                )
+              )}
+            </strong>
+          </div>
+
+          <div class="tic-budget-wallet-status">
+            <span>
+              ${
+                snapshot.balance > 0
+                  ? "رصيدك جاهز للتخطيط"
+                  : "ابدأ من الصفر"
+              }
+            </span>
+
+            <small>
+              ${
+                snapshot.balance > 0
+                  ? "اقتراحاتك تتحدث تلقائياً"
+                  : "أضف أول مبلغ لصندوق السفر"
+              }
+            </small>
+          </div>
+        </div>
 
         <div class="tic-budget-primary-actions">
           ${button({
@@ -817,16 +855,16 @@
             tone: "primary",
             icon: "+"
           })}
-        </div>
 
-        <button
-          type="button"
-          class="tic-budget-withdraw-link"
-          data-budget-action="open-withdrawal"
-        >
-          سحب من الرصيد
-        </button>
-      </div>
+          <button
+            type="button"
+            class="tic-budget-withdraw-link"
+            data-budget-action="open-withdrawal"
+          >
+            سحب من الرصيد
+          </button>
+        </div>
+      </article>
     </section>
   `;
 
