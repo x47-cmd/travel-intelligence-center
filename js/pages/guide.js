@@ -1,17 +1,18 @@
 /* =========================================================
    Travel Intelligence Center
-   Guide Intelligence Platform Page V4.4.0
+   Guide Intelligence Platform Page V4.5.0
 
    File Path:
    js/pages/guide.js
 
    Purpose:
-   - Rebuilds the Guide page into a shorter, smoother iPhone-first experience.
-   - Replaces the long vertical recommendation list with a compact horizontal rail.
-   - Keeps only the most useful information visible inside recommendation cards.
-   - Uses one delegated event layer instead of rebinding many listeners after every render.
-   - Prevents Store refreshes and full page rendering while the user is actively scrolling.
-   - Keeps the country picker mounted safely under document.body.
+   - Preserves the complete Guide Intelligence Platform experience.
+   - Fixes iPhone horizontal recommendation rail snapping and RTL conflicts.
+   - Preserves the active recommendation card across page refreshes.
+   - Prevents Store refreshes while the user is scrolling or swiping.
+   - Coalesces repeated Store updates into one controlled refresh.
+   - Reduces unnecessary deep cloning of the full 195-country snapshot.
+   - Keeps one delegated page event layer and one isolated rail event layer.
    - Preserves GuideEngine, TravelAI, PlannerEngine, Store, Router and UI integration.
    - Preserves wishlist, annual planning, country details and trip creation flows.
 
@@ -34,11 +35,12 @@
   "use strict";
 
   const PAGE_ID = "guide";
-  const PAGE_VERSION = "4.4.0";
+  const PAGE_VERSION = "4.5.0";
   const RECOMMENDATION_LIMIT = 8;
   const SEARCH_RESULT_LIMIT = 300;
-  const STORE_REFRESH_DELAY = 220;
-  const SCROLL_IDLE_DELAY = 220;
+  const STORE_REFRESH_DELAY = 650;
+  const SCROLL_IDLE_DELAY = 420;
+  const RAIL_IDLE_DELAY = 180;
 
   const MONTHS_AR = Object.freeze([
     "",
@@ -96,18 +98,29 @@
     rendering: false,
     refreshQueued: false,
     isUserScrolling: false,
+    isRailInteracting: false,
+    recommendationIndex: 0,
+    pendingForceRefresh: false,
 
     storeRefreshTimer: null,
     scrollTimer: null,
     searchTimer: null,
     scrollFrame: null,
+    railScrollTimer: null,
+    railScrollFrame: null,
 
     delegatedClickHandler: null,
     delegatedChangeHandler: null,
-    delegatedInputHandler: null,
     scrollHandler: null,
     scrollTarget: null,
-    escapeHandler: null
+    escapeHandler: null,
+
+    railElement: null,
+    railScrollHandler: null,
+    railTouchStartHandler: null,
+    railTouchEndHandler: null,
+    railPointerDownHandler: null,
+    railPointerUpHandler: null
   };
 
   /* =========================================================
@@ -129,7 +142,7 @@
   };
 
   const safeArray = (value) =>
-    Array.isArray(value) ? clone(value) : [];
+    Array.isArray(value) ? value : [];
 
   const text = (value, fallback = "") =>
     String(
@@ -394,7 +407,7 @@
       state.cacheSnapshot &&
       state.cacheKey === signature
     ) {
-      return clone(state.cacheSnapshot);
+      return state.cacheSnapshot;
     }
 
     const guide = getGuideEngine();
@@ -488,7 +501,7 @@
     };
 
     state.cacheKey = signature;
-    state.cacheSnapshot = clone(snapshot);
+    state.cacheSnapshot = snapshot;
 
     return snapshot;
   };
@@ -881,6 +894,7 @@
       <article
         class="tic-card guide-recommendation-card is-compact"
         data-guide-recommendation-index="${escapeHTML(index)}"
+        dir="rtl"
       >
         <div class="tic-card-body">
           <div class="guide-recommendation-head">
@@ -970,6 +984,7 @@
           class="guide-recommendation-rail"
           data-guide-recommendation-rail
           aria-label="اقتراحات السفر"
+          dir="ltr"
         >
           ${snapshot.recommendations
             .slice(0, RECOMMENDATION_LIMIT)
@@ -2239,34 +2254,334 @@
   };
 
   /* =========================================================
+     Recommendation rail
+  ========================================================= */
+
+  const getRecommendationRail = () =>
+    state.container?.querySelector(
+      "[data-guide-recommendation-rail]"
+    ) || null;
+
+  const getRecommendationCards = (
+    rail = getRecommendationRail()
+  ) =>
+    rail
+      ? Array.from(
+          rail.querySelectorAll(
+            "[data-guide-recommendation-index]"
+          )
+        )
+      : [];
+
+  const clampRecommendationIndex = (
+    value,
+    rail = getRecommendationRail()
+  ) => {
+    const cards = getRecommendationCards(rail);
+
+    if (!cards.length) return 0;
+
+    return clamp(
+      number(value, 0),
+      0,
+      cards.length - 1
+    );
+  };
+
+  const getNearestRecommendationIndex = (
+    rail = getRecommendationRail()
+  ) => {
+    if (!rail) return 0;
+
+    const cards = getRecommendationCards(rail);
+
+    if (!cards.length) return 0;
+
+    const railRect = rail.getBoundingClientRect();
+    const railCenter =
+      railRect.left + railRect.width / 2;
+
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    cards.forEach((card, index) => {
+      const rect = card.getBoundingClientRect();
+      const center = rect.left + rect.width / 2;
+      const distance = Math.abs(center - railCenter);
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+
+    return nearestIndex;
+  };
+
+  const restoreRecommendationPosition = ({
+    behavior = "auto"
+  } = {}) => {
+    const rail = getRecommendationRail();
+
+    if (!rail) return false;
+
+    const cards = getRecommendationCards(rail);
+
+    if (!cards.length) return false;
+
+    state.recommendationIndex =
+      clampRecommendationIndex(
+        state.recommendationIndex,
+        rail
+      );
+
+    const card = cards[state.recommendationIndex];
+
+    if (!card) return false;
+
+    window.requestAnimationFrame(() => {
+      card.scrollIntoView({
+        behavior,
+        block: "nearest",
+        inline: "center"
+      });
+    });
+
+    return true;
+  };
+
+  const finishRailInteraction = () => {
+    window.clearTimeout(
+      state.railScrollTimer
+    );
+
+    state.railScrollTimer =
+      window.setTimeout(() => {
+        state.recommendationIndex =
+          getNearestRecommendationIndex();
+
+        state.isRailInteracting = false;
+
+        if (
+          state.refreshQueued &&
+          !state.rendering &&
+          !state.isUserScrolling
+        ) {
+          const force =
+            state.pendingForceRefresh;
+
+          state.refreshQueued = false;
+          state.pendingForceRefresh = false;
+
+          refresh({
+            force,
+            preserveScroll: true,
+            preserveRail: true,
+            allowDuringScroll: false,
+            allowDuringRail: true
+          });
+        }
+      }, RAIL_IDLE_DELAY);
+  };
+
+  const unbindRecommendationRail = () => {
+    const rail = state.railElement;
+
+    if (rail) {
+      if (state.railScrollHandler) {
+        rail.removeEventListener(
+          "scroll",
+          state.railScrollHandler
+        );
+      }
+
+      if (state.railTouchStartHandler) {
+        rail.removeEventListener(
+          "touchstart",
+          state.railTouchStartHandler
+        );
+      }
+
+      if (state.railTouchEndHandler) {
+        rail.removeEventListener(
+          "touchend",
+          state.railTouchEndHandler
+        );
+
+        rail.removeEventListener(
+          "touchcancel",
+          state.railTouchEndHandler
+        );
+      }
+
+      if (state.railPointerDownHandler) {
+        rail.removeEventListener(
+          "pointerdown",
+          state.railPointerDownHandler
+        );
+      }
+
+      if (state.railPointerUpHandler) {
+        rail.removeEventListener(
+          "pointerup",
+          state.railPointerUpHandler
+        );
+
+        rail.removeEventListener(
+          "pointercancel",
+          state.railPointerUpHandler
+        );
+      }
+    }
+
+    if (state.railScrollFrame) {
+      window.cancelAnimationFrame(
+        state.railScrollFrame
+      );
+    }
+
+    window.clearTimeout(
+      state.railScrollTimer
+    );
+
+    state.railElement = null;
+    state.railScrollHandler = null;
+    state.railTouchStartHandler = null;
+    state.railTouchEndHandler = null;
+    state.railPointerDownHandler = null;
+    state.railPointerUpHandler = null;
+    state.railScrollFrame = null;
+    state.railScrollTimer = null;
+    state.isRailInteracting = false;
+  };
+
+  const bindRecommendationRail = () => {
+    unbindRecommendationRail();
+
+    const rail = getRecommendationRail();
+
+    if (!rail) return;
+
+    state.railElement = rail;
+
+    state.railScrollHandler = () => {
+      state.isRailInteracting = true;
+
+      if (state.railScrollFrame) return;
+
+      state.railScrollFrame =
+        window.requestAnimationFrame(() => {
+          state.railScrollFrame = null;
+          state.recommendationIndex =
+            getNearestRecommendationIndex(rail);
+          finishRailInteraction();
+        });
+    };
+
+    state.railTouchStartHandler = () => {
+      state.isRailInteracting = true;
+      window.clearTimeout(
+        state.railScrollTimer
+      );
+    };
+
+    state.railTouchEndHandler = () => {
+      finishRailInteraction();
+    };
+
+    state.railPointerDownHandler = () => {
+      state.isRailInteracting = true;
+      window.clearTimeout(
+        state.railScrollTimer
+      );
+    };
+
+    state.railPointerUpHandler = () => {
+      finishRailInteraction();
+    };
+
+    rail.addEventListener(
+      "scroll",
+      state.railScrollHandler,
+      { passive: true }
+    );
+
+    rail.addEventListener(
+      "touchstart",
+      state.railTouchStartHandler,
+      { passive: true }
+    );
+
+    rail.addEventListener(
+      "touchend",
+      state.railTouchEndHandler,
+      { passive: true }
+    );
+
+    rail.addEventListener(
+      "touchcancel",
+      state.railTouchEndHandler,
+      { passive: true }
+    );
+
+    rail.addEventListener(
+      "pointerdown",
+      state.railPointerDownHandler,
+      { passive: true }
+    );
+
+    rail.addEventListener(
+      "pointerup",
+      state.railPointerUpHandler,
+      { passive: true }
+    );
+
+    rail.addEventListener(
+      "pointercancel",
+      state.railPointerUpHandler,
+      { passive: true }
+    );
+
+    restoreRecommendationPosition();
+  };
+
+  /* =========================================================
      Page events
   ========================================================= */
 
   const scrollRecommendationRail = (
     direction
   ) => {
-    const rail = state.container?.querySelector(
-      "[data-guide-recommendation-rail]"
-    );
+    const rail = getRecommendationRail();
 
     if (!rail) return false;
 
-    const card = rail.querySelector(
-      ".guide-recommendation-card"
+    const cards = getRecommendationCards(rail);
+
+    if (!cards.length) return false;
+
+    const current =
+      getNearestRecommendationIndex(rail);
+
+    const delta =
+      direction === "next" ? 1 : -1;
+
+    const targetIndex = clamp(
+      current + delta,
+      0,
+      cards.length - 1
     );
 
-    const distance =
-      (card?.getBoundingClientRect?.().width ||
-        rail.clientWidth * 0.78) + 14;
+    state.recommendationIndex = targetIndex;
+    state.isRailInteracting = true;
 
-    rail.scrollBy({
-      left:
-        direction === "next"
-          ? -distance
-          : distance,
-      behavior: "smooth"
+    cards[targetIndex]?.scrollIntoView?.({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center"
     });
 
+    finishRailInteraction();
     return true;
   };
 
@@ -2346,7 +2661,9 @@
       refresh({
         force: true,
         preserveScroll: true,
-        allowDuringScroll: false
+        preserveRail: true,
+        allowDuringScroll: false,
+        allowDuringRail: false
       });
     };
 
@@ -2412,13 +2729,21 @@
 
               if (
                 state.refreshQueued &&
-                !state.rendering
+                !state.rendering &&
+                !state.isRailInteracting
               ) {
+                const force =
+                  state.pendingForceRefresh;
+
                 state.refreshQueued = false;
+                state.pendingForceRefresh = false;
 
                 refresh({
+                  force,
                   preserveScroll: true,
-                  allowDuringScroll: true
+                  preserveRail: true,
+                  allowDuringScroll: true,
+                  allowDuringRail: false
                 });
               }
             }, SCROLL_IDLE_DELAY);
@@ -2463,8 +2788,14 @@
       return false;
     }
 
+    const requestedForce =
+      options.force === true;
+
     if (state.rendering) {
       state.refreshQueued = true;
+      state.pendingForceRefresh =
+        state.pendingForceRefresh ||
+        requestedForce;
       return false;
     }
 
@@ -2473,31 +2804,63 @@
       options.allowDuringScroll !== true
     ) {
       state.refreshQueued = true;
+      state.pendingForceRefresh =
+        state.pendingForceRefresh ||
+        requestedForce;
+      return false;
+    }
+
+    if (
+      state.isRailInteracting &&
+      options.allowDuringRail !== true
+    ) {
+      state.refreshQueued = true;
+      state.pendingForceRefresh =
+        state.pendingForceRefresh ||
+        requestedForce;
       return false;
     }
 
     state.rendering = true;
 
     const scrollTop = getScrollTop();
+    const preservedRecommendationIndex =
+      options.preserveRail === false
+        ? 0
+        : getNearestRecommendationIndex();
+
+    state.recommendationIndex =
+      preservedRecommendationIndex;
 
     try {
       const snapshot = await buildSnapshot({
-        force: options.force === true
+        force: requestedForce
       });
 
       state.snapshot = snapshot;
+
+      unbindRecommendationRail();
+
       state.container.innerHTML =
         renderPage(snapshot);
 
+      bindRecommendationRail();
+
       if (options.preserveScroll !== false) {
         restoreScrollTop(scrollTop);
+      }
+
+      if (options.preserveRail !== false) {
+        restoreRecommendationPosition();
       }
 
       emit("refreshed", {
         activeView: state.activeView,
         activeSection: state.activeSection,
         selectedCountryCode:
-          state.selectedCountryCode
+          state.selectedCountryCode,
+        recommendationIndex:
+          state.recommendationIndex
       });
 
       return true;
@@ -2506,16 +2869,24 @@
 
       if (
         state.refreshQueued &&
-        !state.isUserScrolling
+        !state.isUserScrolling &&
+        !state.isRailInteracting
       ) {
+        const force =
+          state.pendingForceRefresh;
+
         state.refreshQueued = false;
+        state.pendingForceRefresh = false;
 
         window.setTimeout(() => {
           refresh({
+            force,
             preserveScroll: true,
-            allowDuringScroll: false
+            preserveRail: true,
+            allowDuringScroll: false,
+            allowDuringRail: false
           });
-        }, 50);
+        }, 90);
       }
     }
   };
@@ -2551,6 +2922,7 @@
       state.selectedDays;
     state.activeView = "country";
     state.activeSection = "overview";
+    state.recommendationIndex = 0;
     state.search = "";
     state.countryPickerOpen = false;
 
@@ -2566,7 +2938,9 @@
     await refresh({
       force: true,
       preserveScroll: false,
-      allowDuringScroll: true
+      preserveRail: false,
+      allowDuringScroll: true,
+      allowDuringRail: true
     });
 
     restoreScrollTop(0);
@@ -2615,6 +2989,7 @@
         state.selectedCountryCode = "";
         state.search = "";
         state.countryPickerOpen = false;
+        state.recommendationIndex = 0;
 
         removeCountrySheetPortal();
         syncCountrySheetBodyLock();
@@ -2625,7 +3000,9 @@
         await refresh({
           force: true,
           preserveScroll: false,
-          allowDuringScroll: true
+          preserveRail: false,
+          allowDuringScroll: true,
+          allowDuringRail: true
         });
 
         restoreScrollTop(0);
@@ -2640,7 +3017,9 @@
 
         await refresh({
           preserveScroll: true,
-          allowDuringScroll: true
+          preserveRail: true,
+          allowDuringScroll: true,
+          allowDuringRail: true
         });
 
         window.setTimeout(() => {
@@ -2669,7 +3048,9 @@
 
         await refresh({
           preserveScroll: true,
-          allowDuringScroll: true
+          preserveRail: true,
+          allowDuringScroll: true,
+          allowDuringRail: true
         });
 
         window.setTimeout(() => {
@@ -2718,7 +3099,9 @@
         await refresh({
           force: section === "planner",
           preserveScroll: true,
-          allowDuringScroll: true
+          preserveRail: true,
+          allowDuringScroll: true,
+          allowDuringRail: false
         });
 
         return true;
@@ -2751,7 +3134,9 @@
           await refresh({
             force: true,
             preserveScroll: true,
-            allowDuringScroll: true
+            preserveRail: true,
+            allowDuringScroll: true,
+            allowDuringRail: false
           });
 
           return result || true;
@@ -2813,7 +3198,9 @@
           await refresh({
             force: true,
             preserveScroll: true,
-            allowDuringScroll: true
+            preserveRail: true,
+            allowDuringScroll: true,
+            allowDuringRail: false
           });
 
           return plan || true;
@@ -2939,7 +3326,9 @@
           await refresh({
             force: true,
             preserveScroll: true,
-            allowDuringScroll: true
+            preserveRail: true,
+            allowDuringScroll: true,
+            allowDuringRail: false
           });
 
           return result || true;
@@ -2973,10 +3362,7 @@
 
     state.unsubscribeStore =
       store.subscribe(() => {
-        if (
-          !state.mounted ||
-          state.rendering
-        ) {
+        if (!state.mounted) {
           return;
         }
 
@@ -2988,10 +3374,22 @@
           window.setTimeout(() => {
             invalidateSnapshotCache();
 
+            if (
+              state.rendering ||
+              state.isUserScrolling ||
+              state.isRailInteracting
+            ) {
+              state.refreshQueued = true;
+              state.pendingForceRefresh = true;
+              return;
+            }
+
             refresh({
               force: true,
               preserveScroll: true,
-              allowDuringScroll: false
+              preserveRail: true,
+              allowDuringScroll: false,
+              allowDuringRail: false
             });
           }, STORE_REFRESH_DELAY);
       });
@@ -3105,6 +3503,7 @@
 
       bindDelegatedPageEvents();
       registerScrollState();
+      bindRecommendationRail();
 
       emit("mounted", {
         totalCountries:
@@ -3134,6 +3533,7 @@
 
       bindDelegatedPageEvents();
       registerScrollState();
+      bindRecommendationRail();
 
       return true;
     },
@@ -3141,6 +3541,7 @@
     unmount() {
       unbindDelegatedPageEvents();
       unregisterScrollState();
+      unbindRecommendationRail();
 
       state.mounted = false;
       state.container = null;
@@ -3156,6 +3557,15 @@
       window.clearTimeout(
         state.scrollTimer
       );
+
+      window.clearTimeout(
+        state.railScrollTimer
+      );
+
+      state.refreshQueued = false;
+      state.pendingForceRefresh = false;
+      state.isUserScrolling = false;
+      state.isRailInteracting = false;
 
       state.countryPickerOpen = false;
       state.search = "";
@@ -3248,10 +3658,16 @@
           ),
         recommendationLimit:
           RECOMMENDATION_LIMIT,
+        recommendationIndex:
+          state.recommendationIndex,
         isUserScrolling:
           state.isUserScrolling,
+        isRailInteracting:
+          state.isRailInteracting,
         refreshQueued:
           state.refreshQueued,
+        pendingForceRefresh:
+          state.pendingForceRefresh,
         storeAvailable:
           Boolean(getStore()),
         routerAvailable:
