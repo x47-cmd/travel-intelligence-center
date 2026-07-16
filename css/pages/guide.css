@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Guide Intelligence Platform UI V4.4.0
+   Guide Intelligence Platform UI V4.5.0
 
    File Path:
    css/pages/guide.css
@@ -14,10 +14,12 @@
      <link rel="stylesheet" href="css/pages/guide.css">
 
    Purpose:
-   - Dedicated styling for js/pages/guide.js V4.4.0.
-   - Keeps Guide-specific styling out of the large global stylesheet.
-   - Replaces the long vertical recommendation list with a compact horizontal rail.
-   - Improves iPhone scrolling, touch handling, card density and page length.
+   - Dedicated styling for js/pages/guide.js V4.5.0.
+   - Keeps Guide-specific styling out of the global stylesheet.
+   - Fixes iPhone RTL horizontal rail snapping and swipe conflicts.
+   - Preserves the active recommendation position after page refreshes.
+   - Removes unnecessary GPU layers and heavy paint hints on Safari.
+   - Improves vertical scrolling, horizontal touch handling and card density.
    - Preserves the country picker bottom sheet, country details, wishlist,
      annual plans, profile, itinerary and all Guide interactions.
    - Fully scoped to .guide-page and Guide sheet portal selectors.
@@ -36,7 +38,6 @@
   margin-inline: auto;
   padding-bottom: 8px;
   direction: rtl;
-  contain: layout style;
 }
 
 .guide-page,
@@ -467,12 +468,13 @@
     2px
     2px
     8px;
-  scroll-snap-type: inline mandatory;
+  direction: ltr;
+  scroll-snap-type: x proximity;
   scroll-padding-inline: 2px;
-  overscroll-behavior-inline: contain;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
-  touch-action: pan-x pan-y;
+  touch-action: pan-x;
 }
 
 .guide-recommendation-rail::-webkit-scrollbar {
@@ -484,10 +486,9 @@
   min-height: 0;
   overflow: hidden;
   border-radius: 19px;
-  scroll-snap-align: start;
+  direction: rtl;
+  scroll-snap-align: center;
   scroll-snap-stop: normal;
-  content-visibility: auto;
-  contain-intrinsic-size: 280px 250px;
 }
 
 .guide-recommendation-card .tic-card-body {
@@ -656,10 +657,11 @@
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 4px;
-  scroll-snap-type: inline proximity;
-  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  touch-action: pan-x;
 }
 
 .guide-mini-rail::-webkit-scrollbar {
@@ -681,8 +683,6 @@
   text-align: center;
   cursor: pointer;
   scroll-snap-align: start;
-  content-visibility: auto;
-  contain-intrinsic-size: 128px 96px;
 }
 
 .guide-mini-card > span {
@@ -714,8 +714,6 @@
 
 .guide-plan-card {
   border-radius: 18px;
-  content-visibility: auto;
-  contain-intrinsic-size: 1px 82px;
 }
 
 .guide-plan-card .tic-card-body {
@@ -956,12 +954,11 @@
   overflow-x: auto;
   overflow-y: hidden;
   padding: 7px 1px;
-  background: rgba(245, 247, 251, 0.94);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(245, 247, 251, 0.98);
   scrollbar-width: none;
-  overscroll-behavior-inline: contain;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 
 .guide-country-tabs::-webkit-scrollbar {
@@ -1006,8 +1003,6 @@
 .guide-info-card,
 .guide-itinerary-day {
   border-radius: 19px;
-  content-visibility: auto;
-  contain-intrinsic-size: 1px 180px;
 }
 
 .guide-info-card .tic-card-body,
@@ -1125,8 +1120,6 @@ body.guide-country-sheet-open {
     8px
     max(8px, env(safe-area-inset-bottom));
   background: rgba(8, 23, 43, 0.58);
-  backdrop-filter: blur(9px);
-  -webkit-backdrop-filter: blur(9px);
   overscroll-behavior: contain;
   animation: guide-sheet-backdrop-in 160ms ease both;
 }
@@ -1390,18 +1383,6 @@ body.guide-country-sheet-open {
    15. Performance and Stability
 ========================================================= */
 
-.guide-recommendation-card,
-.guide-mini-card,
-.guide-plan-card,
-.guide-info-card,
-.guide-itinerary-day {
-  transform: translateZ(0);
-}
-
-.guide-page .tic-card {
-  backface-visibility: hidden;
-}
-
 .guide-recommendation-rail,
 .guide-mini-rail,
 .guide-country-tabs,
@@ -1409,8 +1390,9 @@ body.guide-country-sheet-open {
   scroll-behavior: auto;
 }
 
-.guide-page [data-guide-recommendation-rail] {
-  will-change: scroll-position;
+.guide-page.is-scrolling .tic-card,
+.guide-page.is-scrolling .guide-country-tabs {
+  box-shadow: none;
 }
 
 /* =========================================================
@@ -1556,6 +1538,7 @@ body.guide-country-sheet-open {
         - 3px
         + env(safe-area-inset-top)
       );
+    background: #f5f7fb;
   }
 
   .guide-country-sheet-backdrop {
