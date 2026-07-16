@@ -40,7 +40,8 @@
        Smart next-trip summary V2.4.0
        Fast Single-Page Trip Form V4.1.0
        Ticket and hotel document import
-       Unified Guide Intelligence V4.0.0
+       Unified Guide Intelligence V4.4.0
+       Dedicated Guide UI stylesheet V4.4.0
        Complete 195-country World Guide Data
        Guide Engine + Travel AI + Planner Engine
        Passport and Guide country-code integration
@@ -52,9 +53,28 @@
        Budget analytics, AI, alerts and notifications
   ====================================================== -->
 
+  <!-- =====================================================
+       Global Design System
+
+       style.css:
+       - Global application shell
+       - Shared components
+       - Home, Trips, Budget and More styles
+
+       guide.css:
+       - Dedicated Guide Intelligence Platform styling
+       - Must load AFTER style.css
+       - Supports js/pages/guide.js V4.4.0
+  ====================================================== -->
+
   <link
     rel="stylesheet"
     href="css/style.css?v=2.3.1"
+  />
+
+  <link
+    rel="stylesheet"
+    href="css/pages/guide.css?v=4.4.0"
   />
 
   <!-- =====================================================
@@ -332,9 +352,20 @@
        Current page versions:
        - Home V2.4.0
        - Trips V3.7.0
-       - Guide V4.0.0
+       - Guide V4.4.0
        - Budget V3.2.0
        - More V2.0.0
+
+       Guide V4.4.0:
+       - Compact iPhone-first Guide experience
+       - Horizontal recommendation rail
+       - Shorter page structure
+       - Delegated page events
+       - Scroll-safe refresh behavior
+       - Dedicated css/pages/guide.css stylesheet
+       - Country picker bottom sheet
+       - Wishlist, annual plans and profile
+       - Country guide and itinerary flows
 
        Trips V3.7.0:
        - Active and upcoming journeys
@@ -363,7 +394,7 @@
 
   <script
     defer
-    src="js/pages/guide.js?v=4.0.0"
+    src="js/pages/guide.js?v=4.4.0"
   ></script>
 
   <script
