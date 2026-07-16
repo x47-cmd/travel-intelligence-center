@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Guide Intelligence Platform Page V4.2.0
+   Guide Intelligence Platform Page V4.3.0
 
    File Path:
    js/pages/guide.js
@@ -8,7 +8,8 @@
    Purpose:
    - Complete redesign of the Guide page for a compact iPhone-first UX.
    - Removes oversized empty cards and long recommendation layouts.
-   - Replaces the inline country list with an iPhone-friendly bottom sheet picker.
+   - Mounts the country picker directly under document.body through a safe portal.
+   - Prevents transformed or contained page ancestors from breaking fixed positioning.
    - Limits initial recommendation rendering to improve page performance.
    - Uses cached snapshots and debounced updates to avoid unnecessary full renders.
    - Preserves GuideEngine, TravelAI, PlannerEngine, Store, Router and UI integration.
@@ -33,7 +34,7 @@
   "use strict";
 
   const PAGE_ID = "guide";
-  const PAGE_VERSION = "4.2.0";
+  const PAGE_VERSION = "4.3.0";
   const INITIAL_RECOMMENDATION_LIMIT = 6;
   const SEARCH_RESULT_LIMIT = 300;
   const STORE_REFRESH_DELAY = 180;
@@ -74,6 +75,9 @@
     selectedCountryCode: "",
     search: "",
     countryPickerOpen: false,
+    countrySheetRoot: null,
+    countrySheetReturnFocus: null,
+    bodyScrollY: 0,
 
     selectedDays: 7,
     selectedTravelers: 2,
@@ -1653,8 +1657,6 @@
             ? renderCountryView(snapshot)
             : renderDiscoverView(snapshot)
         }
-
-        ${renderCountrySheet(snapshot)}
       </div>
     `;
   };
@@ -1663,94 +1665,59 @@
      Events and refresh
   ========================================================= */
 
+  const getCountrySheetRoot = () =>
+    state.countrySheetRoot ||
+    document.querySelector("[data-guide-country-sheet-portal]");
+
   const syncCountrySheetBodyLock = () => {
+    const shouldLock = Boolean(state.countryPickerOpen);
+
     document.body.classList.toggle(
       "guide-country-sheet-open",
-      Boolean(state.countryPickerOpen)
+      shouldLock
     );
+
+    if (shouldLock) {
+      if (!document.body.dataset.guideSheetLocked) {
+        state.bodyScrollY =
+          window.scrollY ||
+          document.documentElement.scrollTop ||
+          0;
+
+        document.body.dataset.guideSheetLocked = "true";
+        document.body.style.position = "fixed";
+        document.body.style.top = `-${state.bodyScrollY}px`;
+        document.body.style.insetInline = "0";
+        document.body.style.width = "100%";
+      }
+
+      return;
+    }
+
+    if (document.body.dataset.guideSheetLocked) {
+      const restoreY = state.bodyScrollY;
+
+      delete document.body.dataset.guideSheetLocked;
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.insetInline = "";
+      document.body.style.width = "";
+
+      window.requestAnimationFrame(() => {
+        window.scrollTo(0, restoreY);
+      });
+    }
   };
 
-  const openCountrySheet = async ({ focusSearch = true } = {}) => {
-    if (state.countryPickerOpen) {
-      const existingInput =
-        state.container?.querySelector("[data-guide-sheet-search]");
+  const removeCountrySheetPortal = () => {
+    const root = getCountrySheetRoot();
 
-      if (focusSearch) existingInput?.focus?.();
-      return true;
+    if (root?.parentNode) {
+      root.parentNode.removeChild(root);
     }
 
-    state.countryPickerOpen = true;
-    state.search = "";
-    invalidateSnapshotCache();
-
-    await refresh({
-      force: true,
-      preserveScroll: true,
-      allowDuringScroll: true
-    });
-
-    syncCountrySheetBodyLock();
-
-    if (focusSearch) {
-      window.setTimeout(() => {
-        state.container
-          ?.querySelector("[data-guide-sheet-search]")
-          ?.focus?.();
-      }, 80);
-    }
-
-    emit("country-picker-opened");
+    state.countrySheetRoot = null;
     return true;
-  };
-
-  const closeCountrySheet = async ({ preserveSearch = false } = {}) => {
-    if (!state.countryPickerOpen) return true;
-
-    state.countryPickerOpen = false;
-
-    if (!preserveSearch) {
-      state.search = "";
-    }
-
-    invalidateSnapshotCache();
-    syncCountrySheetBodyLock();
-
-    await refresh({
-      force: true,
-      preserveScroll: true,
-      allowDuringScroll: true
-    });
-
-    emit("country-picker-closed");
-    return true;
-  };
-
-  const updateSearchResultsOnly = () => {
-    if (!state.container || !state.snapshot) return;
-
-    const guide = getGuideEngine();
-    const allCountries =
-      state.snapshot.allCountries?.length
-        ? state.snapshot.allCountries
-        : getAllCountries(guide);
-
-    const countries = filterCountries(allCountries, state.search);
-    const list = state.container.querySelector(
-      "[data-guide-country-sheet-list]"
-    );
-    const count = state.container.querySelector(
-      ".guide-country-sheet-count span"
-    );
-
-    if (count) {
-      count.textContent =
-        `${countries.length} ${countries.length === 1 ? "نتيجة" : "دولة"}`;
-    }
-
-    if (!list) return;
-
-    list.innerHTML = renderCountryOptions(countries);
-    bindCountryOptionListeners(list);
   };
 
   const bindCountryOptionListeners = (scope) => {
@@ -1767,27 +1734,80 @@
       });
   };
 
-  const applyListeners = () => {
-    if (!state.container) return;
+  const updateSearchResultsOnly = () => {
+    const root = getCountrySheetRoot();
 
-    state.container
-      .querySelectorAll("[data-guide-open-country-sheet]")
-      .forEach((button) => {
-        button.addEventListener("click", () => {
-          openCountrySheet({ focusSearch: true });
-        });
+    if (!root || !state.snapshot) return;
+
+    const guide = getGuideEngine();
+    const allCountries =
+      state.snapshot.allCountries?.length
+        ? state.snapshot.allCountries
+        : getAllCountries(guide);
+
+    const countries = filterCountries(allCountries, state.search);
+    const list = root.querySelector(
+      "[data-guide-country-sheet-list]"
+    );
+    const count = root.querySelector(
+      ".guide-country-sheet-count span"
+    );
+    const clearHost = root.querySelector(
+      ".guide-country-sheet-search"
+    );
+    const existingClear = root.querySelector(
+      "[data-guide-clear-sheet-search]"
+    );
+
+    if (count) {
+      count.textContent =
+        `${countries.length} ${countries.length === 1 ? "نتيجة" : "دولة"}`;
+    }
+
+    if (list) {
+      list.innerHTML = renderCountryOptions(countries);
+      bindCountryOptionListeners(list);
+    }
+
+    if (state.search && !existingClear && clearHost) {
+      const clearButton = document.createElement("button");
+      clearButton.type = "button";
+      clearButton.setAttribute("data-guide-clear-sheet-search", "");
+      clearButton.setAttribute("aria-label", "مسح البحث");
+      clearButton.textContent = "×";
+      clearHost.appendChild(clearButton);
+
+      clearButton.addEventListener("click", () => {
+        state.search = "";
+
+        const input = root.querySelector(
+          "[data-guide-sheet-search]"
+        );
+
+        if (input) {
+          input.value = "";
+          input.focus();
+        }
+
+        updateSearchResultsOnly();
+      });
+    } else if (!state.search && existingClear) {
+      existingClear.remove();
+    }
+  };
+
+  const bindCountrySheetListeners = (root) => {
+    if (!root) return;
+
+    root
+      .querySelector("[data-guide-close-country-sheet]")
+      ?.addEventListener("click", () => {
+        closeCountrySheet();
       });
 
-    state.container
-      .querySelectorAll("[data-guide-close-country-sheet]")
-      .forEach((button) => {
-        button.addEventListener("click", () => {
-          closeCountrySheet();
-        });
-      });
-
-    const backdrop =
-      state.container.querySelector("[data-guide-country-sheet-backdrop]");
+    const backdrop = root.querySelector(
+      "[data-guide-country-sheet-backdrop]"
+    );
 
     backdrop?.addEventListener("click", (event) => {
       if (event.target === backdrop) {
@@ -1795,15 +1815,15 @@
       }
     });
 
-    const sheet =
-      state.container.querySelector("[data-guide-country-sheet]");
+    root
+      .querySelector("[data-guide-country-sheet]")
+      ?.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
 
-    sheet?.addEventListener("click", (event) => {
-      event.stopPropagation();
-    });
-
-    const searchInput =
-      state.container.querySelector("[data-guide-sheet-search]");
+    const searchInput = root.querySelector(
+      "[data-guide-sheet-search]"
+    );
 
     searchInput?.addEventListener("input", (event) => {
       state.search = event.target.value;
@@ -1815,23 +1835,128 @@
       );
     });
 
-    state.container
+    root
       .querySelector("[data-guide-clear-sheet-search]")
       ?.addEventListener("click", () => {
         state.search = "";
 
-        const input =
-          state.container.querySelector("[data-guide-sheet-search]");
-
-        if (input) {
-          input.value = "";
-          input.focus();
+        if (searchInput) {
+          searchInput.value = "";
+          searchInput.focus();
         }
 
         updateSearchResultsOnly();
       });
 
-    bindCountryOptionListeners(state.container);
+    bindCountryOptionListeners(root);
+  };
+
+  const mountCountrySheetPortal = ({ focusSearch = true } = {}) => {
+    removeCountrySheetPortal();
+
+    const snapshot = state.snapshot;
+
+    if (!snapshot?.ready) return false;
+
+    const root = document.createElement("div");
+    root.setAttribute("data-guide-country-sheet-portal", "");
+    root.innerHTML = renderCountrySheet({
+      ...snapshot,
+      countries: filterCountries(
+        snapshot.allCountries || [],
+        state.search
+      )
+    });
+
+    document.body.appendChild(root);
+    state.countrySheetRoot = root;
+
+    bindCountrySheetListeners(root);
+    syncCountrySheetBodyLock();
+
+    if (focusSearch) {
+      window.setTimeout(() => {
+        root
+          .querySelector("[data-guide-sheet-search]")
+          ?.focus?.();
+      }, 80);
+    }
+
+    return true;
+  };
+
+  const openCountrySheet = async ({ focusSearch = true } = {}) => {
+    if (state.countryPickerOpen) {
+      const root = getCountrySheetRoot();
+
+      if (!root) {
+        mountCountrySheetPortal({ focusSearch });
+      } else if (focusSearch) {
+        root
+          .querySelector("[data-guide-sheet-search]")
+          ?.focus?.();
+      }
+
+      return true;
+    }
+
+    state.countryPickerOpen = true;
+    state.search = "";
+    state.countrySheetReturnFocus = document.activeElement;
+
+    if (!state.snapshot?.ready) {
+      state.snapshot = await buildSnapshot();
+    }
+
+    mountCountrySheetPortal({ focusSearch });
+
+    emit("country-picker-opened");
+    return true;
+  };
+
+  const closeCountrySheet = async ({
+    preserveSearch = false,
+    restoreFocus = true
+  } = {}) => {
+    if (!state.countryPickerOpen && !getCountrySheetRoot()) {
+      return true;
+    }
+
+    state.countryPickerOpen = false;
+
+    if (!preserveSearch) {
+      state.search = "";
+    }
+
+    removeCountrySheetPortal();
+    syncCountrySheetBodyLock();
+
+    if (
+      restoreFocus &&
+      state.countrySheetReturnFocus instanceof window.HTMLElement
+    ) {
+      window.setTimeout(() => {
+        state.countrySheetReturnFocus?.focus?.();
+        state.countrySheetReturnFocus = null;
+      }, 0);
+    } else {
+      state.countrySheetReturnFocus = null;
+    }
+
+    emit("country-picker-closed");
+    return true;
+  };
+
+  const applyListeners = () => {
+    if (!state.container) return;
+
+    state.container
+      .querySelectorAll("[data-guide-open-country-sheet]")
+      .forEach((button) => {
+        button.addEventListener("click", () => {
+          openCountrySheet({ focusSearch: true });
+        });
+      });
 
     const days =
       state.container.querySelector("[data-guide-days]");
@@ -1937,7 +2062,6 @@
       state.snapshot = snapshot;
       state.container.innerHTML = renderPage(snapshot);
       applyListeners();
-      syncCountrySheetBodyLock();
 
       if (preserveSearch) {
         const input =
@@ -2005,6 +2129,7 @@
     state.activeSection = "overview";
     state.search = "";
     state.countryPickerOpen = false;
+    removeCountrySheetPortal();
     syncCountrySheetBodyLock();
 
     invalidateSnapshotCache();
@@ -2058,6 +2183,7 @@
       state.search = "";
       state.countryPickerOpen = false;
       state.recommendationLimit = INITIAL_RECOMMENDATION_LIMIT;
+      removeCountrySheetPortal();
       syncCountrySheetBodyLock();
 
       invalidateSnapshotCache();
@@ -2463,7 +2589,6 @@
 
       container.innerHTML = renderPage(snapshot);
       applyListeners();
-      syncCountrySheetBodyLock();
       registerScrollState();
 
       emit("mounted", {
@@ -2482,6 +2607,9 @@
         state.mounted = true;
       }
 
+      removeCountrySheetPortal();
+      state.countryPickerOpen = false;
+      syncCountrySheetBodyLock();
       applyListeners();
       return true;
     },
@@ -2496,6 +2624,7 @@
 
       state.countryPickerOpen = false;
       state.search = "";
+      removeCountrySheetPortal();
       syncCountrySheetBodyLock();
 
       emit("unmounted");
@@ -2557,6 +2686,8 @@
         activeSection: state.activeSection,
         selectedCountryCode: state.selectedCountryCode,
         search: state.search,
+        countryPickerOpen: state.countryPickerOpen,
+        countrySheetPortalMounted: Boolean(getCountrySheetRoot()),
         recommendationLimit: state.recommendationLimit,
         storeAvailable: Boolean(getStore()),
         routerAvailable: Boolean(getRouter()),
