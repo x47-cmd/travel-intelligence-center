@@ -12,7 +12,7 @@
 
   <meta
     name="description"
-    content="منصة شخصية ذكية لتنظيم الرحلات، الرحلات المخططة، الوجهات، الميزانيات، المصروفات، الادخار، الدفعات، التجهيز، المستندات، الذكريات، وقائمة الأمنيات في مكان واحد."
+    content="منصة شخصية ذكية لتنظيم الرحلات، الرحلات المخططة، الوجهات، رصيد السفر، الاقتراحات الذكية، المصروفات، التجهيز، المستندات، الذكريات، وقائمة الأمنيات في مكان واحد."
   />
 
   <meta name="theme-color" content="#0f766e" />
@@ -34,7 +34,7 @@
   />
 
   <!-- =====================================================
-       Travel Intelligence Center V4.1.0
+       Travel Intelligence Center V4.2.0
 
        Premium iPhone-first interface
        Smart next-trip summary V2.4.0
@@ -42,15 +42,16 @@
        Ticket and hotel document import
        Unified Guide Intelligence V4.4.0
        Dedicated Guide UI stylesheet V4.4.0
+       Simple Travel Budget Advisor V4.0.0
+       Dedicated Budget UI stylesheet V4.0.0
+       Central Store V2.4.0 with Budget Wallet
        Complete 195-country World Guide Data
        Guide Engine + Travel AI + Planner Engine
        Passport and Guide country-code integration
-       Budget Intelligence Platform preserved
-       Budget Travel Intelligence enabled
        Planned Trips lifecycle and checklist workflow
        Automatic planned-trip promotion when ready
-       Expense, savings and payment intelligence
-       Budget analytics, AI, alerts and notifications
+       Budget wallet deposits, withdrawals and travel expenses
+       Automatic destination and multi-trip suggestions
   ====================================================== -->
 
   <!-- =====================================================
@@ -59,12 +60,17 @@
        style.css:
        - Global application shell
        - Shared components
-       - Home, Trips, Budget and More styles
+       - Home, Trips and More shared styles
 
        guide.css:
        - Dedicated Guide Intelligence Platform styling
        - Must load AFTER style.css
        - Supports js/pages/guide.js V4.4.0
+
+       budget.css:
+       - Dedicated Simple Travel Budget Advisor styling
+       - Must load AFTER style.css and guide.css
+       - Supports js/pages/budget.js V4.0.0
   ====================================================== -->
 
   <link
@@ -75,6 +81,11 @@
   <link
     rel="stylesheet"
     href="css/pages/guide.css?v=4.4.0"
+  />
+
+  <link
+    rel="stylesheet"
+    href="css/pages/budget.css?v=4.0.0"
   />
 
   <!-- =====================================================
@@ -100,7 +111,7 @@
        Required order:
        Store → Router → UI
 
-       Store V2.3.0 includes:
+       Store V2.4.0 includes:
        - Complete trip persistence
        - Planned Trips persistence
        - Planned-trip checklist persistence
@@ -113,15 +124,20 @@
        - ISO country-code normalization
        - Travel DNA persistence
        - Flight and hotel fields
-       - Expense persistence
-       - Savings persistence
-       - Payment persistence
-       - Budget Intelligence data
+       - Legacy expense, savings and payment persistence
+       - New Budget Wallet persistence
+       - Budget wallet deposits
+       - Budget wallet withdrawals
+       - Budget wallet travel expenses
+       - Automatic available-balance calculation
+       - Budget transaction history
+       - Budget Travel Intelligence compatibility
+       - Backup, restore, import and export
   ====================================================== -->
 
   <script
     defer
-    src="js/store.js?v=2.3.0"
+    src="js/store.js?v=2.4.0"
   ></script>
 
   <script
@@ -261,7 +277,10 @@
   ></script>
 
   <!-- =====================================================
-       7. Budget Intelligence Platform Engines
+       7. Legacy Budget Intelligence Engines
+
+       These files remain loaded for compatibility with existing
+       project modules and historical data.
 
        Required order:
        Budget Core
@@ -276,16 +295,12 @@
        → Integration Engine
        → Budget Travel Intelligence
 
-       Budget Travel Intelligence:
-       - Reads the user's available travel budget
-       - Generates realistic destination suggestions
-       - Uses WorldGuideData and Guide Engine country records
-       - Saves accepted suggestions as plannedTrips
-       - Preserves the original budget recommendation snapshot
-       - Links the Budget page with the Trips planning workflow
-
-       Integration Engine must load after the core Budget engines.
-       Budget Travel Intelligence must load after Guide and Budget engines.
+       Important:
+       - The visible Budget page now uses the simplified
+         Budget Wallet experience in js/pages/budget.js V4.0.0.
+       - The old 30,000 AED annual value is not treated as
+         available travel balance.
+       - Store V2.4.0 remains the authoritative persistence layer.
   ====================================================== -->
 
   <script
@@ -353,7 +368,7 @@
        - Home V2.4.0
        - Trips V3.7.0
        - Guide V4.4.0
-       - Budget V3.2.0
+       - Budget V4.0.0
        - More V2.0.0
 
        Guide V4.4.0:
@@ -375,11 +390,19 @@
        - Automatic promotion into ready trips
        - Passport and previous-trip history
 
-       Budget V3.2.0:
-       - Existing Budget Intelligence preserved
-       - Travel suggestions based on available budget
-       - Save recommendation to plannedTrips
-       - Direct navigation to Trips planning workflow
+       Budget V4.0.0:
+       - Simple travel-money advisor
+       - Starts the visible travel balance from zero
+       - Add balance
+       - Withdraw balance
+       - Add travel expense
+       - Automatic destination suggestions
+       - Upgrade suggestions based on missing amount
+       - Multi-trip suggestions for larger balances
+       - Recent transaction history
+       - Save destination to plannedTrips
+       - Dedicated css/pages/budget.css stylesheet
+       - iPhone scroll stability
   ====================================================== -->
 
   <script
@@ -399,7 +422,7 @@
 
   <script
     defer
-    src="js/pages/budget.js?v=3.2.0"
+    src="js/pages/budget.js?v=4.0.0"
   ></script>
 
   <script
@@ -415,8 +438,7 @@
        - Initializes PlannerEngine
        - Initializes TravelAI
        - Initializes GuideEngine
-       - Initializes all Budget Intelligence engines
-       - Initializes Budget Travel Intelligence
+       - Preserves compatible Budget Intelligence engines
        - Registers all pages
        - Starts the Router
        - Synchronizes Trip Passport lifecycle
@@ -491,8 +513,8 @@
         <p>
           يتم تجهيز الرحلات، الرحلات المخططة، جواز السفر،
           دليل 195 دولة، الاقتراحات الذكية، الجداول السياحية،
-          الميزانيات، اقتراحات السفر حسب الميزانية،
-          المصروفات، الادخار، الدفعات، المستندات،
+          رصيد السفر، اقتراحات الوجهات حسب الرصيد،
+          المصروفات، السحب والإيداع، المستندات،
           التجهيز، الذكريات، وقائمة الأمنيات.
         </p>
 
