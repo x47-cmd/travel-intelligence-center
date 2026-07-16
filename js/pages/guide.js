@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Guide Intelligence Platform Page V4.1.0
+   Guide Intelligence Platform Page V4.2.0
 
    File Path:
    js/pages/guide.js
@@ -8,7 +8,7 @@
    Purpose:
    - Complete redesign of the Guide page for a compact iPhone-first UX.
    - Removes oversized empty cards and long recommendation layouts.
-   - Replaces the broken native country selector with a reliable custom picker.
+   - Replaces the inline country list with an iPhone-friendly bottom sheet picker.
    - Limits initial recommendation rendering to improve page performance.
    - Uses cached snapshots and debounced updates to avoid unnecessary full renders.
    - Preserves GuideEngine, TravelAI, PlannerEngine, Store, Router and UI integration.
@@ -33,9 +33,9 @@
   "use strict";
 
   const PAGE_ID = "guide";
-  const PAGE_VERSION = "4.1.0";
+  const PAGE_VERSION = "4.2.0";
   const INITIAL_RECOMMENDATION_LIMIT = 6;
-  const SEARCH_RESULT_LIMIT = 14;
+  const SEARCH_RESULT_LIMIT = 300;
   const STORE_REFRESH_DELAY = 180;
 
   const MONTHS_AR = Object.freeze([
@@ -629,6 +629,40 @@
     </section>
   `;
 
+  const renderCountryOptions = (countries) => {
+    if (!countries.length) {
+      return renderEmpty(
+        "لا توجد نتيجة",
+        "جرب كتابة اسم الدولة بالعربي أو الإنجليزي.",
+        "⌕",
+        true
+      );
+    }
+
+    return countries
+      .map(
+        (country) => `
+          <button
+            type="button"
+            class="guide-country-option"
+            data-guide-country-option="${escapeHTML(country.code)}"
+          >
+            <span class="guide-country-flag">
+              ${escapeHTML(country.flag || "🌍")}
+            </span>
+
+            <span class="guide-country-option-copy">
+              <strong>${escapeHTML(country.nameAr)}</strong>
+              <small>${escapeHTML(country.nameEn || country.code)}</small>
+            </span>
+
+            <span aria-hidden="true">‹</span>
+          </button>
+        `
+      )
+      .join("");
+  };
+
   const renderCountryPicker = (snapshot) => {
     const selected =
       snapshot.allCountries.find(
@@ -638,72 +672,114 @@
     return `
       <div class="tic-card guide-country-card" data-guide-search-card>
         <div class="tic-card-body">
-          <label class="guide-search-field">
-            <span>ابحث عن دولة</span>
-            <div class="guide-search-input-wrap">
-              <span aria-hidden="true">⌕</span>
-              <input
-                type="search"
-                data-guide-search
-                value="${escapeHTML(state.search)}"
-                placeholder="اكتب اسم الدولة..."
-                autocomplete="off"
-                enterkeyhint="search"
-              >
+          <div class="guide-picker-summary">
+            <div>
+              <span>الدولة</span>
+              <strong>
+                ${
+                  selected
+                    ? `${escapeHTML(selected.flag || "🌍")} ${escapeHTML(selected.nameAr)}`
+                    : "اختر وجهتك"
+                }
+              </strong>
+              <small>ابحث واختر من قائمة الدول الكاملة.</small>
             </div>
-          </label>
+
+            <span class="guide-picker-summary-icon" aria-hidden="true">🌍</span>
+          </div>
 
           <button
             type="button"
-            class="guide-country-trigger"
-            data-guide-country-trigger
+            class="guide-country-open-button"
+            data-guide-open-country-sheet
+            aria-haspopup="dialog"
             aria-expanded="${state.countryPickerOpen ? "true" : "false"}"
           >
-            <span>
-              ${
-                selected
-                  ? `${escapeHTML(selected.flag || "🌍")} ${escapeHTML(selected.nameAr)}`
-                  : "اختر الدولة"
-              }
-            </span>
-            <span aria-hidden="true">${state.countryPickerOpen ? "⌃" : "⌄"}</span>
+            <span aria-hidden="true">⌕</span>
+            <span>${selected ? "تغيير الدولة" : "ابحث واختر الدولة"}</span>
+            <span aria-hidden="true">‹</span>
           </button>
+        </div>
+      </div>
+    `;
+  };
 
-          <div
-            class="guide-country-panel ${state.countryPickerOpen || state.search ? "is-open" : ""}"
-            data-guide-country-panel
-          >
+  const renderCountrySheet = (snapshot) => {
+    if (!state.countryPickerOpen) return "";
+
+    return `
+      <div
+        class="guide-country-sheet-backdrop"
+        data-guide-country-sheet-backdrop
+        role="presentation"
+      >
+        <section
+          class="guide-country-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="guide-country-sheet-title"
+          data-guide-country-sheet
+        >
+          <div class="guide-country-sheet-handle" aria-hidden="true"></div>
+
+          <header class="guide-country-sheet-header">
+            <div>
+              <span>DESTINATION PICKER</span>
+              <h2 id="guide-country-sheet-title">اختر الدولة</h2>
+              <p>ابحث بالعربي أو الإنجليزي ثم اضغط على الدولة.</p>
+            </div>
+
+            <button
+              type="button"
+              class="guide-country-sheet-close"
+              data-guide-close-country-sheet
+              aria-label="إغلاق قائمة الدول"
+            >
+              ×
+            </button>
+          </header>
+
+          <div class="guide-country-sheet-search">
+            <span aria-hidden="true">⌕</span>
+            <input
+              type="search"
+              data-guide-sheet-search
+              value="${escapeHTML(state.search)}"
+              placeholder="اكتب اسم الدولة..."
+              autocomplete="off"
+              enterkeyhint="search"
+              aria-label="البحث عن دولة"
+            >
             ${
-              snapshot.countries.length
-                ? snapshot.countries
-                    .map(
-                      (country) => `
-                        <button
-                          type="button"
-                          class="guide-country-option"
-                          data-guide-country-option="${escapeHTML(country.code)}"
-                        >
-                          <span class="guide-country-flag">
-                            ${escapeHTML(country.flag || "🌍")}
-                          </span>
-                          <span>
-                            <strong>${escapeHTML(country.nameAr)}</strong>
-                            <small>${escapeHTML(country.nameEn || country.code)}</small>
-                          </span>
-                          <span aria-hidden="true">‹</span>
-                        </button>
-                      `
-                    )
-                    .join("")
-                : renderEmpty(
-                    "لا توجد نتيجة",
-                    "جرب كتابة الاسم بالعربي أو الإنجليزي.",
-                    "⌕",
-                    true
-                  )
+              state.search
+                ? `
+                  <button
+                    type="button"
+                    data-guide-clear-sheet-search
+                    aria-label="مسح البحث"
+                  >
+                    ×
+                  </button>
+                `
+                : ""
             }
           </div>
-        </div>
+
+          <div class="guide-country-sheet-count">
+            <span>
+              ${escapeHTML(snapshot.countries.length)}
+              ${snapshot.countries.length === 1 ? "نتيجة" : "دولة"}
+            </span>
+            <small>مرر داخل القائمة فقط</small>
+          </div>
+
+          <div
+            class="guide-country-sheet-list"
+            data-guide-country-sheet-list
+          >
+            ${renderCountryOptions(snapshot.countries)}
+          </div>
+        </section>
       </div>
     `;
   };
@@ -1577,6 +1653,8 @@
             ? renderCountryView(snapshot)
             : renderDiscoverView(snapshot)
         }
+
+        ${renderCountrySheet(snapshot)}
       </div>
     `;
   };
@@ -1584,6 +1662,68 @@
   /* =========================================================
      Events and refresh
   ========================================================= */
+
+  const syncCountrySheetBodyLock = () => {
+    document.body.classList.toggle(
+      "guide-country-sheet-open",
+      Boolean(state.countryPickerOpen)
+    );
+  };
+
+  const openCountrySheet = async ({ focusSearch = true } = {}) => {
+    if (state.countryPickerOpen) {
+      const existingInput =
+        state.container?.querySelector("[data-guide-sheet-search]");
+
+      if (focusSearch) existingInput?.focus?.();
+      return true;
+    }
+
+    state.countryPickerOpen = true;
+    state.search = "";
+    invalidateSnapshotCache();
+
+    await refresh({
+      force: true,
+      preserveScroll: true,
+      allowDuringScroll: true
+    });
+
+    syncCountrySheetBodyLock();
+
+    if (focusSearch) {
+      window.setTimeout(() => {
+        state.container
+          ?.querySelector("[data-guide-sheet-search]")
+          ?.focus?.();
+      }, 80);
+    }
+
+    emit("country-picker-opened");
+    return true;
+  };
+
+  const closeCountrySheet = async ({ preserveSearch = false } = {}) => {
+    if (!state.countryPickerOpen) return true;
+
+    state.countryPickerOpen = false;
+
+    if (!preserveSearch) {
+      state.search = "";
+    }
+
+    invalidateSnapshotCache();
+    syncCountrySheetBodyLock();
+
+    await refresh({
+      force: true,
+      preserveScroll: true,
+      allowDuringScroll: true
+    });
+
+    emit("country-picker-closed");
+    return true;
+  };
 
   const updateSearchResultsOnly = () => {
     if (!state.container || !state.snapshot) return;
@@ -1595,46 +1735,22 @@
         : getAllCountries(guide);
 
     const countries = filterCountries(allCountries, state.search);
-    const panel = state.container.querySelector(
-      "[data-guide-country-panel]"
+    const list = state.container.querySelector(
+      "[data-guide-country-sheet-list]"
+    );
+    const count = state.container.querySelector(
+      ".guide-country-sheet-count span"
     );
 
-    if (!panel) return;
+    if (count) {
+      count.textContent =
+        `${countries.length} ${countries.length === 1 ? "نتيجة" : "دولة"}`;
+    }
 
-    panel.classList.toggle(
-      "is-open",
-      Boolean(state.countryPickerOpen || state.search)
-    );
+    if (!list) return;
 
-    panel.innerHTML = countries.length
-      ? countries
-          .map(
-            (country) => `
-              <button
-                type="button"
-                class="guide-country-option"
-                data-guide-country-option="${escapeHTML(country.code)}"
-              >
-                <span class="guide-country-flag">
-                  ${escapeHTML(country.flag || "🌍")}
-                </span>
-                <span>
-                  <strong>${escapeHTML(country.nameAr)}</strong>
-                  <small>${escapeHTML(country.nameEn || country.code)}</small>
-                </span>
-                <span aria-hidden="true">‹</span>
-              </button>
-            `
-          )
-          .join("")
-      : renderEmpty(
-          "لا توجد نتيجة",
-          "جرب كتابة الاسم بالعربي أو الإنجليزي.",
-          "⌕",
-          true
-        );
-
-    bindCountryOptionListeners(panel);
+    list.innerHTML = renderCountryOptions(countries);
+    bindCountryOptionListeners(list);
   };
 
   const bindCountryOptionListeners = (scope) => {
@@ -1654,42 +1770,66 @@
   const applyListeners = () => {
     if (!state.container) return;
 
-    const searchInput =
-      state.container.querySelector("[data-guide-search]");
+    state.container
+      .querySelectorAll("[data-guide-open-country-sheet]")
+      .forEach((button) => {
+        button.addEventListener("click", () => {
+          openCountrySheet({ focusSearch: true });
+        });
+      });
 
-    searchInput?.addEventListener("focus", () => {
-      state.countryPickerOpen = true;
-      state.container
-        ?.querySelector("[data-guide-country-panel]")
-        ?.classList.add("is-open");
+    state.container
+      .querySelectorAll("[data-guide-close-country-sheet]")
+      .forEach((button) => {
+        button.addEventListener("click", () => {
+          closeCountrySheet();
+        });
+      });
+
+    const backdrop =
+      state.container.querySelector("[data-guide-country-sheet-backdrop]");
+
+    backdrop?.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        closeCountrySheet();
+      }
     });
+
+    const sheet =
+      state.container.querySelector("[data-guide-country-sheet]");
+
+    sheet?.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const searchInput =
+      state.container.querySelector("[data-guide-sheet-search]");
 
     searchInput?.addEventListener("input", (event) => {
       state.search = event.target.value;
-      state.countryPickerOpen = true;
 
       window.clearTimeout(state.searchTimer);
       state.searchTimer = window.setTimeout(
         updateSearchResultsOnly,
-        90
+        80
       );
     });
 
-    const trigger =
-      state.container.querySelector("[data-guide-country-trigger]");
+    state.container
+      .querySelector("[data-guide-clear-sheet-search]")
+      ?.addEventListener("click", () => {
+        state.search = "";
 
-    trigger?.addEventListener("click", () => {
-      state.countryPickerOpen = !state.countryPickerOpen;
+        const input =
+          state.container.querySelector("[data-guide-sheet-search]");
 
-      trigger.setAttribute(
-        "aria-expanded",
-        state.countryPickerOpen ? "true" : "false"
-      );
+        if (input) {
+          input.value = "";
+          input.focus();
+        }
 
-      state.container
-        ?.querySelector("[data-guide-country-panel]")
-        ?.classList.toggle("is-open", state.countryPickerOpen);
-    });
+        updateSearchResultsOnly();
+      });
 
     bindCountryOptionListeners(state.container);
 
@@ -1797,6 +1937,7 @@
       state.snapshot = snapshot;
       state.container.innerHTML = renderPage(snapshot);
       applyListeners();
+      syncCountrySheetBodyLock();
 
       if (preserveSearch) {
         const input =
@@ -1864,6 +2005,7 @@
     state.activeSection = "overview";
     state.search = "";
     state.countryPickerOpen = false;
+    syncCountrySheetBodyLock();
 
     invalidateSnapshotCache();
     getStore()?.setSelectedGuideCountry?.(code);
@@ -1916,6 +2058,7 @@
       state.search = "";
       state.countryPickerOpen = false;
       state.recommendationLimit = INITIAL_RECOMMENDATION_LIMIT;
+      syncCountrySheetBodyLock();
 
       invalidateSnapshotCache();
       getGuideEngine()?.clearSelection?.();
@@ -1931,7 +2074,6 @@
 
     register("guide-focus-country-search", async () => {
       state.activeView = "discover";
-      state.pendingFocusSelector = "[data-guide-search]";
 
       await refresh({
         preserveScroll: false,
@@ -1945,7 +2087,9 @@
             behavior: "smooth",
             block: "center"
           });
-      }, 50);
+
+        openCountrySheet({ focusSearch: true });
+      }, 80);
 
       return true;
     });
@@ -2243,6 +2387,15 @@
       registerActions();
       subscribeToStore();
 
+      document.addEventListener("keydown", (event) => {
+        if (
+          event.key === "Escape" &&
+          state.countryPickerOpen
+        ) {
+          closeCountrySheet();
+        }
+      });
+
       await getPlannerEngine()?.init?.();
       await getTravelAI()?.init?.();
       await getGuideEngine()?.init?.();
@@ -2310,6 +2463,7 @@
 
       container.innerHTML = renderPage(snapshot);
       applyListeners();
+      syncCountrySheetBodyLock();
       registerScrollState();
 
       emit("mounted", {
@@ -2339,6 +2493,10 @@
       window.clearTimeout(state.searchTimer);
       window.clearTimeout(state.storeRefreshTimer);
       window.clearTimeout(state.scrollTimer);
+
+      state.countryPickerOpen = false;
+      state.search = "";
+      syncCountrySheetBodyLock();
 
       emit("unmounted");
       return true;
