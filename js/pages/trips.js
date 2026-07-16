@@ -4287,3 +4287,1436 @@
 
   TripsPage.init();
 })(window, document);
+
+/* =========================================================
+   Travel Intelligence Center
+   Planned Trips Integration for Trips Page V1.0.0
+
+   File Path:
+   js/pages/trips.js
+
+   Installation:
+   - Keep Trips Page V3.6.0 exactly as it is.
+   - Append this block AFTER the existing final line:
+     })(window, document);
+
+   Purpose:
+   - Adds a separate "الرحلات المخطط لها" area.
+   - Reads plannedTrips from Central Store V2.3.0.
+   - Shows booking checklist and readiness percentage.
+   - Updates flight/hotel checklist directly in Store.
+   - Automatically promotes a planned trip to a ready trip
+     when flightBooked and hotelBooked are both complete.
+   - Preserves every current Trips, Passport, Guide and UI feature.
+========================================================= */
+
+(function plannedTripsPageIntegrationFactory(window, document) {
+  "use strict";
+
+  const VERSION = "1.0.0";
+  const STYLE_ID = "tic-planned-trips-integration-styles";
+  const PAGE_SELECTOR = '[data-page="trips"]';
+  const SECTION_SELECTOR = "[data-planned-trips-section]";
+
+  const runtime = {
+    initialized: false,
+    observer: null,
+    clickBound: false,
+    eventBindings: [],
+    patchApplied: false,
+    rendering: false,
+    lastSignature: ""
+  };
+
+  const clone = (value) => {
+    if (value === undefined) return undefined;
+
+    if (typeof structuredClone === "function") {
+      try {
+        return structuredClone(value);
+      } catch (_) {}
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+      return value;
+    }
+  };
+
+  const text = (value, fallback = "") =>
+    String(value === undefined || value === null ? fallback : value).trim();
+
+  const number = (value, fallback = 0) => {
+    const result = Number(value);
+    return Number.isFinite(result) ? result : fallback;
+  };
+
+  const nonNegative = (value, fallback = 0) =>
+    Math.max(0, number(value, fallback));
+
+  const asArray = (value) =>
+    Array.isArray(value) ? clone(value) : [];
+
+  const escapeHTML = (value) =>
+    text(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  const getStore = () =>
+    window.TIC?.Store ||
+    window.TICStore ||
+    window.Store ||
+    window.TravelStore ||
+    null;
+
+  const getRouter = () =>
+    window.TIC?.Router ||
+    window.TICRouter ||
+    null;
+
+  const getUI = () =>
+    window.TIC?.UI ||
+    window.TICUI ||
+    null;
+
+  const notify = (message, tone = "info") => {
+    const ui = getUI();
+
+    if (typeof ui?.toast === "function") {
+      try {
+        return ui.toast(message, { tone });
+      } catch (_) {
+        return ui.toast(message, tone);
+      }
+    }
+
+    if (typeof ui?.showToast === "function") {
+      return ui.showToast(message, tone);
+    }
+
+    console.log(`[PlannedTrips:${tone}] ${message}`);
+    return null;
+  };
+
+  const getStoreState = () => {
+    const store = getStore();
+
+    if (!store) return {};
+
+    try {
+      if (typeof store.getState === "function") {
+        return clone(store.getState()) || {};
+      }
+
+      if (typeof store.get === "function") {
+        const fullState = store.get();
+
+        if (fullState && typeof fullState === "object") {
+          return clone(fullState);
+        }
+
+        return {
+          profile: store.get("profile"),
+          plannedTrips: store.get("plannedTrips"),
+          trips: store.get("trips"),
+          budgetTravelIntelligence: store.get("budgetTravelIntelligence")
+        };
+      }
+    } catch (error) {
+      console.warn("Planned Trips: Store read failed.", error);
+    }
+
+    return {};
+  };
+
+  const getPlannedTrips = () => {
+    const store = getStore();
+
+    try {
+      if (typeof store?.getPlannedTrips === "function") {
+        return asArray(
+          store.getPlannedTrips({
+            includeArchived: false,
+            includeConverted: false
+          })
+        );
+      }
+
+      return asArray(getStoreState().plannedTrips).filter(
+        (trip) =>
+          !["archived", "cancelled", "converted"].includes(
+            text(trip.status).toLowerCase()
+          )
+      );
+    } catch (error) {
+      console.warn("Planned Trips: failed to list planned trips.", error);
+      return [];
+    }
+  };
+
+  const findPlannedTrip = (plannedTripId) =>
+    getPlannedTrips().find(
+      (trip) => String(trip.id) === String(plannedTripId)
+    ) || null;
+
+  const calculateReadiness = (trip) => {
+    const checklist = trip?.checklist || {};
+
+    const primary = [
+      checklist.flightBooked === true,
+      checklist.hotelBooked === true
+    ];
+
+    const secondary = [
+      checklist.destinationApproved !== false,
+      checklist.budgetApproved === true,
+      checklist.insuranceReady === true,
+      checklist.visaReady === true,
+      checklist.documentsReady === true,
+      checklist.activitiesPlanned === true,
+      checklist.packingReady === true
+    ];
+
+    const allSteps = [...primary, ...secondary];
+    const completed = allSteps.filter(Boolean).length;
+    const total = allSteps.length;
+
+    return {
+      completed,
+      total,
+      percent: total
+        ? Math.round((completed / total) * 100)
+        : 0,
+      flightBooked: checklist.flightBooked === true,
+      hotelBooked: checklist.hotelBooked === true,
+      readyForPromotion:
+        checklist.flightBooked === true &&
+        checklist.hotelBooked === true
+    };
+  };
+
+  const formatCurrency = (value, currency = "AED") => {
+    try {
+      return new Intl.NumberFormat("ar-AE", {
+        style: "currency",
+        currency: currency || "AED",
+        maximumFractionDigits: 0
+      }).format(number(value));
+    } catch (_) {
+      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${
+        currency || "AED"
+      }`;
+    }
+  };
+
+  const monthLabel = (month) => {
+    const labels = [
+      "",
+      "يناير",
+      "فبراير",
+      "مارس",
+      "أبريل",
+      "مايو",
+      "يونيو",
+      "يوليو",
+      "أغسطس",
+      "سبتمبر",
+      "أكتوبر",
+      "نوفمبر",
+      "ديسمبر"
+    ];
+
+    return labels[number(month)] || "التاريخ لاحقاً";
+  };
+
+  const ensureStyles = () => {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      .planned-trips-section {
+        display: grid;
+        gap: 15px;
+        padding: 20px;
+        border: 1px solid #d7e1ee;
+        border-radius: 29px;
+        background:
+          radial-gradient(circle at 100% 0%, rgba(76, 111, 255, .09), transparent 34%),
+          linear-gradient(155deg, #ffffff 0%, #f5f7ff 100%);
+        box-shadow: 0 18px 42px rgba(34, 56, 108, .07);
+      }
+
+      .planned-trips-section__head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 13px;
+      }
+
+      .planned-trips-section__kicker {
+        color: #5267c9;
+        font-size: 10px;
+        font-weight: 950;
+        letter-spacing: .09em;
+      }
+
+      .planned-trips-section__head h2 {
+        margin: 4px 0 0;
+        color: #061b38;
+        font-size: clamp(25px, 7vw, 33px);
+      }
+
+      .planned-trips-section__head p {
+        margin: 5px 0 0;
+        color: #75839b;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .planned-trips-section__count {
+        display: grid;
+        place-items: center;
+        min-width: 72px;
+        min-height: 48px;
+        padding: 0 12px;
+        border: 1px solid #d8def7;
+        border-radius: 16px;
+        background: #fff;
+        color: #5267c9;
+        font-size: 12px;
+        font-weight: 950;
+      }
+
+      .planned-trips-list {
+        display: grid;
+        gap: 13px;
+      }
+
+      .planned-trip-card {
+        overflow: hidden;
+        border: 1px solid #dce3f2;
+        border-radius: 24px;
+        background: #fff;
+        box-shadow: 0 12px 30px rgba(34, 56, 108, .055);
+      }
+
+      .planned-trip-card__top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 17px;
+        background:
+          radial-gradient(circle at 100% 0%, rgba(98, 119, 255, .12), transparent 40%),
+          #f8f9ff;
+      }
+
+      .planned-trip-card__chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: #e9edff;
+        color: #485dbf;
+        font-size: 10px;
+        font-weight: 950;
+      }
+
+      .planned-trip-card__top h3 {
+        margin: 8px 0 4px;
+        color: #061b38;
+        font-size: 21px;
+      }
+
+      .planned-trip-card__top p {
+        margin: 0;
+        color: #75839b;
+        font-size: 12px;
+      }
+
+      .planned-trip-card__score {
+        min-width: 57px;
+        padding: 9px 8px;
+        border-radius: 15px;
+        background: #061b38;
+        color: #fff;
+        text-align: center;
+      }
+
+      .planned-trip-card__score strong,
+      .planned-trip-card__score small {
+        display: block;
+      }
+
+      .planned-trip-card__score strong {
+        font-size: 17px;
+      }
+
+      .planned-trip-card__score small {
+        margin-top: 2px;
+        color: rgba(255,255,255,.68);
+        font-size: 8px;
+      }
+
+      .planned-trip-card__body {
+        display: grid;
+        gap: 14px;
+        padding: 17px;
+      }
+
+      .planned-trip-card__facts {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .planned-trip-card__facts > div {
+        padding: 11px 9px;
+        border-radius: 15px;
+        background: #f6f8fc;
+        text-align: center;
+      }
+
+      .planned-trip-card__facts small,
+      .planned-trip-card__facts strong {
+        display: block;
+      }
+
+      .planned-trip-card__facts small {
+        color: #75839b;
+        font-size: 8px;
+      }
+
+      .planned-trip-card__facts strong {
+        margin-top: 4px;
+        color: #061b38;
+        font-size: 11px;
+      }
+
+      .planned-trip-progress__head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 7px;
+        color: #75839b;
+        font-size: 11px;
+      }
+
+      .planned-trip-progress__track {
+        height: 8px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e6eaf3;
+      }
+
+      .planned-trip-progress__track > span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #596fd0, #7d8cf4);
+      }
+
+      .planned-trip-checklist {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+      }
+
+      .planned-trip-check {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 47px;
+        padding: 9px 11px;
+        border: 1px solid #dce3f2;
+        border-radius: 15px;
+        background: #fff;
+        color: #061b38;
+        font: inherit;
+        text-align: start;
+        cursor: pointer;
+      }
+
+      .planned-trip-check.is-complete {
+        border-color: #bfe5d7;
+        background: #effaf6;
+        color: #0b7565;
+      }
+
+      .planned-trip-check__icon {
+        display: grid;
+        place-items: center;
+        width: 27px;
+        height: 27px;
+        flex: 0 0 27px;
+        border-radius: 9px;
+        background: #eef1f8;
+        font-size: 12px;
+      }
+
+      .planned-trip-check.is-complete .planned-trip-check__icon {
+        background: #d7f1e7;
+      }
+
+      .planned-trip-check span:last-child {
+        font-size: 11px;
+        font-weight: 900;
+      }
+
+      .planned-trip-card__actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 8px;
+      }
+
+      .planned-trip-btn {
+        min-height: 45px;
+        padding: 0 11px;
+        border-radius: 14px;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 950;
+        cursor: pointer;
+      }
+
+      .planned-trip-btn--primary {
+        border: 0;
+        background: linear-gradient(135deg, #576dcc, #4054ae);
+        color: #fff;
+      }
+
+      .planned-trip-btn--secondary {
+        border: 1px solid #dce3f2;
+        background: #fff;
+        color: #061b38;
+      }
+
+      .planned-trip-btn--danger {
+        width: 44px;
+        border: 1px solid #f0d1d5;
+        background: #fff7f8;
+        color: #a33142;
+      }
+
+      .planned-trips-empty {
+        padding: 29px 18px;
+        border: 1px dashed #cfd7e8;
+        border-radius: 22px;
+        background: rgba(255,255,255,.78);
+        text-align: center;
+      }
+
+      .planned-trips-empty__icon {
+        font-size: 39px;
+      }
+
+      .planned-trips-empty h3 {
+        margin: 11px 0 4px;
+        color: #061b38;
+        font-size: 21px;
+      }
+
+      .planned-trips-empty p {
+        margin: 0;
+        color: #75839b;
+        font-size: 12px;
+        line-height: 1.7;
+      }
+
+      @media (max-width: 520px) {
+        .planned-trips-section {
+          padding: 17px;
+        }
+
+        .planned-trips-section__head {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .planned-trips-section__count {
+          align-self: flex-start;
+          min-height: 39px;
+        }
+
+        .planned-trip-card__facts {
+          grid-template-columns: 1fr;
+        }
+
+        .planned-trip-checklist {
+          grid-template-columns: 1fr;
+        }
+
+        .planned-trip-card__actions {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .planned-trip-btn--danger {
+          width: auto;
+          grid-column: 1 / -1;
+        }
+      }
+    `;
+
+    document.head.appendChild(style);
+  };
+
+  const renderPlannedTripCard = (trip) => {
+    const readiness = calculateReadiness(trip);
+    const currency =
+      trip.currency ||
+      getStoreState().profile?.currency ||
+      "AED";
+
+    const title =
+      trip.title ||
+      `رحلة ${trip.city || trip.country || "مخطط لها"}`;
+
+    const location = [
+      trip.city,
+      trip.country
+    ].filter(Boolean).join("، ");
+
+    const budget = nonNegative(
+      trip.estimatedBudget ??
+      trip.budget ??
+      trip.totalCost
+    );
+
+    const month =
+      trip.startDate
+        ? text(trip.startDate).slice(0, 10)
+        : monthLabel(trip.suggestedMonth);
+
+    return `
+      <article
+        class="planned-trip-card"
+        data-planned-trip-id="${escapeHTML(trip.id)}"
+      >
+        <div class="planned-trip-card__top">
+          <div>
+            <span class="planned-trip-card__chip">
+              PLANNED JOURNEY
+            </span>
+            <h3>${escapeHTML(title)}</h3>
+            <p>
+              ${escapeHTML(location || "الوجهة محددة من الاقتراح الذكي")}
+            </p>
+          </div>
+
+          <div class="planned-trip-card__score">
+            <strong>${readiness.percent}%</strong>
+            <small>جاهزية</small>
+          </div>
+        </div>
+
+        <div class="planned-trip-card__body">
+          <div class="planned-trip-card__facts">
+            <div>
+              <small>الميزانية المتوقعة</small>
+              <strong>${escapeHTML(formatCurrency(budget, currency))}</strong>
+            </div>
+            <div>
+              <small>المدة</small>
+              <strong>${number(trip.durationDays, 5)} أيام</strong>
+            </div>
+            <div>
+              <small>التوقيت المقترح</small>
+              <strong>${escapeHTML(month)}</strong>
+            </div>
+          </div>
+
+          <div class="planned-trip-progress">
+            <div class="planned-trip-progress__head">
+              <span>تقدم التجهيز</span>
+              <strong>
+                ${readiness.completed} من ${readiness.total}
+              </strong>
+            </div>
+            <div class="planned-trip-progress__track">
+              <span style="width:${readiness.percent}%"></span>
+            </div>
+          </div>
+
+          <div class="planned-trip-checklist">
+            <button
+              type="button"
+              class="planned-trip-check ${
+                readiness.flightBooked ? "is-complete" : ""
+              }"
+              data-planned-action="toggle-check"
+              data-planned-trip-id="${escapeHTML(trip.id)}"
+              data-check-key="flightBooked"
+              aria-pressed="${readiness.flightBooked ? "true" : "false"}"
+            >
+              <span class="planned-trip-check__icon">
+                ${readiness.flightBooked ? "✓" : "✈"}
+              </span>
+              <span>
+                ${
+                  readiness.flightBooked
+                    ? "تم شراء التذكرة"
+                    : "علّم عند شراء التذكرة"
+                }
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="planned-trip-check ${
+                readiness.hotelBooked ? "is-complete" : ""
+              }"
+              data-planned-action="toggle-check"
+              data-planned-trip-id="${escapeHTML(trip.id)}"
+              data-check-key="hotelBooked"
+              aria-pressed="${readiness.hotelBooked ? "true" : "false"}"
+            >
+              <span class="planned-trip-check__icon">
+                ${readiness.hotelBooked ? "✓" : "⌂"}
+              </span>
+              <span>
+                ${
+                  readiness.hotelBooked
+                    ? "تم حجز الفندق"
+                    : "علّم عند حجز الفندق"
+                }
+              </span>
+            </button>
+          </div>
+
+          <div class="planned-trip-card__actions">
+            <button
+              type="button"
+              class="planned-trip-btn planned-trip-btn--primary"
+              data-planned-action="open-guide"
+              data-country-code="${escapeHTML(trip.countryCode || "")}"
+            >
+              دليل الوجهة
+            </button>
+
+            <button
+              type="button"
+              class="planned-trip-btn planned-trip-btn--secondary"
+              data-planned-action="promote"
+              data-planned-trip-id="${escapeHTML(trip.id)}"
+              ${readiness.readyForPromotion ? "" : "disabled"}
+            >
+              ${
+                readiness.readyForPromotion
+                  ? "تحويل إلى رحلة جاهزة"
+                  : "أكمل التذكرة والفندق"
+              }
+            </button>
+
+            <button
+              type="button"
+              class="planned-trip-btn planned-trip-btn--danger"
+              data-planned-action="delete"
+              data-planned-trip-id="${escapeHTML(trip.id)}"
+              aria-label="حذف الرحلة المخطط لها"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      </article>
+    `;
+  };
+
+  const renderSection = (plannedTrips) => `
+    <section
+      class="planned-trips-section"
+      data-planned-trips-section
+      data-integration-version="${VERSION}"
+    >
+      <div class="planned-trips-section__head">
+        <div>
+          <span class="planned-trips-section__kicker">
+            PLANNED TRIPS
+          </span>
+          <h2>الرحلات المخطط لها</h2>
+          <p>
+            أفكار رحلات وافقت عليها، وتتحول تلقائياً إلى رحلة جاهزة
+            بعد شراء التذكرة وحجز الفندق.
+          </p>
+        </div>
+
+        <span class="planned-trips-section__count">
+          ${plannedTrips.length} مخططة
+        </span>
+      </div>
+
+      ${
+        plannedTrips.length
+          ? `
+            <div class="planned-trips-list">
+              ${plannedTrips.map(renderPlannedTripCard).join("")}
+            </div>
+          `
+          : `
+            <div class="planned-trips-empty">
+              <div class="planned-trips-empty__icon">🧭</div>
+              <h3>لا توجد رحلات مخطط لها</h3>
+              <p>
+                أضف اقتراحاً من مستشار السفر في صفحة الميزانية،
+                وسيظهر هنا مع خطوات التجهيز.
+              </p>
+            </div>
+          `
+      }
+    </section>
+  `;
+
+  const getInsertionTarget = (page) =>
+    page.querySelector(".trips-zone--journeys") ||
+    page.querySelector(".trips-passport-divider") ||
+    page.querySelector(".trips-shell");
+
+  const buildSignature = (plannedTrips) =>
+    JSON.stringify(
+      plannedTrips.map((trip) => ({
+        id: trip.id,
+        status: trip.status,
+        updatedAt: trip.updatedAt,
+        convertedTripId: trip.convertedTripId,
+        checklist: trip.checklist,
+        budget:
+          trip.estimatedBudget ??
+          trip.budget,
+        startDate: trip.startDate,
+        suggestedMonth: trip.suggestedMonth
+      }))
+    );
+
+  const inject = (force = false) => {
+    if (runtime.rendering) return false;
+
+    const page = document.querySelector(PAGE_SELECTOR);
+
+    if (
+      !page ||
+      page.getAttribute("data-view") === "details"
+    ) {
+      return false;
+    }
+
+    const target = getInsertionTarget(page);
+    if (!target) return false;
+
+    const plannedTrips = getPlannedTrips();
+    const signature = buildSignature(plannedTrips);
+
+    if (!force && signature === runtime.lastSignature) {
+      return false;
+    }
+
+    runtime.rendering = true;
+
+    try {
+      page.querySelector(SECTION_SELECTOR)?.remove();
+
+      target.insertAdjacentHTML(
+        "beforebegin",
+        renderSection(plannedTrips)
+      );
+
+      runtime.lastSignature = signature;
+      return true;
+    } finally {
+      runtime.rendering = false;
+    }
+  };
+
+  const updateChecklist = async (
+    plannedTripId,
+    checkKey
+  ) => {
+    const store = getStore();
+    const trip = findPlannedTrip(plannedTripId);
+
+    if (!store || !trip) {
+      notify("تعذر العثور على الرحلة المخطط لها.", "danger");
+      return false;
+    }
+
+    const currentValue =
+      trip.checklist?.[checkKey] === true;
+
+    const changes = {
+      [checkKey]: !currentValue
+    };
+
+    try {
+      let updated = null;
+
+      if (
+        typeof store.updatePlannedTripChecklist ===
+        "function"
+      ) {
+        updated =
+          store.updatePlannedTripChecklist(
+            plannedTripId,
+            changes,
+            {
+              autoPromote: true
+            }
+          );
+      } else if (
+        typeof store.updatePlannedTrip === "function"
+      ) {
+        updated =
+          store.updatePlannedTrip(
+            plannedTripId,
+            {
+              checklist: {
+                ...(trip.checklist || {}),
+                ...changes
+              }
+            }
+          );
+      }
+
+      if (!updated) {
+        notify(
+          "تعذر تحديث التجهيز. تأكد من Store V2.3.0.",
+          "danger"
+        );
+        return false;
+      }
+
+      const readiness =
+        calculateReadiness(updated);
+
+      notify(
+        !currentValue
+          ? "تم تحديث خطوة التجهيز."
+          : "تم إلغاء علامة التجهيز.",
+        "success"
+      );
+
+      if (readiness.readyForPromotion) {
+        await promotePlannedTrip(
+          plannedTripId,
+          true
+        );
+      } else {
+        runtime.lastSignature = "";
+        inject(true);
+      }
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Planned Trips checklist update failed.",
+        error
+      );
+
+      notify(
+        error?.message ||
+        "تعذر تحديث خطوة التجهيز.",
+        "danger"
+      );
+
+      return false;
+    }
+  };
+
+  const promotePlannedTrip = async (
+    plannedTripId,
+    automatic = false
+  ) => {
+    const store = getStore();
+    const trip = findPlannedTrip(plannedTripId);
+
+    if (!store || !trip) {
+      notify("تعذر العثور على الرحلة المخطط لها.", "danger");
+      return false;
+    }
+
+    const readiness = calculateReadiness(trip);
+
+    if (!readiness.readyForPromotion) {
+      notify(
+        "يجب شراء التذكرة وحجز الفندق أولاً.",
+        "warning"
+      );
+      return false;
+    }
+
+    try {
+      let result = null;
+
+      if (
+        typeof store.promotePlannedTripToReady ===
+        "function"
+      ) {
+        result =
+          store.promotePlannedTripToReady(
+            plannedTripId,
+            {
+              automatic,
+              source: "trips-page"
+            }
+          );
+      } else if (
+        typeof store.convertPlannedTripToTrip ===
+        "function"
+      ) {
+        result =
+          store.convertPlannedTripToTrip(
+            plannedTripId,
+            {
+              status: "ready",
+              planningStatus: "ready"
+            }
+          );
+      }
+
+      if (!result) {
+        notify(
+          "تعذر تحويل الرحلة. تأكد من Store V2.3.0.",
+          "danger"
+        );
+        return false;
+      }
+
+      notify(
+        automatic
+          ? "اكتمل الحجز وتحولت الرحلة تلقائياً إلى رحلة جاهزة."
+          : "تم تحويل الرحلة إلى رحلة جاهزة.",
+        "success"
+      );
+
+      window.dispatchEvent(
+        new CustomEvent(
+          "tic:planned-trip-promoted",
+          {
+            detail: {
+              plannedTripId,
+              result: clone(result),
+              automatic
+            }
+          }
+        )
+      );
+
+      runtime.lastSignature = "";
+
+      window.requestAnimationFrame(() => {
+        const page =
+          window.TIC?.Pages?.trips ||
+          window.TICTripsPage;
+
+        if (typeof page?.refresh === "function") {
+          page.refresh();
+        }
+
+        inject(true);
+      });
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Planned Trips promotion failed.",
+        error
+      );
+
+      notify(
+        error?.message ||
+        "تعذر تحويل الرحلة إلى جاهزة.",
+        "danger"
+      );
+
+      return false;
+    }
+  };
+
+  const deletePlannedTrip = async (
+    plannedTripId
+  ) => {
+    const store = getStore();
+    const trip = findPlannedTrip(plannedTripId);
+
+    if (!store || !trip) {
+      notify("تعذر العثور على الرحلة.", "danger");
+      return false;
+    }
+
+    const confirmed =
+      typeof getUI()?.confirm === "function"
+        ? await getUI().confirm({
+            title: "حذف الرحلة المخطط لها",
+            message:
+              `سيتم حذف "${
+                trip.title ||
+                trip.city ||
+                trip.country ||
+                "الرحلة"
+              }" من خططك.`,
+            confirmLabel: "حذف",
+            cancelLabel: "إلغاء",
+            danger: true
+          })
+        : window.confirm(
+            "هل تريد حذف هذه الرحلة المخطط لها؟"
+          );
+
+    if (confirmed !== true) return false;
+
+    try {
+      let result = null;
+
+      if (
+        typeof store.deletePlannedTrip === "function"
+      ) {
+        result =
+          store.deletePlannedTrip(plannedTripId);
+      } else if (
+        typeof store.removePlannedTrip === "function"
+      ) {
+        result =
+          store.removePlannedTrip(plannedTripId);
+      }
+
+      if (result === false || result === null) {
+        notify(
+          "تعذر حذف الرحلة المخطط لها.",
+          "danger"
+        );
+        return false;
+      }
+
+      notify(
+        "تم حذف الرحلة المخطط لها.",
+        "success"
+      );
+
+      runtime.lastSignature = "";
+      inject(true);
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Planned Trips deletion failed.",
+        error
+      );
+
+      notify(
+        error?.message ||
+        "تعذر حذف الرحلة.",
+        "danger"
+      );
+
+      return false;
+    }
+  };
+
+  const openGuide = (countryCode) => {
+    const router = getRouter();
+
+    if (typeof router?.go === "function") {
+      router.go("guide", {
+        params: {
+          country: countryCode
+        },
+        query: {
+          country: countryCode
+        },
+        source: "planned-trips"
+      });
+
+      return true;
+    }
+
+    window.location.hash = countryCode
+      ? `#guide?country=${encodeURIComponent(countryCode)}`
+      : "#guide";
+
+    return true;
+  };
+
+  const onClick = (event) => {
+    const target = event.target.closest(
+      "[data-planned-action]"
+    );
+
+    if (!target) return;
+
+    event.preventDefault();
+
+    const action =
+      target.dataset.plannedAction;
+
+    if (action === "toggle-check") {
+      updateChecklist(
+        target.dataset.plannedTripId,
+        target.dataset.checkKey
+      );
+      return;
+    }
+
+    if (action === "promote") {
+      promotePlannedTrip(
+        target.dataset.plannedTripId,
+        false
+      );
+      return;
+    }
+
+    if (action === "delete") {
+      deletePlannedTrip(
+        target.dataset.plannedTripId
+      );
+      return;
+    }
+
+    if (action === "open-guide") {
+      openGuide(
+        target.dataset.countryCode || ""
+      );
+    }
+  };
+
+  const observePage = () => {
+    if (runtime.observer) return;
+
+    runtime.observer = new MutationObserver(() => {
+      window.requestAnimationFrame(() => {
+        inject(false);
+      });
+    });
+
+    runtime.observer.observe(
+      document.documentElement,
+      {
+        childList: true,
+        subtree: true
+      }
+    );
+  };
+
+  const bindEvents = () => {
+    if (!runtime.clickBound) {
+      document.addEventListener("click", onClick);
+      runtime.clickBound = true;
+    }
+
+    [
+      "tic:page:trips:mounted",
+      "tic:page:trips:refreshed",
+      "tic:planned-trips-changed",
+      "tic:budget-travel-planned-trip-created",
+      "tic:store-change",
+      "store:changed"
+    ].forEach((eventName) => {
+      const handler = () => {
+        runtime.lastSignature = "";
+
+        window.requestAnimationFrame(() => {
+          inject(true);
+        });
+      };
+
+      window.addEventListener(eventName, handler);
+
+      runtime.eventBindings.push({
+        eventName,
+        handler
+      });
+    });
+  };
+
+  const patchTripsPage = () => {
+    const page =
+      window.TIC?.Pages?.trips ||
+      window.TICTripsPage;
+
+    if (!page || page.__plannedTripsIntegrationPatched) {
+      return false;
+    }
+
+    ["mount", "afterEnter", "refresh", "openHub", "openList"].forEach(
+      (methodName) => {
+        if (typeof page[methodName] !== "function") return;
+
+        const original = page[methodName].bind(page);
+
+        page[methodName] = function patchedTripsMethod(
+          ...args
+        ) {
+          const result = original(...args);
+
+          runtime.lastSignature = "";
+
+          window.requestAnimationFrame(() => {
+            inject(true);
+          });
+
+          return result;
+        };
+      }
+    );
+
+    Object.defineProperty(
+      page,
+      "__plannedTripsIntegrationPatched",
+      {
+        value: true,
+        enumerable: false,
+        configurable: false,
+        writable: false
+      }
+    );
+
+    page.getPlannedTrips = () =>
+      clone(getPlannedTrips());
+
+    page.openPlannedTrips = () => {
+      if (typeof page.openHub === "function") {
+        page.openHub("upcoming");
+      }
+
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector(SECTION_SELECTOR)
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+          });
+      });
+
+      return true;
+    };
+
+    page.promotePlannedTrip = (
+      plannedTripId
+    ) =>
+      promotePlannedTrip(
+        plannedTripId,
+        false
+      );
+
+    return true;
+  };
+
+  const registerUIActions = () => {
+    const ui = getUI();
+
+    if (
+      !ui ||
+      typeof ui.registerAction !== "function"
+    ) {
+      return false;
+    }
+
+    const register = (name, handler) => {
+      if (ui.hasAction?.(name)) return;
+
+      try {
+        ui.registerAction(name, handler);
+      } catch (error) {
+        console.warn(
+          `Planned Trips UI action registration failed: ${name}`,
+          error
+        );
+      }
+    };
+
+    register(
+      "trips-open-planned",
+      () => {
+        const page =
+          window.TIC?.Pages?.trips ||
+          window.TICTripsPage;
+
+        return page?.openPlannedTrips?.();
+      }
+    );
+
+    register(
+      "planned-trip-promote",
+      (payload = {}) =>
+        promotePlannedTrip(
+          payload.params?.plannedTripId ||
+          payload.plannedTripId,
+          false
+        )
+    );
+
+    return true;
+  };
+
+  const init = () => {
+    if (runtime.initialized) return true;
+
+    ensureStyles();
+    bindEvents();
+    observePage();
+    patchTripsPage();
+    registerUIActions();
+
+    runtime.initialized = true;
+
+    window.requestAnimationFrame(() => {
+      inject(true);
+    });
+
+    window.TIC = window.TIC || {};
+    window.TIC.Features =
+      window.TIC.Features || {};
+
+    window.TIC.Features.plannedTripsPageIntegration =
+      Object.freeze({
+        version: VERSION,
+        inject: () => inject(true),
+        getPlannedTrips: () =>
+          clone(getPlannedTrips()),
+        updateChecklist,
+        promotePlannedTrip,
+        deletePlannedTrip,
+        diagnostics() {
+          return {
+            version: VERSION,
+            initialized: runtime.initialized,
+            patchApplied:
+              Boolean(
+                window.TIC?.Pages?.trips
+                  ?.__plannedTripsIntegrationPatched
+              ),
+            storeAvailable: Boolean(getStore()),
+            pageAvailable: Boolean(
+              document.querySelector(PAGE_SELECTOR)
+            ),
+            sectionInjected: Boolean(
+              document.querySelector(
+                SECTION_SELECTOR
+              )
+            ),
+            plannedTripCount:
+              getPlannedTrips().length,
+            eventBindingCount:
+              runtime.eventBindings.length,
+            lastSignature:
+              runtime.lastSignature
+          };
+        }
+      });
+
+    return true;
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      init,
+      { once: true }
+    );
+  } else {
+    init();
+  }
+})(window, document);
