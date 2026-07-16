@@ -1,71 +1,210 @@
 /* =========================================================
    Travel Intelligence Center
-   Budget Intelligence Platform Page V3.1.1
+   Simple Travel Budget Advisor V4.0.0
 
    File Path:
    js/pages/budget.js
 
    Purpose:
-   - Complete Budget Intelligence page.
-   - Preserves Store, Router, UI and ten-engine integration.
-   - Improves iPhone scrolling and content hierarchy.
-   - Keeps expenses, savings, payments, AI, alerts and reports.
+   - Rebuilds the Budget page as a simple travel-money advisor.
+   - Starts the travel balance from zero unless saved data exists.
+   - Supports:
+     1) Add balance.
+     2) Withdraw balance.
+     3) Add travel expense.
+     4) Automatic smart destination suggestions.
+     5) Upgrade suggestions when a little more money is needed.
+     6) Multi-trip suggestions for larger balances.
+     7) Recent transaction history.
+     8) Adding a suggested destination to planned trips.
+   - Preserves Router, Store and UI compatibility.
+   - Keeps the page stable while scrolling on iPhone.
 ========================================================= */
 
 (function (window, document) {
   "use strict";
 
-  const Config = window.TICConfig || window.TIC?.Config || {};
   const PAGE_ID = "budget";
-  const PAGE_VERSION = "3.1.1";
+  const PAGE_VERSION = "4.0.0";
+  const STORAGE_KEY = "tic_simple_travel_budget_v4";
 
-  const VIEWS = Object.freeze({
-    OVERVIEW: "overview",
-    EXPENSES: "expenses",
-    SAVINGS: "savings",
-    PAYMENTS: "payments",
-    ALERTS: "alerts",
-    REPORTS: "reports"
+  const TRANSACTION_TYPES = Object.freeze({
+    DEPOSIT: "deposit",
+    WITHDRAWAL: "withdrawal",
+    EXPENSE: "expense"
   });
+
+  const DIALOGS = Object.freeze({
+    DEPOSIT: "deposit",
+    WITHDRAWAL: "withdrawal",
+    EXPENSE: "expense",
+    HISTORY: "history",
+    DESTINATION: "destination"
+  });
+
+  const DESTINATIONS = Object.freeze([
+    {
+      id: "baku",
+      country: "أذربيجان",
+      countryCode: "AZ",
+      city: "باكو",
+      title: "رحلة باكو",
+      days: 5,
+      cost: 5000,
+      level: "اقتصادية",
+      style: "مدينة هادئة",
+      summary: "رحلة خفيفة ومرتبة مع مطاعم حلال وطبيعة قريبة.",
+      tags: ["مطاعم حلال", "رحلة قصيرة", "مدينة هادئة"],
+      bestFor: "خيار اقتصادي قريب"
+    },
+    {
+      id: "sarajevo",
+      country: "البوسنة والهرسك",
+      countryCode: "BA",
+      city: "سراييفو",
+      title: "رحلة البوسنة",
+      days: 6,
+      cost: 6500,
+      level: "متوازنة",
+      style: "طبيعة وهدوء",
+      summary: "طبيعة جميلة وأجواء هادئة وتكلفة مناسبة للعائلة.",
+      tags: ["طبيعة", "أكل حلال", "هدوء"],
+      bestFor: "أفضل قيمة مقابل الميزانية"
+    },
+    {
+      id: "tbilisi",
+      country: "جورجيا",
+      countryCode: "GE",
+      city: "تبليسي",
+      title: "رحلة تبليسي",
+      days: 6,
+      cost: 7500,
+      level: "متوسطة",
+      style: "طبيعة ورحلات يومية",
+      summary: "مدينة مناسبة كنقطة انطلاق للطبيعة والجبال والرحلات اليومية.",
+      tags: ["طبيعة", "أجواء معتدلة", "رحلات يومية"],
+      bestFor: "طبيعة بميزانية متوسطة"
+    },
+    {
+      id: "istanbul",
+      country: "تركيا",
+      countryCode: "TR",
+      city: "إسطنبول",
+      title: "رحلة إسطنبول",
+      days: 6,
+      cost: 9000,
+      level: "متوسطة",
+      style: "مدينة وتسوق",
+      summary: "خيارات واسعة للسكن والمطاعم والتسوق والأنشطة.",
+      tags: ["مطاعم حلال", "تسوق", "أنشطة متنوعة"],
+      bestFor: "رحلة مدينة متكاملة"
+    },
+    {
+      id: "budapest",
+      country: "المجر",
+      countryCode: "HU",
+      city: "بودابست",
+      title: "رحلة بودابست",
+      days: 7,
+      cost: 10000,
+      level: "مريحة",
+      style: "مدينة أوروبية",
+      summary: "مدينة منظمة بإطلالات نهرية وفنادق جميلة وتجربة أوروبية هادئة.",
+      tags: ["إطلالات نهرية", "مدينة منظمة", "فنادق راقية"],
+      bestFor: "تجربة أوروبية مريحة"
+    },
+    {
+      id: "vienna",
+      country: "النمسا",
+      countryCode: "AT",
+      city: "فيينا",
+      title: "رحلة النمسا",
+      days: 7,
+      cost: 12500,
+      level: "راقية",
+      style: "مدينة وطبيعة",
+      summary: "خيار راقٍ يجمع المدينة المنظمة والطبيعة والقرى القريبة.",
+      tags: ["طبيعة", "هدوء", "مدينة راقية"],
+      bestFor: "ترقية أوروبية واضحة"
+    },
+    {
+      id: "interlaken",
+      country: "سويسرا",
+      countryCode: "CH",
+      city: "إنترلاكن",
+      title: "رحلة سويسرا",
+      days: 7,
+      cost: 15000,
+      level: "فاخرة",
+      style: "جبال وهدوء",
+      summary: "طبيعة فاخرة وقطارات ومناظر جبلية وإقامة هادئة.",
+      tags: ["مناظر جبلية", "قطارات", "طبيعة فاخرة"],
+      bestFor: "رحلة فاخرة"
+    },
+    {
+      id: "maldives",
+      country: "المالديف",
+      countryCode: "MV",
+      city: "منتجع جزيرة",
+      title: "رحلة المالديف",
+      days: 5,
+      cost: 18000,
+      level: "فاخرة",
+      style: "بحر وخصوصية",
+      summary: "استجمام وخصوصية ومنتجع هادئ وتجربة بحرية فاخرة.",
+      tags: ["خصوصية", "بحر", "استجمام"],
+      bestFor: "استجمام فاخر"
+    }
+  ]);
 
   const state = {
     initialized: false,
     mounted: false,
-    refreshing: false,
     container: null,
     unsubscribeStore: null,
-    integrationUnsubscribe: null,
     actionUnsubscribers: [],
     eventBindings: [],
     subscribers: new Set(),
-    lastSnapshot: null,
-    activeView: VIEWS.OVERVIEW,
     activeDialog: null,
-    refreshTimer: null,
+    selectedDestinationId: null,
+    snapshot: null,
     lastSignature: "",
+    refreshTimer: null,
+    refreshing: false,
 
-    // Scroll stability V3.1.1
+    // iPhone scroll stability
     isUserScrolling: false,
     scrollIdleTimer: null,
     pendingRefresh: false,
     lastKnownScrollY: 0
   };
 
+  /* =========================================================
+     Utilities
+  ========================================================= */
+
   const clone = (value) => {
     if (value === undefined) return undefined;
+
     if (typeof structuredClone === "function") {
-      try { return structuredClone(value); } catch (_) {}
+      try {
+        return structuredClone(value);
+      } catch (_) {}
     }
-    try { return JSON.parse(JSON.stringify(value)); } catch (_) { return value; }
+
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+      return value;
+    }
   };
 
-  const escapeHTML = (value) =>
-    String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  const text = (value, fallback = "") =>
+    String(
+      value === undefined || value === null
+        ? fallback
+        : value
+    ).trim();
 
   const number = (value, fallback = 0) => {
     const parsed = Number(value);
@@ -75,45 +214,57 @@
   const nonNegative = (value, fallback = 0) =>
     Math.max(0, number(value, fallback));
 
-  const percentage = (part, total) =>
-    number(total) > 0
-      ? Math.round((number(part) / number(total)) * 100)
-      : 0;
+  const asArray = (value) =>
+    Array.isArray(value)
+      ? value
+      : value && typeof value === "object"
+        ? Object.values(value)
+        : [];
 
-  const asArray = (value) => {
-    if (Array.isArray(value)) return value;
-    if (value && typeof value === "object") return Object.values(value);
-    return [];
-  };
+  const escapeHTML = (value) =>
+    text(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
 
-  const firstDefined = (...values) =>
-    values.find((value) => value !== undefined && value !== null && value !== "");
+  const createId = (prefix = "item") =>
+    `${prefix}_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 9)}`;
+
+  const nowISO = () =>
+    new Date().toISOString();
+
+  const todayISO = () =>
+    nowISO().slice(0, 10);
 
   const getStore = () =>
-    window.TIC?.Store || window.TICStore || window.Store || null;
+    window.TIC?.Store ||
+    window.TICStore ||
+    window.Store ||
+    window.TravelStore ||
+    null;
 
   const getRouter = () =>
-    window.TIC?.Router || window.TICRouter || null;
+    window.TIC?.Router ||
+    window.TICRouter ||
+    null;
 
   const getUI = () =>
-    window.TIC?.UI || window.TICUI || null;
-
-  const engines = () => ({
-    budget: window.TICBudgetEngine || window.TIC?.Features?.budgetEngine || null,
-    expense: window.TICExpenseEngine || window.TIC?.Features?.expenseEngine || null,
-    savings: window.TICSavingsEngine || window.TIC?.Features?.savingsEngine || null,
-    analytics: window.TICBudgetAnalytics || window.TIC?.Features?.budgetAnalytics || null,
-    ai: window.TICBudgetAI || window.TIC?.Features?.budgetAI || null,
-    payments: window.TICPaymentTracker || window.TIC?.Features?.paymentTracker || null,
-    alerts: window.TICExpenseAlertEngine || window.TIC?.Features?.expenseAlertEngine || null,
-    export: window.TICBudgetExportEngine || window.TIC?.Features?.budgetExportEngine || null,
-    notifications: window.TICBudgetNotificationEngine || window.TIC?.Features?.budgetNotificationEngine || null,
-    integration: window.TICBudgetIntegrationEngine || window.TIC?.Features?.budgetIntegrationEngine || null
-  });
+    window.TIC?.UI ||
+    window.TICUI ||
+    null;
 
   const resolveContainer = (container) => {
-    if (container instanceof window.Element) return container;
-    if (typeof container === "string") return document.querySelector(container);
+    if (container instanceof window.Element) {
+      return container;
+    }
+
+    if (typeof container === "string") {
+      return document.querySelector(container);
+    }
 
     return (
       document.querySelector("[data-router-view]") ||
@@ -123,35 +274,128 @@
     );
   };
 
+  const notify = (message, tone = "info") => {
+    const ui = getUI();
+
+    if (typeof ui?.toast === "function") {
+      return ui.toast(message, { tone });
+    }
+
+    if (typeof ui?.showToast === "function") {
+      return ui.showToast(message, tone);
+    }
+
+    console.log(`[Budget:${tone}] ${message}`);
+    return null;
+  };
+
   const emit = (type, detail = {}) => {
     const payload = {
       type,
       page: PAGE_ID,
-      timestamp: new Date().toISOString(),
+      timestamp: nowISO(),
       ...clone(detail)
     };
 
     state.subscribers.forEach((listener) => {
-      try { listener(payload); } catch (error) {
+      try {
+        listener(payload);
+      } catch (error) {
         console.error("TIC Budget subscriber error:", error);
       }
     });
 
     window.dispatchEvent(
-      new CustomEvent(`tic:page:${PAGE_ID}:${type}`, { detail: payload })
+      new CustomEvent(
+        `tic:page:${PAGE_ID}:${type}`,
+        { detail: payload }
+      )
     );
 
     return payload;
   };
 
-  const notify = (message, tone = "info") => {
+  const formatCurrency = (
+    value,
+    currencyCode = "AED"
+  ) => {
     const ui = getUI();
-    if (ui?.toast) return ui.toast(message, { tone });
-    if (ui?.showToast) return ui.showToast(message, tone);
-    console.log(`[Budget:${tone}] ${message}`);
+
+    if (typeof ui?.currency === "function") {
+      try {
+        return ui.currency(
+          number(value),
+          currencyCode
+        );
+      } catch (_) {}
+    }
+
+    try {
+      return new Intl.NumberFormat("ar-AE", {
+        style: "currency",
+        currency: currencyCode || "AED",
+        maximumFractionDigits: 0
+      }).format(number(value));
+    } catch (_) {
+      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${
+        currencyCode || "AED"
+      }`;
+    }
   };
 
-  const getStoreState = () => {
+  const formatDate = (value) => {
+    if (!value) return "";
+
+    try {
+      return new Intl.DateTimeFormat("ar-AE", {
+        day: "numeric",
+        month: "short",
+        year: "numeric"
+      }).format(new Date(value));
+    } catch (_) {
+      return text(value).slice(0, 10);
+    }
+  };
+
+  const button = ({
+    label,
+    action,
+    tone = "secondary",
+    icon = "",
+    block = false,
+    small = false,
+    attrs = ""
+  }) => `
+    <button
+      type="button"
+      class="tic-btn ${
+        tone === "primary"
+          ? "tic-btn-primary"
+          : tone === "danger"
+            ? "tic-btn-danger"
+            : tone === "ghost"
+              ? "tic-btn-ghost"
+              : "tic-btn-secondary"
+      } ${block ? "tic-btn-block" : ""} ${
+        small ? "tic-btn-small" : ""
+      }"
+      data-budget-action="${escapeHTML(action)}"
+      ${attrs}
+    >
+      ${
+        icon
+          ? `<span aria-hidden="true">${escapeHTML(icon)}</span>`
+          : ""
+      }
+      <span>${escapeHTML(label)}</span>
+    </button>
+  `;
+
+  /* =========================================================
+     Store and persistence adapter
+  ========================================================= */
+
+  const readStoreState = () => {
     const store = getStore();
     if (!store) return {};
 
@@ -162,1180 +406,1239 @@
 
       if (typeof store.get === "function") {
         const full = store.get();
-        if (full && typeof full === "object") return clone(full);
+
+        if (full && typeof full === "object") {
+          return clone(full);
+        }
 
         return {
           profile: store.get("profile"),
-          trips: store.get("trips"),
+          budgetWallet: store.get("budgetWallet"),
+          savings: store.get("savings"),
           budgets: store.get("budgets"),
           expenses: store.get("expenses"),
-          savings: store.get("savings"),
-          payments: store.get("payments"),
-          budgetNotifications: store.get("budgetNotifications")
+          plannedTrips: store.get("plannedTrips")
         };
       }
 
       if (store.state) return clone(store.state);
       if (store.data) return clone(store.data);
     } catch (error) {
-      console.error("TIC Budget Store read error:", error);
+      console.warn("TIC Budget Store read failed:", error);
     }
 
     return {};
   };
 
-  const callEngine = (engine, methods, args = []) => {
-    if (!engine) return null;
+  const readLocalWallet = () => {
+    try {
+      const raw = window.localStorage.getItem(
+        STORAGE_KEY
+      );
 
-    for (const method of methods) {
-      if (typeof engine[method] !== "function") continue;
+      if (!raw) return null;
 
-      try {
-        return engine[method](...args);
-      } catch (error) {
-        console.warn(`TIC Budget engine method failed: ${method}`, error);
+      const parsed = JSON.parse(raw);
+
+      return parsed && typeof parsed === "object"
+        ? parsed
+        : null;
+    } catch (error) {
+      console.warn(
+        "TIC Budget local wallet read failed:",
+        error
+      );
+      return null;
+    }
+  };
+
+  const normalizeTransaction = (
+    item,
+    index = 0
+  ) => {
+    const typeValue = text(
+      item?.type,
+      TRANSACTION_TYPES.DEPOSIT
+    );
+
+    const type = Object.values(
+      TRANSACTION_TYPES
+    ).includes(typeValue)
+      ? typeValue
+      : TRANSACTION_TYPES.DEPOSIT;
+
+    return {
+      id: text(
+        item?.id,
+        `budget_tx_${index}`
+      ),
+      type,
+      amount: nonNegative(item?.amount),
+      title: text(
+        item?.title,
+        type === TRANSACTION_TYPES.DEPOSIT
+          ? "إضافة رصيد"
+          : type === TRANSACTION_TYPES.WITHDRAWAL
+            ? "سحب من الرصيد"
+            : "مصروف سفر"
+      ),
+      category: text(
+        item?.category,
+        type === TRANSACTION_TYPES.EXPENSE
+          ? "other"
+          : ""
+      ),
+      notes: text(item?.notes),
+      date: text(
+        item?.date,
+        todayISO()
+      ),
+      createdAt: text(
+        item?.createdAt,
+        nowISO()
+      ),
+      source: text(
+        item?.source,
+        "budget-page"
+      )
+    };
+  };
+
+  const calculateBalance = (
+    transactions,
+    openingBalance = 0
+  ) =>
+    asArray(transactions).reduce(
+      (total, item) => {
+        const amount = nonNegative(item.amount);
+
+        if (
+          item.type ===
+          TRANSACTION_TYPES.DEPOSIT
+        ) {
+          return total + amount;
+        }
+
+        return total - amount;
+      },
+      nonNegative(openingBalance)
+    );
+
+  const normalizeWallet = (
+    wallet,
+    currencyCode = "AED"
+  ) => {
+    const source =
+      wallet &&
+      typeof wallet === "object"
+        ? wallet
+        : {};
+
+    const transactions = asArray(
+      source.transactions
+    )
+      .map(normalizeTransaction)
+      .filter((item) => item.amount > 0)
+      .sort((a, b) =>
+        String(b.createdAt).localeCompare(
+          String(a.createdAt)
+        )
+      );
+
+    const openingBalance = nonNegative(
+      source.openingBalance
+    );
+
+    const calculatedBalance = Math.max(
+      0,
+      calculateBalance(
+        transactions,
+        openingBalance
+      )
+    );
+
+    return {
+      version: PAGE_VERSION,
+      currency: text(
+        source.currency,
+        currencyCode || "AED"
+      ),
+      openingBalance,
+      balance: calculatedBalance,
+      transactions,
+      createdAt: text(
+        source.createdAt,
+        nowISO()
+      ),
+      updatedAt: text(
+        source.updatedAt,
+        nowISO()
+      )
+    };
+  };
+
+  const getWallet = () => {
+    const raw = readStoreState();
+    const currencyCode = text(
+      raw.profile?.currency,
+      "AED"
+    );
+
+    if (
+      raw.budgetWallet &&
+      typeof raw.budgetWallet === "object"
+    ) {
+      return normalizeWallet(
+        raw.budgetWallet,
+        currencyCode
+      );
+    }
+
+    const localWallet = readLocalWallet();
+
+    if (localWallet) {
+      return normalizeWallet(
+        localWallet,
+        currencyCode
+      );
+    }
+
+    /*
+     * Migration:
+     * Read older savings balance only when it is a real saved value.
+     * Do not use the previous 30,000 annual budget as a balance.
+     */
+    const oldSavingsBalance = nonNegative(
+      raw.savings?.balance ??
+      raw.savings?.currentBalance ??
+      raw.budgets?.savingsBalance ??
+      0
+    );
+
+    const migratedWallet = normalizeWallet(
+      {
+        openingBalance:
+          oldSavingsBalance,
+        currency: currencyCode,
+        transactions: [],
+        createdAt: nowISO(),
+        updatedAt: nowISO()
+      },
+      currencyCode
+    );
+
+    return migratedWallet;
+  };
+
+  const writeLocalWallet = (wallet) => {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(wallet)
+      );
+      return true;
+    } catch (error) {
+      console.warn(
+        "TIC Budget local wallet write failed:",
+        error
+      );
+      return false;
+    }
+  };
+
+  const saveWallet = (wallet) => {
+    const store = getStore();
+    const normalized = normalizeWallet(
+      {
+        ...wallet,
+        updatedAt: nowISO()
+      },
+      wallet?.currency || "AED"
+    );
+
+    let savedToStore = false;
+
+    try {
+      if (
+        typeof store?.setBudgetWallet ===
+        "function"
+      ) {
+        store.setBudgetWallet(
+          clone(normalized)
+        );
+        savedToStore = true;
+      } else if (
+        typeof store?.saveBudgetWallet ===
+        "function"
+      ) {
+        store.saveBudgetWallet(
+          clone(normalized)
+        );
+        savedToStore = true;
+      } else if (
+        typeof store?.set === "function"
+      ) {
+        store.set(
+          "budgetWallet",
+          clone(normalized),
+          { immediate: true }
+        );
+        savedToStore = true;
+      } else if (
+        typeof store?.dispatch === "function"
+      ) {
+        const result = store.dispatch(
+          "budgetWallet/set",
+          clone(normalized)
+        );
+        savedToStore = result !== false;
+      }
+    } catch (error) {
+      console.warn(
+        "TIC Budget Store wallet save failed:",
+        error
+      );
+    }
+
+    /*
+     * Local copy is intentionally kept as a resilience fallback.
+     * The next Store update can adopt budgetWallet as the main branch.
+     */
+    const savedLocally =
+      writeLocalWallet(normalized);
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "tic:budget-wallet-changed",
+        {
+          detail: {
+            wallet: clone(normalized),
+            savedToStore,
+            savedLocally
+          }
+        }
+      )
+    );
+
+    return (
+      savedToStore ||
+      savedLocally
+    );
+  };
+
+  const addTransaction = ({
+    type,
+    amount,
+    title,
+    category = "",
+    notes = "",
+    date = todayISO()
+  }) => {
+    const wallet = getWallet();
+    const normalizedAmount =
+      nonNegative(amount);
+
+    if (normalizedAmount <= 0) {
+      return {
+        ok: false,
+        reason: "invalid-amount"
+      };
+    }
+
+    if (
+      [
+        TRANSACTION_TYPES.WITHDRAWAL,
+        TRANSACTION_TYPES.EXPENSE
+      ].includes(type) &&
+      normalizedAmount > wallet.balance
+    ) {
+      return {
+        ok: false,
+        reason: "insufficient-balance",
+        balance: wallet.balance
+      };
+    }
+
+    const transaction =
+      normalizeTransaction({
+        id: createId("budget_tx"),
+        type,
+        amount: normalizedAmount,
+        title,
+        category,
+        notes,
+        date,
+        createdAt: nowISO(),
+        source: "simple-budget-page"
+      });
+
+    const nextWallet = normalizeWallet(
+      {
+        ...wallet,
+        transactions: [
+          transaction,
+          ...wallet.transactions
+        ],
+        updatedAt: nowISO()
+      },
+      wallet.currency
+    );
+
+    const saved =
+      saveWallet(nextWallet);
+
+    return {
+      ok: saved,
+      wallet: nextWallet,
+      transaction
+    };
+  };
+
+  /* =========================================================
+     Smart travel analysis
+  ========================================================= */
+
+  const getDestination = (id) =>
+    DESTINATIONS.find(
+      (item) =>
+        String(item.id) === String(id)
+    ) || null;
+
+  const buildAffordable = (balance) =>
+    DESTINATIONS.filter(
+      (item) => item.cost <= balance
+    ).sort(
+      (a, b) => b.cost - a.cost
+    );
+
+  const buildUpcoming = (balance) =>
+    DESTINATIONS.filter(
+      (item) => item.cost > balance
+    ).sort(
+      (a, b) => a.cost - b.cost
+    );
+
+  const buildMultiTripOptions = (
+    balance
+  ) => {
+    const pairs = [];
+
+    for (
+      let firstIndex = 0;
+      firstIndex < DESTINATIONS.length;
+      firstIndex += 1
+    ) {
+      for (
+        let secondIndex =
+          firstIndex + 1;
+        secondIndex <
+        DESTINATIONS.length;
+        secondIndex += 1
+      ) {
+        const first =
+          DESTINATIONS[firstIndex];
+        const second =
+          DESTINATIONS[secondIndex];
+
+        const total =
+          first.cost + second.cost;
+
+        if (total <= balance) {
+          pairs.push({
+            id: `${first.id}_${second.id}`,
+            trips: [first, second],
+            total,
+            remaining:
+              balance - total,
+            score:
+              total -
+              Math.abs(
+                first.cost -
+                second.cost
+              ) * 0.08
+          });
+        }
       }
     }
 
-    return null;
+    return pairs
+      .sort(
+        (a, b) => b.score - a.score
+      )
+      .slice(0, 2);
   };
 
-  const fallbackSnapshot = (raw) => {
-    const profile = raw.profile && typeof raw.profile === "object" ? raw.profile : {};
-    const trips = asArray(raw.trips);
-    const expenses = asArray(
-      firstDefined(raw.expenses, raw.budget?.expenses, raw.budgets?.expenses, raw.finance?.expenses, [])
-    );
+  const buildTravelAdvice = (
+    balance
+  ) => {
+    const affordable =
+      buildAffordable(balance);
 
-    const annualBudget = nonNegative(
-      firstDefined(
-        raw.budget?.annualBudget,
-        raw.budgets?.annualBudget,
-        profile.annualTravelBudget,
-        Config.profile?.annualTravelBudget,
-        30000
-      )
-    );
+    const upcoming =
+      buildUpcoming(balance);
 
-    const totalSpent = expenses.length
-      ? expenses.reduce((total, item) => total + nonNegative(firstDefined(item.amount, item.total, item.value, 0)), 0)
-      : trips.reduce((total, trip) => total + nonNegative(firstDefined(trip.spent, trip.totalSpent, 0)), 0);
+    const bestNow =
+      affordable[0] || null;
 
-    const savingsRoot = raw.savings || {};
-    const savingEntries = asArray(
-      savingsRoot.entries || savingsRoot.transactions || savingsRoot.contributions
-    );
+    const nextUpgrade =
+      upcoming[0] || null;
 
-    const balance = nonNegative(
-      firstDefined(
-        savingsRoot.balance,
-        savingsRoot.currentBalance,
-        raw.budgets?.savingsBalance,
-        savingEntries.reduce((total, item) => total + nonNegative(item.amount), 0),
-        0
-      )
-    );
+    const multiTripOptions =
+      buildMultiTripOptions(balance);
 
-    const monthlySaving = nonNegative(
-      firstDefined(
-        savingsRoot.monthlySaving,
-        raw.budgets?.monthlySavingTarget,
-        profile.monthlySaving,
-        profile.monthlyTravelSaving,
-        1500
-      )
-    );
+    if (balance <= 0) {
+      return {
+        tone: "empty",
+        eyebrow: "ابدأ من الصفر",
+        title:
+          "أضف أول مبلغ لصندوق السفر",
+        message:
+          "كل مبلغ تضيفه سيغيّر الاقتراحات تلقائياً ويقرّبك من وجهة مناسبة.",
+        bestNow: null,
+        nextUpgrade:
+          DESTINATIONS[0],
+        affordable: [],
+        multiTripOptions: []
+      };
+    }
 
-    const tripItems = trips.map((trip, index) => {
-      const planned = nonNegative(firstDefined(trip.budget, trip.plannedBudget, 0));
-      const spent = nonNegative(firstDefined(trip.spent, trip.totalSpent, 0));
+    if (!bestNow) {
+      return {
+        tone: "building",
+        eyebrow: "صندوقك بدأ يكبر",
+        title:
+          `باقي لك ${formatCurrency(
+            DESTINATIONS[0].cost -
+              balance
+          )} لرحلة باكو`,
+        message:
+          "استمر في إضافة الرصيد، وأول خيار مناسب سيفتح لك تلقائياً.",
+        bestNow: null,
+        nextUpgrade:
+          DESTINATIONS[0],
+        affordable: [],
+        multiTripOptions: []
+      };
+    }
+
+    if (
+      multiTripOptions.length
+    ) {
+      const bestPair =
+        multiTripOptions[0];
 
       return {
-        id: String(firstDefined(trip.id, `trip_${index}`)),
-        title: trip.title || trip.destination || "رحلة",
-        destination: trip.destination || trip.country || "",
-        planned,
-        spent,
-        remaining: planned - spent,
-        usagePercent: percentage(spent, planned),
-        expenseCount: expenses.filter((expense) => String(expense.tripId) === String(trip.id)).length
+        tone: "multi",
+        eyebrow:
+          "رصيدك يفتح أكثر من خيار",
+        title:
+          "تقدر ترتب سفرتين بدل سفرة واحدة",
+        message:
+          `${bestPair.trips[0].title} و${bestPair.trips[1].title} ضمن رصيدك الحالي.`,
+        bestNow,
+        nextUpgrade,
+        affordable,
+        multiTripOptions
       };
-    });
+    }
 
-    const remaining = annualBudget - totalSpent;
-    const usagePercent = percentage(totalSpent, annualBudget);
+    if (nextUpgrade) {
+      return {
+        tone: "ready",
+        eyebrow:
+          "تقدر تسافر الحين",
+        title:
+          `تقدر ترتب ${bestNow.title} لمدة ${bestNow.days} أيام`,
+        message:
+          `ولو زدت ${formatCurrency(
+            nextUpgrade.cost -
+              balance
+          )} تقدر تنتقل إلى ${nextUpgrade.title}.`,
+        bestNow,
+        nextUpgrade,
+        affordable,
+        multiTripOptions: []
+      };
+    }
 
     return {
-      currency: profile.currency || "AED",
-      annualBudget,
-      totalSpent,
-      remaining,
-      usagePercent,
-      expenses,
-      savings: {
-        balance,
-        monthlySaving,
-        coveragePercent: percentage(balance, annualBudget),
-        remainingToFund: Math.max(0, annualBudget - balance)
-      },
-      trips: {
-        items: tripItems,
-        totalTrips: tripItems.length,
-        totalPlanned: tripItems.reduce((total, trip) => total + trip.planned, 0),
-        totalSpent,
-        tripsOverBudget: tripItems.filter((trip) => trip.planned > 0 && trip.spent > trip.planned).length,
-        tripsNearLimit: tripItems.filter((trip) => trip.usagePercent >= 85 && trip.usagePercent <= 100).length
-      },
-      categories: { items: [] },
-      monthly: { items: [] },
-      forecast: {
-        projectedSpend: totalSpent,
-        likelyToExceed: totalSpent > annualBudget,
-        expectedOverrun: Math.max(0, totalSpent - annualBudget),
-        recommendedMonthlyLimit:
-          Math.max(0, annualBudget - totalSpent) /
-          Math.max(1, 12 - new Date().getMonth())
-      },
-      health: {
-        score: Math.max(0, Math.min(100, 100 - Math.max(0, usagePercent - 50))),
-        status:
-          usagePercent > 100
-            ? "critical"
-            : usagePercent >= 85
-              ? "warning"
-              : "healthy"
-      }
+      tone: "premium",
+      eyebrow:
+        "ميزانيتك ممتازة",
+      title:
+        `تقدر ترتب ${bestNow.title} براحة`,
+      message:
+        "رصيدك الحالي يغطي أعلى خيار موجود، وتقدر تختار بين رحلة فاخرة أو أكثر من سفرة.",
+      bestNow,
+      nextUpgrade: null,
+      affordable,
+      multiTripOptions
     };
   };
 
   const buildSnapshot = () => {
-    const raw = getStoreState();
-    const modules = engines();
+    const raw = readStoreState();
+    const wallet = getWallet();
+    const analysis =
+      buildTravelAdvice(
+        wallet.balance
+      );
 
-    const integrated =
-      callEngine(modules.integration, ["getUnifiedDashboard", "getDashboard"], [
-        { store: getStore() }
-      ]) || {};
+    const deposits =
+      wallet.transactions
+        .filter(
+          (item) =>
+            item.type ===
+            TRANSACTION_TYPES.DEPOSIT
+        )
+        .reduce(
+          (total, item) =>
+            total + item.amount,
+          wallet.openingBalance
+        );
 
-    const analytics =
-      integrated.analytics ||
-      callEngine(modules.analytics, ["getDashboard", "getSnapshot", "generate"], [
-        { store: getStore() }
-      ]) ||
-      fallbackSnapshot(raw);
+    const withdrawals =
+      wallet.transactions
+        .filter(
+          (item) =>
+            item.type ===
+            TRANSACTION_TYPES.WITHDRAWAL
+        )
+        .reduce(
+          (total, item) =>
+            total + item.amount,
+          0
+        );
 
-    const ai =
-      integrated.ai ||
-      callEngine(modules.ai, ["getDashboard", "generateDashboard"], [
-        { store: getStore() }
-      ]) ||
-      { recommendations: [], summary: {} };
-
-    const payments =
-      integrated.payments ||
-      callEngine(modules.payments, ["getDashboard", "buildDashboard"], [
-        { store: getStore() }
-      ]) ||
-      { payments: [], upcoming: [], summary: {} };
-
-    const alerts =
-      integrated.alerts ||
-      callEngine(modules.alerts, ["getDashboard", "buildDashboard"], [
-        { store: getStore() }
-      ]) ||
-      { alerts: [], activeAlerts: [], summary: {} };
-
-    const notifications =
-      integrated.notifications ||
-      callEngine(modules.notifications, ["getDashboard", "buildDashboard"], [
-        { store: getStore() }
-      ]) ||
-      { notifications: [], unread: [], summary: {} };
-
-    const integrationHealth =
-      callEngine(modules.integration, ["getHealth"], []) ||
-      integrated.integration ||
-      null;
-
-    const expenseList =
-      asArray(analytics.expenses).length
-        ? asArray(analytics.expenses)
-        : asArray(
-            callEngine(
-              modules.expense,
-              ["listExpenses", "getExpenses", "getAll", "list"],
-              [{ store: getStore(), includeDeleted: false }]
-            ) ||
-            raw.expenses ||
-            raw.budget?.expenses ||
-            raw.budgets?.expenses
-          );
+    const expenses =
+      wallet.transactions
+        .filter(
+          (item) =>
+            item.type ===
+            TRANSACTION_TYPES.EXPENSE
+        )
+        .reduce(
+          (total, item) =>
+            total + item.amount,
+          0
+        );
 
     const snapshot = {
       raw,
-      analytics,
-      ai,
-      payments,
-      alerts,
-      notifications,
-      integrationHealth,
-      expenses: expenseList,
-      currency: analytics.currency || raw.profile?.currency || "AED",
-      annualBudget: nonNegative(analytics.annualBudget),
-      totalSpent: nonNegative(analytics.totalSpent),
-      remaining: number(
-        analytics.remaining,
-        nonNegative(analytics.annualBudget) - nonNegative(analytics.totalSpent)
-      ),
-      usagePercent: nonNegative(analytics.usagePercent),
-      healthScore: number(analytics.health?.score, 0),
-      healthStatus: analytics.health?.status || "unknown",
-      savings: analytics.savings || {},
-      trips: analytics.trips || { items: [] },
-      categories: analytics.categories || { items: [] },
-      monthly: analytics.monthly || { items: [] },
-      forecast: analytics.forecast || {},
-      recommendations: asArray(ai.recommendations),
-      activeAlerts: asArray(alerts.activeAlerts || alerts.alerts),
-      unreadNotifications: asArray(notifications.unread)
+      wallet,
+      analysis,
+      currency:
+        wallet.currency ||
+        raw.profile?.currency ||
+        "AED",
+      balance: wallet.balance,
+      totals: {
+        deposits,
+        withdrawals,
+        expenses
+      },
+      recentTransactions:
+        wallet.transactions.slice(0, 5),
+      plannedTrips:
+        asArray(raw.plannedTrips)
     };
 
-    state.lastSnapshot = snapshot;
+    state.snapshot = snapshot;
     return snapshot;
   };
 
-  const currency = (value, snapshot = state.lastSnapshot) => {
-    const ui = getUI();
+  /* =========================================================
+     Rendering
+  ========================================================= */
 
-    if (ui?.currency) {
-      return ui.currency(number(value), snapshot?.currency);
-    }
-
-    try {
-      return new Intl.NumberFormat("ar-AE", {
-        style: "currency",
-        currency: snapshot?.currency || "AED",
-        maximumFractionDigits: 0
-      }).format(number(value));
-    } catch (_) {
-      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${snapshot?.currency || "AED"}`;
-    }
-  };
-
-  const badge = (label, tone = "info") => `
-    <span class="tic-badge tic-badge-${escapeHTML(tone)}">
-      ${escapeHTML(label)}
-    </span>
-  `;
-
-  const progress = (value, label, hint) => {
-    const normalized = Math.max(0, Math.min(100, number(value)));
-
-    return `
-      <div class="tic-budget-progress">
-        <div class="tic-budget-progress-head">
-          <span>${escapeHTML(label)}</span>
-          <span>${escapeHTML(hint)}</span>
-        </div>
-        <div class="tic-budget-progress-track">
-          <span style="width:${normalized}%"></span>
-        </div>
+  const renderHero = (snapshot) => `
+    <section class="tic-budget-simple-hero">
+      <div class="tic-budget-simple-hero-copy">
+        <span class="tic-budget-simple-eyebrow">
+          TRAVEL MONEY ADVISOR
+        </span>
+        <h1>ميزانية سفرك</h1>
+        <p>
+          أضف رصيدك، واسحب منه عند الحاجة، وخلك تعرف مباشرة وين تقدر تسافر.
+        </p>
       </div>
-    `;
-  };
 
-  const button = ({
-    label,
-    action,
-    tone = "secondary",
-    icon = "",
-    block = false,
-    attrs = ""
-  }) => `
-    <button
-      type="button"
-      class="tic-btn ${
-        tone === "primary"
-          ? "tic-btn-primary"
-          : tone === "danger"
-            ? "tic-btn-danger"
-            : "tic-btn-secondary"
-      } ${block ? "tic-btn-block" : ""}"
-      data-budget-action="${escapeHTML(action)}"
-      ${attrs}
-    >
-      ${icon ? `<span aria-hidden="true">${escapeHTML(icon)}</span>` : ""}
-      <span>${escapeHTML(label)}</span>
-    </button>
-  `;
+      <div class="tic-budget-balance-card">
+        <small>رصيد السفر الحالي</small>
+        <strong>
+          ${escapeHTML(
+            formatCurrency(
+              snapshot.balance,
+              snapshot.currency
+            )
+          )}
+        </strong>
 
-  const renderHero = (snapshot) => {
-    const unread =
-      snapshot.notifications?.summary?.unread ||
-      snapshot.unreadNotifications.length;
-
-    return `
-      <section class="tic-budget-hero">
-        <div>
-          <span class="tic-hero-badge">Budget Intelligence</span>
-          <h1>مركز الميزانية الذكي</h1>
-          <p>ميزانية السفر والمصروفات والادخار والدفعات في مكان واحد.</p>
-        </div>
-
-        <div class="tic-budget-hero-actions">
+        <div class="tic-budget-primary-actions">
           ${button({
-            label: "إضافة مصروف",
-            action: "add-expense",
+            label: "إضافة رصيد",
+            action: "open-deposit",
             tone: "primary",
             icon: "+"
           })}
+
           ${button({
-            label: "اسأل الذكاء المالي",
-            action: "ask-ai",
-            icon: "✦"
+            label: "إضافة مصروف",
+            action: "open-expense",
+            icon: "−"
           })}
         </div>
 
-        ${
-          unread > 0
-            ? `<div class="tic-budget-hero-notice">لديك ${escapeHTML(unread)} إشعار مالي غير مقروء.</div>`
-            : ""
-        }
-      </section>
-    `;
-  };
-
-  const renderTabs = () => {
-    const tabs = [
-      [VIEWS.OVERVIEW, "نظرة عامة"],
-      [VIEWS.EXPENSES, "المصروفات"],
-      [VIEWS.SAVINGS, "الادخار"],
-      [VIEWS.PAYMENTS, "الدفعات"],
-      [VIEWS.ALERTS, "التنبيهات"],
-      [VIEWS.REPORTS, "التقارير"]
-    ];
-
-    return `
-      <nav class="tic-budget-tabs" aria-label="أقسام الميزانية">
-        ${tabs
-          .map(
-            ([id, label]) => `
-              <button
-                type="button"
-                class="tic-budget-tab ${state.activeView === id ? "is-active" : ""}"
-                data-budget-view="${id}"
-                aria-pressed="${state.activeView === id ? "true" : "false"}"
-              >
-                ${escapeHTML(label)}
-              </button>
-            `
-          )
-          .join("")}
-      </nav>
-    `;
-  };
-
-  const renderRecommendation = (snapshot) => {
-    const item = snapshot.recommendations[0];
-
-    if (!item) {
-      return `
-        <article class="tic-card tic-card-body tic-budget-ai-card">
-          <div class="tic-feature-row">
-            <div>
-              <span class="tic-chip">AI</span>
-              <h3 class="tic-card-title">وضعك المالي منظم</h3>
-              <p class="tic-card-text">لا توجد توصيات عاجلة حالياً.</p>
-            </div>
-            ${badge("ممتاز", "success")}
-          </div>
-        </article>
-      `;
-    }
-
-    const priorityLabel =
-      item.priority === "critical"
-        ? "عاجل"
-        : item.priority === "high"
-          ? "مهم"
-          : "اقتراح";
-
-    const priorityTone =
-      item.priority === "critical"
-        ? "danger"
-        : item.priority === "high"
-          ? "warning"
-          : "info";
-
-    return `
-      <article class="tic-card tic-card-body tic-budget-ai-card">
-        <div class="tic-feature-row">
-          <div>
-            <span class="tic-chip">AI RECOMMENDATION</span>
-            <h3 class="tic-card-title">
-              ${escapeHTML(item.titleAr || item.title || "توصية مالية")}
-            </h3>
-          </div>
-          ${badge(priorityLabel, priorityTone)}
-        </div>
-
-        <p class="tic-card-text">
-          ${escapeHTML(item.messageAr || item.message || "")}
-        </p>
-
-        <div class="tic-budget-inline-actions">
-          ${button({
-            label: item.actionLabelAr || item.actionLabel || "تنفيذ التوصية",
-            action: "run-recommendation",
-            tone: "primary",
-            attrs: `data-recommendation-id="${escapeHTML(item.id)}"`
-          })}
-          ${button({
-            label: "إخفاء",
-            action: "dismiss-recommendation",
-            attrs: `data-recommendation-id="${escapeHTML(item.id)}"`
-          })}
-        </div>
-      </article>
-    `;
-  };
-
-  const renderOverviewCard = (snapshot) => {
-    const over = snapshot.remaining < 0;
-    const statusTone =
-      over
-        ? "danger"
-        : snapshot.usagePercent >= 85
-          ? "warning"
-          : "success";
-
-    return `
-      <article class="tic-budget-overview">
-        <div class="tic-budget-overview-head">
-          <div>
-            <small>الميزانية السنوية</small>
-            <strong>${escapeHTML(currency(snapshot.annualBudget, snapshot))}</strong>
-          </div>
-          ${badge(
-            over
-              ? "متجاوزة"
-              : snapshot.usagePercent >= 85
-                ? "قريبة من الحد"
-                : "ضمن الخطة",
-            statusTone
-          )}
-        </div>
-
-        <p class="tic-budget-overview-copy">
-          ${
-            over
-              ? `تجاوزت الميزانية بمقدار ${escapeHTML(currency(Math.abs(snapshot.remaining), snapshot))}.`
-              : `استخدمت ${Math.round(snapshot.usagePercent)}% والمتبقي ${escapeHTML(currency(snapshot.remaining, snapshot))}.`
-          }
-        </p>
-
-        ${progress(
-          Math.min(100, snapshot.usagePercent),
-          "استخدام الميزانية",
-          `${Math.round(snapshot.usagePercent)}%`
-        )}
-
-        <div class="tic-budget-breakdown">
-          <div class="tic-budget-breakdown-item">
-            <small>إجمالي المصروف</small>
-            <strong>${escapeHTML(currency(snapshot.totalSpent, snapshot))}</strong>
-          </div>
-          <div class="tic-budget-breakdown-item">
-            <small>رصيد الادخار</small>
-            <strong>${escapeHTML(currency(snapshot.savings?.balance, snapshot))}</strong>
-          </div>
-          <div class="tic-budget-breakdown-item">
-            <small>الصحة المالية</small>
-            <strong>${Math.round(snapshot.healthScore)}/100</strong>
-          </div>
-          <div class="tic-budget-breakdown-item">
-            <small>الإنفاق المتوقع</small>
-            <strong>${escapeHTML(currency(snapshot.forecast?.projectedSpend, snapshot))}</strong>
-          </div>
-        </div>
-      </article>
-    `;
-  };
-
-  const renderKpis = (snapshot) => {
-    const items = [
-      {
-        icon: "◈",
-        value: currency(snapshot.trips?.totalPlanned, snapshot),
-        label: "ميزانيات الرحلات",
-        subtitle: `${snapshot.trips?.totalTrips || 0} رحلة`
-      },
-      {
-        icon: "◎",
-        value: currency(snapshot.payments?.summary?.remainingAmount, snapshot),
-        label: "دفعات متبقية",
-        subtitle: `${snapshot.payments?.summary?.overdueCount || 0} متأخرة`
-      },
-      {
-        icon: "!",
-        value: snapshot.alerts?.summary?.active || snapshot.activeAlerts.length,
-        label: "تنبيهات نشطة",
-        subtitle: `${snapshot.alerts?.summary?.critical || 0} حرجة`
-      },
-      {
-        icon: "✦",
-        value: snapshot.recommendations.length,
-        label: "توصيات ذكية",
-        subtitle: snapshot.forecast?.likelyToExceed ? "تحتاج إجراء" : "الوضع مستقر"
-      }
-    ];
-
-    return `
-      <div class="tic-budget-kpis">
-        ${items
-          .map(
-            (item) => `
-              <article class="tic-budget-kpi">
-                <span>${escapeHTML(item.icon)}</span>
-                <strong>${escapeHTML(item.value)}</strong>
-                <h3>${escapeHTML(item.label)}</h3>
-                <p>${escapeHTML(item.subtitle)}</p>
-              </article>
-            `
-          )
-          .join("")}
-      </div>
-    `;
-  };
-
-  const renderUpcoming = (snapshot) => {
-    const items = asArray(snapshot.payments?.upcoming).slice(0, 3);
-
-    if (!items.length) {
-      return `
-        <article class="tic-card tic-card-body">
-          <h3 class="tic-card-title">لا توجد دفعات قريبة</h3>
-          <p class="tic-card-text">جميع دفعات السفر الحالية منظمة.</p>
-        </article>
-      `;
-    }
-
-    return `
-      <div class="tic-settings-list">
-        ${items
-          .map(
-            (item) => `
-              <article class="tic-card tic-card-body">
-                <div class="tic-feature-row">
-                  <div>
-                    <span class="tic-chip">${escapeHTML(item.typeLabelAr || item.type || "دفعة")}</span>
-                    <h3 class="tic-card-title">${escapeHTML(item.title || "دفعة")}</h3>
-                    <p class="tic-card-text">
-                      ${escapeHTML(
-                        item.daysUntilDue === 0
-                          ? "مستحقة اليوم"
-                          : `تستحق خلال ${item.daysUntilDue} يوم`
-                      )}
-                    </p>
-                  </div>
-                  <strong>${escapeHTML(currency(item.remainingAmount, snapshot))}</strong>
-                </div>
-
-                <div class="tic-budget-inline-actions">
-                  ${button({
-                    label: "تسجيل دفع",
-                    action: "pay-payment",
-                    tone: "primary",
-                    attrs: `data-payment-id="${escapeHTML(item.id)}"`
-                  })}
-                  ${button({
-                    label: "عرض الكل",
-                    action: "switch-payments"
-                  })}
-                </div>
-              </article>
-            `
-          )
-          .join("")}
-      </div>
-    `;
-  };
-
-  const renderTripBudgets = (snapshot) => {
-    const trips = asArray(snapshot.trips?.items).slice(0, 4);
-
-    if (!trips.length) {
-      return `
-        <article class="tic-card tic-card-body">
-          <h3 class="tic-card-title">لا توجد ميزانيات رحلات</h3>
-          <p class="tic-card-text">أنشئ رحلة وحدد ميزانيتها لتظهر هنا.</p>
-        </article>
-      `;
-    }
-
-    return `
-      <div class="tic-settings-list">
-        ${trips
-          .map((trip) => {
-            const usage = nonNegative(trip.usagePercent);
-            const tone =
-              trip.planned <= 0
-                ? "info"
-                : usage > 100
-                  ? "danger"
-                  : usage >= 85
-                    ? "warning"
-                    : "success";
-
-            return `
-              <article class="tic-card tic-card-body">
-                <div class="tic-feature-row">
-                  <div>
-                    <span class="tic-chip">${escapeHTML(trip.destination || "رحلة")}</span>
-                    <h3 class="tic-card-title">${escapeHTML(trip.title || "رحلة بدون اسم")}</h3>
-                  </div>
-                  ${badge(
-                    trip.planned <= 0
-                      ? "بدون ميزانية"
-                      : usage > 100
-                        ? "متجاوزة"
-                        : usage >= 85
-                          ? "قريبة"
-                          : "ضمن الخطة",
-                    tone
-                  )}
-                </div>
-
-                <div class="tic-trip-meta">
-                  <div>
-                    <small>المخطط</small>
-                    <strong>${escapeHTML(currency(trip.planned, snapshot))}</strong>
-                  </div>
-                  <div>
-                    <small>المصروف</small>
-                    <strong>${escapeHTML(currency(trip.spent, snapshot))}</strong>
-                  </div>
-                  <div>
-                    <small>المتبقي</small>
-                    <strong>${escapeHTML(currency(Math.max(0, number(trip.remaining)), snapshot))}</strong>
-                  </div>
-                </div>
-
-                <div style="margin-top:14px">
-                  ${progress(
-                    Math.min(100, usage),
-                    "استخدام ميزانية الرحلة",
-                    `${Math.round(usage)}%`
-                  )}
-                </div>
-
-                <div class="tic-budget-inline-actions">
-                  ${button({
-                    label: "عرض الرحلة",
-                    action: "open-trip",
-                    attrs: `data-trip-id="${escapeHTML(trip.id)}"`
-                  })}
-                  ${button({
-                    label: "إضافة مصروف",
-                    action: "add-expense",
-                    tone: "primary",
-                    attrs: `data-trip-id="${escapeHTML(trip.id)}"`
-                  })}
-                </div>
-              </article>
-            `;
-          })
-          .join("")}
-      </div>
-    `;
-  };
-
-  const renderOverview = (snapshot) => `
-    <section class="tic-budget-view" data-budget-panel="${VIEWS.OVERVIEW}">
-      <section>
-        <div class="tic-budget-section-heading">
-          <div>
-            <small>SMART ACTION</small>
-            <h2>أفضل إجراء الآن</h2>
-            <p>أهم توصية مالية حسب وضعك الحالي.</p>
-          </div>
-          ${button({ label: "اسأل الذكاء", action: "ask-ai" })}
-        </div>
-        ${renderRecommendation(snapshot)}
-      </section>
-
-      ${renderOverviewCard(snapshot)}
-      ${renderKpis(snapshot)}
-
-      <div class="tic-budget-split">
-        <section>
-          <div class="tic-budget-section-heading">
-            <div>
-              <small>UPCOMING</small>
-              <h2>الدفعات القادمة</h2>
-            </div>
-            ${button({ label: "عرض الكل", action: "switch-payments" })}
-          </div>
-          ${renderUpcoming(snapshot)}
-        </section>
-
-        <section>
-          <div class="tic-budget-section-heading">
-            <div>
-              <small>TRIP BUDGETS</small>
-              <h2>ميزانيات الرحلات</h2>
-            </div>
-            ${button({ label: "عرض الرحلات", action: "open-trips" })}
-          </div>
-          ${renderTripBudgets(snapshot)}
-        </section>
+        <button
+          type="button"
+          class="tic-budget-withdraw-link"
+          data-budget-action="open-withdrawal"
+        >
+          سحب من الرصيد
+        </button>
       </div>
     </section>
   `;
 
-  const renderExpenses = (snapshot) => {
-    const expenses = asArray(snapshot.expenses)
-      .slice()
-      .sort((a, b) =>
-        String(firstDefined(b.date, b.paidAt, b.createdAt, "")).localeCompare(
-          String(firstDefined(a.date, a.paidAt, a.createdAt, ""))
-        )
-      );
+  const renderAdvice = (
+    snapshot
+  ) => {
+    const analysis =
+      snapshot.analysis;
 
     return `
-      <section class="tic-budget-view" data-budget-panel="${VIEWS.EXPENSES}">
-        <div class="tic-budget-section-heading">
+      <section class="tic-budget-simple-section">
+        <div class="tic-budget-simple-heading">
           <div>
-            <small>EXPENSE CENTER</small>
-            <h2>المصروفات</h2>
-            <p>سجل مصروفات السفر واربطها بالرحلات.</p>
-          </div>
-          ${button({
-            label: "إضافة مصروف",
-            action: "add-expense",
-            tone: "primary",
-            icon: "+"
-          })}
-        </div>
-
-        ${
-          expenses.length
-            ? `
-              <div class="tic-settings-list">
-                ${expenses
-                  .slice(0, 40)
-                  .map((item) => {
-                    const id = firstDefined(item.id, item._id, "");
-                    return `
-                      <article class="tic-card tic-card-body">
-                        <div class="tic-feature-row">
-                          <div>
-                            <span class="tic-chip">${escapeHTML(item.category || item.type || "أخرى")}</span>
-                            <h3 class="tic-card-title">${escapeHTML(item.title || item.name || "مصروف")}</h3>
-                            <p class="tic-card-text">${escapeHTML(String(firstDefined(item.date, item.paidAt, item.createdAt, "")).slice(0, 10))}</p>
-                          </div>
-                          <strong>${escapeHTML(currency(firstDefined(item.amount, item.total, item.value, 0), snapshot))}</strong>
-                        </div>
-
-                        <div class="tic-budget-inline-actions">
-                          ${button({
-                            label: "تعديل",
-                            action: "edit-expense",
-                            attrs: `data-expense-id="${escapeHTML(id)}"`
-                          })}
-                          ${button({
-                            label: "حذف",
-                            action: "delete-expense",
-                            tone: "danger",
-                            attrs: `data-expense-id="${escapeHTML(id)}"`
-                          })}
-                        </div>
-                      </article>
-                    `;
-                  })
-                  .join("")}
-              </div>
-            `
-            : `
-              <article class="tic-card tic-card-body">
-                <h3 class="tic-card-title">لا توجد مصروفات مسجلة</h3>
-                <p class="tic-card-text">أضف أول مصروف حتى تبدأ التحليلات الذكية.</p>
-              </article>
-            `
-        }
-      </section>
-    `;
-  };
-
-  const renderSavings = (snapshot) => {
-    const saving = snapshot.savings || {};
-    const monthly = nonNegative(saving.monthlySaving);
-    const balance = nonNegative(saving.balance);
-    const coverage = nonNegative(saving.coveragePercent);
-
-    return `
-      <section class="tic-budget-view" data-budget-panel="${VIEWS.SAVINGS}">
-        <div class="tic-budget-section-heading">
-          <div>
-            <small>SAVINGS CENTER</small>
-            <h2>خطة الادخار</h2>
-            <p>تابع صندوق السفر وحدد المبلغ الشهري المناسب.</p>
-          </div>
-
-          <div class="tic-budget-inline-actions">
-            ${button({ label: "إيداع", action: "add-saving", tone: "primary", icon: "+" })}
-            ${button({ label: "تعديل الخطة", action: "edit-saving-plan" })}
+            <small>SMART TRAVEL ADVICE</small>
+            <h2>شو تقدر تسافر؟</h2>
           </div>
         </div>
 
-        <div class="tic-budget-savings-grid">
-          <article class="tic-card tic-card-body">
-            <small>رصيد صندوق السفر</small>
-            <strong class="tic-stat-value">${escapeHTML(currency(balance, snapshot))}</strong>
-            <p class="tic-card-text">
-              المتبقي لتمويل الميزانية:
-              ${escapeHTML(currency(saving.remainingToFund, snapshot))}
-            </p>
-          </article>
+        <article
+          class="tic-budget-main-advice tic-budget-main-advice-${escapeHTML(
+            analysis.tone
+          )}"
+        >
+          <span class="tic-budget-advice-eyebrow">
+            ${escapeHTML(
+              analysis.eyebrow
+            )}
+          </span>
 
-          <article class="tic-card tic-card-body">
-            <small>الادخار الشهري</small>
-            <strong class="tic-stat-value">${escapeHTML(currency(monthly, snapshot))}</strong>
-            <p class="tic-card-text">سنوياً: ${escapeHTML(currency(monthly * 12, snapshot))}</p>
-          </article>
+          <h3>
+            ${escapeHTML(
+              analysis.title
+            )}
+          </h3>
 
-          <article class="tic-card tic-card-body">
-            <small>تغطية الميزانية</small>
-            <strong class="tic-stat-value">${Math.round(coverage)}%</strong>
-            ${progress(coverage, "تغطية صندوق السفر", `${Math.round(coverage)}%`)}
-          </article>
-        </div>
+          <p>
+            ${escapeHTML(
+              analysis.message
+            )}
+          </p>
 
-        ${button({
-          label: "إنشاء خطة شهرية ذكية",
-          action: "create-monthly-plan",
-          tone: "primary",
-          block: true,
-          icon: "✦"
-        })}
-      </section>
-    `;
-  };
-
-  const renderPayments = (snapshot) => {
-    const payments = asArray(snapshot.payments?.payments);
-
-    return `
-      <section class="tic-budget-view" data-budget-panel="${VIEWS.PAYMENTS}">
-        <div class="tic-budget-section-heading">
-          <div>
-            <small>PAYMENT TRACKER</small>
-            <h2>الدفعات والحجوزات</h2>
-            <p>تابع الدفعات المستحقة والمدفوعات المكتملة.</p>
-          </div>
-          ${button({
-            label: "إضافة دفعة",
-            action: "add-payment",
-            tone: "primary",
-            icon: "+"
-          })}
-        </div>
-
-        ${renderKpis({
-          ...snapshot,
-          trips: { totalPlanned: snapshot.payments?.summary?.totalAmount, totalTrips: 0 },
-          recommendations: [],
-          activeAlerts: [],
-          alerts: { summary: { active: snapshot.payments?.summary?.overdueCount || 0, critical: 0 } },
-          payments: {
-            ...snapshot.payments,
-            summary: {
-              ...snapshot.payments?.summary,
-              remainingAmount: snapshot.payments?.summary?.remainingAmount
-            }
-          },
-          forecast: { likelyToExceed: false }
-        })}
-
-        <div class="tic-settings-list">
           ${
-            payments.length
-              ? payments
-                  .slice(0, 40)
-                  .map(
-                    (item) => `
-                      <article class="tic-card tic-card-body">
-                        <div class="tic-feature-row">
-                          <div>
-                            <span class="tic-chip">${escapeHTML(item.typeLabelAr || item.type || "دفعة")}</span>
-                            <h3 class="tic-card-title">${escapeHTML(item.title || "دفعة")}</h3>
-                            <p class="tic-card-text">
-                              ${item.dueDate ? `الاستحقاق: ${escapeHTML(String(item.dueDate).slice(0, 10))}` : "بدون تاريخ استحقاق"}
-                            </p>
-                          </div>
-                          <div>
-                            <strong>${escapeHTML(currency(item.remainingAmount, snapshot))}</strong>
-                            <div style="margin-top:7px">
-                              ${badge(
-                                item.status === "paid"
-                                  ? "مدفوعة"
-                                  : item.status === "overdue"
-                                    ? "متأخرة"
-                                    : item.status === "partial"
-                                      ? "جزئية"
-                                      : "معلقة",
-                                item.status === "paid"
-                                  ? "success"
-                                  : item.status === "overdue"
-                                    ? "danger"
-                                    : item.status === "partial"
-                                      ? "warning"
-                                      : "info"
-                              )}
-                            </div>
-                          </div>
-                        </div>
+            analysis.bestNow
+              ? `
+                <div class="tic-budget-advice-actions">
+                  ${button({
+                    label: "رتب الرحلة",
+                    action:
+                      "add-planned-trip",
+                    tone: "primary",
+                    attrs:
+                      `data-destination-id="${escapeHTML(
+                        analysis.bestNow.id
+                      )}"`
+                  })}
 
-                        <div style="margin-top:14px">
-                          ${progress(item.progressPercent, "نسبة الدفع", `${Math.round(nonNegative(item.progressPercent))}%`)}
-                        </div>
-
-                        <div class="tic-budget-inline-actions">
-                          ${
-                            !["paid", "refunded", "cancelled"].includes(item.status)
-                              ? button({
-                                  label: "تسجيل دفع",
-                                  action: "pay-payment",
-                                  tone: "primary",
-                                  attrs: `data-payment-id="${escapeHTML(item.id)}"`
-                                })
-                              : ""
-                          }
-                          ${button({
-                            label: "تعديل",
-                            action: "edit-payment",
-                            attrs: `data-payment-id="${escapeHTML(item.id)}"`
-                          })}
-                          ${button({
-                            label: "حذف",
-                            action: "delete-payment",
-                            tone: "danger",
-                            attrs: `data-payment-id="${escapeHTML(item.id)}"`
-                          })}
-                        </div>
-                      </article>
-                    `
-                  )
-                  .join("")
+                  ${button({
+                    label: "عرض التفاصيل",
+                    action:
+                      "open-destination",
+                    attrs:
+                      `data-destination-id="${escapeHTML(
+                        analysis.bestNow.id
+                      )}"`
+                  })}
+                </div>
+              `
               : `
-                <article class="tic-card tic-card-body">
-                  <h3 class="tic-card-title">لا توجد دفعات</h3>
-                  <p class="tic-card-text">أضف حجوزات الطيران والفنادق والأقساط لتتبعها.</p>
-                </article>
+                <div class="tic-budget-advice-actions">
+                  ${button({
+                    label: "أضف أول مبلغ",
+                    action:
+                      "open-deposit",
+                    tone: "primary"
+                  })}
+                </div>
               `
           }
+        </article>
+      </section>
+    `;
+  };
+
+  const renderDestinationCard = (
+    destination,
+    snapshot,
+    mode = "available"
+  ) => {
+    const missing = Math.max(
+      0,
+      destination.cost -
+        snapshot.balance
+    );
+
+    const available =
+      mode === "available";
+
+    return `
+      <article class="tic-budget-destination-card">
+        <div class="tic-budget-destination-head">
+          <div>
+            <span class="tic-budget-destination-label">
+              ${
+                available
+                  ? "مناسبة الآن"
+                  : `زد ${escapeHTML(
+                      formatCurrency(
+                        missing,
+                        snapshot.currency
+                      )
+                    )}`
+              }
+            </span>
+
+            <h3>
+              ${escapeHTML(
+                destination.title
+              )}
+            </h3>
+
+            <p>
+              ${escapeHTML(
+                `${destination.country} • ${destination.days} أيام`
+              )}
+            </p>
+          </div>
+
+          <strong>
+            ${escapeHTML(
+              formatCurrency(
+                destination.cost,
+                snapshot.currency
+              )
+            )}
+          </strong>
+        </div>
+
+        <div class="tic-budget-destination-tags">
+          ${destination.tags
+            .slice(0, 3)
+            .map(
+              (tag) =>
+                `<span>${escapeHTML(
+                  tag
+                )}</span>`
+            )
+            .join("")}
+        </div>
+
+        <div class="tic-budget-destination-actions">
+          ${
+            available
+              ? button({
+                  label: "إضافة إلى رحلاتي",
+                  action:
+                    "add-planned-trip",
+                  tone: "primary",
+                  attrs:
+                    `data-destination-id="${escapeHTML(
+                      destination.id
+                    )}"`
+                })
+              : button({
+                  label: "أضف الفرق",
+                  action:
+                    "quick-add-difference",
+                  tone: "primary",
+                  attrs:
+                    `data-destination-id="${escapeHTML(
+                      destination.id
+                    )}"`
+                })
+          }
+
+          ${button({
+            label: "التفاصيل",
+            action:
+              "open-destination",
+            attrs:
+              `data-destination-id="${escapeHTML(
+                destination.id
+              )}"`
+          })}
+        </div>
+      </article>
+    `;
+  };
+
+  const renderSuggestions = (
+    snapshot
+  ) => {
+    const available =
+      snapshot.analysis.affordable
+        .slice(0, 2);
+
+    const upcoming =
+      buildUpcoming(
+        snapshot.balance
+      ).slice(0, 2);
+
+    const suggestions = [];
+
+    available.forEach((item) => {
+      suggestions.push({
+        destination: item,
+        mode: "available"
+      });
+    });
+
+    upcoming.forEach((item) => {
+      if (
+        !suggestions.some(
+          (entry) =>
+            entry.destination.id ===
+            item.id
+        )
+      ) {
+        suggestions.push({
+          destination: item,
+          mode: "upcoming"
+        });
+      }
+    });
+
+    const finalSuggestions =
+      suggestions.slice(0, 3);
+
+    return `
+      <section class="tic-budget-simple-section">
+        <div class="tic-budget-simple-heading">
+          <div>
+            <small>BEST OPTIONS</small>
+            <h2>أفضل الخيارات لك</h2>
+            <p>
+              ثلاث اختيارات فقط حتى تكون المقارنة واضحة وسريعة.
+            </p>
+          </div>
+        </div>
+
+        <div class="tic-budget-destination-list">
+          ${finalSuggestions
+            .map((entry) =>
+              renderDestinationCard(
+                entry.destination,
+                snapshot,
+                entry.mode
+              )
+            )
+            .join("")}
         </div>
       </section>
     `;
   };
 
-  const renderAlerts = (snapshot) => `
-    <section class="tic-budget-view" data-budget-panel="${VIEWS.ALERTS}">
-      <div class="tic-budget-section-heading">
-        <div>
-          <small>RISK CENTER</small>
-          <h2>التنبيهات المالية</h2>
-          <p>المخاطر والمصروفات غير الاعتيادية والدفعات المتأخرة.</p>
+  const renderMultiTripPlan = (
+    snapshot
+  ) => {
+    const option =
+      snapshot.analysis
+        .multiTripOptions[0];
+
+    if (!option) return "";
+
+    return `
+      <section class="tic-budget-simple-section">
+        <div class="tic-budget-simple-heading">
+          <div>
+            <small>MULTI TRIP OPTION</small>
+            <h2>تقدر ترتب سفرتين</h2>
+            <p>
+              خيار ذكي لتقسيم الرصيد بدل صرفه كله على رحلة واحدة.
+            </p>
+          </div>
         </div>
-        ${button({ label: "تحديث التحليل", action: "refresh-alerts" })}
+
+        <article class="tic-budget-multi-card">
+          <div class="tic-budget-multi-trips">
+            ${option.trips
+              .map(
+                (trip) => `
+                  <div>
+                    <small>
+                      ${escapeHTML(
+                        trip.level
+                      )}
+                    </small>
+                    <strong>
+                      ${escapeHTML(
+                        trip.title
+                      )}
+                    </strong>
+                    <span>
+                      ${escapeHTML(
+                        formatCurrency(
+                          trip.cost,
+                          snapshot.currency
+                        )
+                      )}
+                    </span>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+
+          <div class="tic-budget-multi-summary">
+            <span>الإجمالي</span>
+            <strong>
+              ${escapeHTML(
+                formatCurrency(
+                  option.total,
+                  snapshot.currency
+                )
+              )}
+            </strong>
+            <small>
+              المتبقي بعد الرحلتين:
+              ${escapeHTML(
+                formatCurrency(
+                  option.remaining,
+                  snapshot.currency
+                )
+              )}
+            </small>
+          </div>
+
+          <div class="tic-budget-multi-actions">
+            ${button({
+              label: "إضافة الرحلتين",
+              action:
+                "add-multi-trip",
+              tone: "primary",
+              attrs:
+                `data-multi-trip-id="${escapeHTML(
+                  option.id
+                )}"`
+            })}
+          </div>
+        </article>
+      </section>
+    `;
+  };
+
+  const transactionIcon = (
+    type
+  ) => {
+    if (
+      type ===
+      TRANSACTION_TYPES.DEPOSIT
+    ) {
+      return "+";
+    }
+
+    if (
+      type ===
+      TRANSACTION_TYPES.WITHDRAWAL
+    ) {
+      return "↘";
+    }
+
+    return "−";
+  };
+
+  const transactionTone = (
+    type
+  ) =>
+    type ===
+    TRANSACTION_TYPES.DEPOSIT
+      ? "positive"
+      : type ===
+          TRANSACTION_TYPES.WITHDRAWAL
+        ? "neutral"
+        : "expense";
+
+  const renderTransaction = (
+    item,
+    snapshot
+  ) => `
+    <article class="tic-budget-transaction">
+      <span
+        class="tic-budget-transaction-icon tic-budget-transaction-${escapeHTML(
+          transactionTone(item.type)
+        )}"
+      >
+        ${escapeHTML(
+          transactionIcon(item.type)
+        )}
+      </span>
+
+      <div>
+        <strong>
+          ${escapeHTML(
+            item.title
+          )}
+        </strong>
+        <small>
+          ${escapeHTML(
+            [
+              formatDate(
+                item.date
+              ),
+              item.notes
+            ]
+              .filter(Boolean)
+              .join(" • ")
+          )}
+        </small>
       </div>
 
-      <div class="tic-settings-list">
+      <b>
         ${
-          snapshot.activeAlerts.length
-            ? snapshot.activeAlerts
-                .slice(0, 50)
-                .map(
-                  (item) => `
-                    <article class="tic-card tic-card-body">
-                      <div class="tic-feature-row">
-                        <div>
-                          <span class="tic-chip">${escapeHTML(item.type || "تنبيه")}</span>
-                          <h3 class="tic-card-title">${escapeHTML(item.titleAr || item.title || "تنبيه مالي")}</h3>
-                        </div>
-                        ${badge(
-                          item.severity === "critical"
-                            ? "حرج"
-                            : item.severity === "high"
-                              ? "مرتفع"
-                              : item.severity === "medium"
-                                ? "متوسط"
-                                : "معلومة",
-                          item.severity === "critical"
-                            ? "danger"
-                            : item.severity === "high"
-                              ? "warning"
-                              : "info"
-                        )}
-                      </div>
+          item.type ===
+          TRANSACTION_TYPES.DEPOSIT
+            ? "+"
+            : "−"
+        }${escapeHTML(
+          formatCurrency(
+            item.amount,
+            snapshot.currency
+          )
+        )}
+      </b>
+    </article>
+  `;
 
-                      <p class="tic-card-text">${escapeHTML(item.messageAr || item.message || "")}</p>
+  const renderRecentActivity = (
+    snapshot
+  ) => `
+    <section class="tic-budget-simple-section">
+      <div class="tic-budget-simple-heading tic-budget-heading-row">
+        <div>
+          <small>RECENT ACTIVITY</small>
+          <h2>آخر الحركات</h2>
+        </div>
 
-                      <div class="tic-budget-inline-actions">
-                        ${button({
-                          label: item.actionLabelAr || "فتح",
-                          action: "run-alert-action",
-                          tone: "primary",
-                          attrs: `data-alert-id="${escapeHTML(item.id)}"`
-                        })}
-                        ${button({
-                          label: "تمت المراجعة",
-                          action: "acknowledge-alert",
-                          attrs: `data-alert-id="${escapeHTML(item.id)}"`
-                        })}
-                        ${button({
-                          label: "تأجيل",
-                          action: "snooze-alert",
-                          attrs: `data-alert-id="${escapeHTML(item.id)}"`
-                        })}
-                      </div>
-                    </article>
-                  `
-                )
-                .join("")
-            : `
-              <article class="tic-card tic-card-body">
-                <h3 class="tic-card-title">لا توجد تنبيهات نشطة</h3>
-                <p class="tic-card-text">الوضع المالي منظم حالياً.</p>
-              </article>
-            `
+        ${
+          snapshot.wallet.transactions
+            .length > 5
+            ? button({
+                label: "عرض الكل",
+                action:
+                  "open-history",
+                small: true
+              })
+            : ""
         }
       </div>
+
+      ${
+        snapshot.recentTransactions
+          .length
+          ? `
+            <div class="tic-budget-transactions">
+              ${snapshot.recentTransactions
+                .map((item) =>
+                  renderTransaction(
+                    item,
+                    snapshot
+                  )
+                )
+                .join("")}
+            </div>
+          `
+          : `
+            <article class="tic-budget-empty-card">
+              <h3>ما عندك حركات للحين</h3>
+              <p>
+                أول مبلغ تضيفه بيظهر هنا، وبعدها تتحدث اقتراحات السفر تلقائياً.
+              </p>
+            </article>
+          `
+      }
     </section>
   `;
 
-  const renderReports = (snapshot) => {
-    const categories = asArray(snapshot.categories?.items).slice(0, 6);
-    const months = asArray(snapshot.monthly?.items).slice(-6);
+  const renderMiniSummary = (
+    snapshot
+  ) => `
+    <section class="tic-budget-mini-summary">
+      <article>
+        <small>إجمالي الإضافات</small>
+        <strong>
+          ${escapeHTML(
+            formatCurrency(
+              snapshot.totals
+                .deposits,
+              snapshot.currency
+            )
+          )}
+        </strong>
+      </article>
 
-    return `
-      <section class="tic-budget-view" data-budget-panel="${VIEWS.REPORTS}">
-        <div class="tic-budget-section-heading">
-          <div>
-            <small>REPORTS & EXPORT</small>
-            <h2>التقارير المالية</h2>
-            <p>صدّر البيانات وراجع التوقعات والفئات والاتجاهات.</p>
-          </div>
+      <article>
+        <small>إجمالي السحب</small>
+        <strong>
+          ${escapeHTML(
+            formatCurrency(
+              snapshot.totals
+                .withdrawals,
+              snapshot.currency
+            )
+          )}
+        </strong>
+      </article>
 
-          <div class="tic-budget-inline-actions">
-            ${button({ label: "CSV", action: "export-csv" })}
-            ${button({ label: "JSON", action: "export-json" })}
-            ${button({ label: "طباعة", action: "print-report", tone: "primary" })}
-          </div>
-        </div>
+      <article>
+        <small>مصروفات السفر</small>
+        <strong>
+          ${escapeHTML(
+            formatCurrency(
+              snapshot.totals
+                .expenses,
+              snapshot.currency
+            )
+          )}
+        </strong>
+      </article>
+    </section>
+  `;
 
-        <div class="tic-budget-split">
-          <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">التوقع السنوي</h3>
-            <div class="tic-trip-meta">
-              <div>
-                <small>الإنفاق المتوقع</small>
-                <strong>${escapeHTML(currency(snapshot.forecast?.projectedSpend, snapshot))}</strong>
-              </div>
-              <div>
-                <small>التجاوز المتوقع</small>
-                <strong>${escapeHTML(currency(snapshot.forecast?.expectedOverrun, snapshot))}</strong>
-              </div>
-              <div>
-                <small>الحد الشهري</small>
-                <strong>${escapeHTML(currency(snapshot.forecast?.recommendedMonthlyLimit, snapshot))}</strong>
-              </div>
-            </div>
-          </article>
-
-          <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">صحة النظام</h3>
-            <div class="tic-trip-meta">
-              <div>
-                <small>الجاهزية</small>
-                <strong>${escapeHTML(snapshot.integrationHealth?.score || 0)}%</strong>
-              </div>
-              <div>
-                <small>المحركات</small>
-                <strong>${escapeHTML(snapshot.integrationHealth?.readyModules || 0)}</strong>
-              </div>
-              <div>
-                <small>آخر مزامنة</small>
-                <strong>${escapeHTML(String(snapshot.integrationHealth?.lastSyncAt || "-").slice(0, 16))}</strong>
-              </div>
-            </div>
-          </article>
-        </div>
-
-        <div class="tic-budget-split">
-          <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">أعلى فئات الإنفاق</h3>
-            ${
-              categories.length
-                ? categories
-                    .map(
-                      (item) => `
-                        <div class="tic-budget-report-row">
-                          <span>${escapeHTML(item.labelAr || item.key || "فئة")}</span>
-                          <strong>${escapeHTML(currency(item.amount, snapshot))}</strong>
-                        </div>
-                      `
-                    )
-                    .join("")
-                : `<p class="tic-card-text">لا توجد بيانات فئات كافية.</p>`
-            }
-          </article>
-
-          <article class="tic-card tic-card-body">
-            <h3 class="tic-card-title">الإنفاق الشهري</h3>
-            ${
-              months.length
-                ? months
-                    .map(
-                      (item) => `
-                        <div class="tic-budget-report-row">
-                          <span>${escapeHTML(item.labelAr || item.key || "شهر")}</span>
-                          <strong>${escapeHTML(currency(item.amount, snapshot))}</strong>
-                        </div>
-                      `
-                    )
-                    .join("")
-                : `<p class="tic-card-text">لا توجد بيانات شهرية كافية.</p>`
-            }
-          </article>
-        </div>
-      </section>
-    `;
-  };
-
-  const renderActiveView = (snapshot) => {
-    switch (state.activeView) {
-      case VIEWS.EXPENSES: return renderExpenses(snapshot);
-      case VIEWS.SAVINGS: return renderSavings(snapshot);
-      case VIEWS.PAYMENTS: return renderPayments(snapshot);
-      case VIEWS.ALERTS: return renderAlerts(snapshot);
-      case VIEWS.REPORTS: return renderReports(snapshot);
-      default: return renderOverview(snapshot);
-    }
-  };
-
-  const renderPage = (snapshot) => `
+  const renderPage = (
+    snapshot
+  ) => `
     <div
-      class="tic-module tic-budget-platform"
+      class="tic-module tic-budget-simple"
       data-page="${PAGE_ID}"
       data-page-version="${PAGE_VERSION}"
     >
       ${renderHero(snapshot)}
-      ${renderTabs()}
-      ${renderActiveView(snapshot)}
+      ${renderAdvice(snapshot)}
+      ${renderSuggestions(snapshot)}
+      ${renderMultiTripPlan(snapshot)}
+      ${renderRecentActivity(snapshot)}
+      ${renderMiniSummary(snapshot)}
+
       <div data-budget-dialog-root></div>
     </div>
   `;
+
+  /* =========================================================
+     Dialogs
+  ========================================================= */
 
   const renderDialogShell = ({
     title,
@@ -1344,7 +1647,10 @@
     submitLabel = "حفظ",
     submitAction = ""
   }) => `
-    <div class="tic-budget-dialog-backdrop" data-budget-dialog-backdrop>
+    <div
+      class="tic-budget-dialog-backdrop"
+      data-budget-dialog-backdrop
+    >
       <section
         class="tic-budget-dialog"
         role="dialog"
@@ -1354,21 +1660,47 @@
         <header class="tic-budget-dialog-head">
           <div>
             <h2>${escapeHTML(title)}</h2>
-            ${subtitle ? `<p>${escapeHTML(subtitle)}</p>` : ""}
+            ${
+              subtitle
+                ? `<p>${escapeHTML(
+                    subtitle
+                  )}</p>`
+                : ""
+            }
           </div>
+
           <button
             type="button"
             class="tic-budget-dialog-close"
             data-budget-action="close-dialog"
             aria-label="إغلاق"
-          >×</button>
+          >
+            ×
+          </button>
         </header>
 
-        <div class="tic-budget-dialog-body">${body}</div>
+        <div class="tic-budget-dialog-body">
+          ${body}
+        </div>
 
         <footer class="tic-budget-dialog-footer">
-          ${button({ label: "إلغاء", action: "close-dialog" })}
-          ${submitAction ? button({ label: submitLabel, action: submitAction, tone: "primary" }) : ""}
+          ${button({
+            label: "إلغاء",
+            action:
+              "close-dialog"
+          })}
+
+          ${
+            submitAction
+              ? button({
+                  label:
+                    submitLabel,
+                  action:
+                    submitAction,
+                  tone: "primary"
+                })
+              : ""
+          }
         </footer>
       </section>
     </div>
@@ -1381,21 +1713,40 @@
     value = "",
     placeholder = "",
     required = false,
+    min = "",
+    step = "",
     options = null
   }) => {
-    if (Array.isArray(options)) {
+    if (
+      Array.isArray(options)
+    ) {
       return `
         <label class="tic-budget-field">
           <span>${escapeHTML(label)}</span>
-          <select name="${escapeHTML(name)}" ${required ? "required" : ""}>
+
+          <select
+            name="${escapeHTML(name)}"
+            ${required ? "required" : ""}
+          >
             ${options
               .map(
                 (item) => `
                   <option
-                    value="${escapeHTML(item.value)}"
-                    ${String(item.value) === String(value) ? "selected" : ""}
+                    value="${escapeHTML(
+                      item.value
+                    )}"
+                    ${
+                      String(
+                        item.value
+                      ) ===
+                      String(value)
+                        ? "selected"
+                        : ""
+                    }
                   >
-                    ${escapeHTML(item.label)}
+                    ${escapeHTML(
+                      item.label
+                    )}
                   </option>
                 `
               )
@@ -1408,481 +1759,1371 @@
     return `
       <label class="tic-budget-field">
         <span>${escapeHTML(label)}</span>
+
         <input
           type="${escapeHTML(type)}"
           name="${escapeHTML(name)}"
           value="${escapeHTML(value)}"
           placeholder="${escapeHTML(placeholder)}"
           ${required ? "required" : ""}
+          ${
+            min !== ""
+              ? `min="${escapeHTML(
+                  min
+                )}"`
+              : ""
+          }
+          ${
+            step !== ""
+              ? `step="${escapeHTML(
+                  step
+                )}"`
+              : ""
+          }
         >
       </label>
     `;
   };
 
-  const openDialog = (name, payload = {}) => {
-    if (!state.container) return false;
+  const openDialog = (
+    name,
+    payload = {}
+  ) => {
+    if (!state.container) {
+      return false;
+    }
 
-    const root = state.container.querySelector("[data-budget-dialog-root]");
+    const root =
+      state.container.querySelector(
+        "[data-budget-dialog-root]"
+      );
+
     if (!root) return false;
 
-    const snapshot = state.lastSnapshot || buildSnapshot();
+    const snapshot =
+      state.snapshot ||
+      buildSnapshot();
+
     let html = "";
 
-    if (name === "expense") {
-      const expense = payload.expense || {};
-      const tripOptions = [
-        { value: "", label: "بدون رحلة" },
-        ...asArray(snapshot.trips?.items).map((trip) => ({
-          value: trip.id,
-          label: trip.title
-        }))
-      ];
-
+    if (
+      name === DIALOGS.DEPOSIT
+    ) {
       html = renderDialogShell({
-        title: payload.mode === "edit" ? "تعديل المصروف" : "إضافة مصروف",
-        subtitle: "سجّل المصروف ليظهر في التحليلات.",
-        submitLabel: payload.mode === "edit" ? "حفظ التعديل" : "إضافة المصروف",
-        submitAction: "submit-expense",
+        title:
+          "إضافة رصيد للسفر",
+        subtitle:
+          "أضف أي مبلغ خصصته للسفر.",
+        submitLabel:
+          "إضافة الرصيد",
+        submitAction:
+          "submit-deposit",
         body: `
           <form
             class="tic-budget-form"
-            data-budget-form="expense"
-            data-mode="${escapeHTML(payload.mode || "create")}"
-            data-expense-id="${escapeHTML(firstDefined(expense.id, expense._id, ""))}"
+            data-budget-form="deposit"
           >
             ${formField({
-              label: "اسم المصروف",
-              name: "title",
-              value: expense.title || expense.name || "",
-              placeholder: "مثال: تذاكر الطيران",
+              label: "المبلغ",
+              name: "amount",
+              type: "number",
+              min: "1",
+              step: "1",
+              value:
+                payload.amount ||
+                "",
+              placeholder:
+                "مثال: 2000",
               required: true
             })}
-            <div class="tic-budget-form-grid">
-              ${formField({
-                label: "القيمة",
-                name: "amount",
-                type: "number",
-                value: firstDefined(expense.amount, expense.total, ""),
-                required: true
-              })}
-              ${formField({
-                label: "التاريخ",
-                name: "date",
-                type: "date",
-                value: String(firstDefined(expense.date, expense.paidAt, new Date().toISOString())).slice(0, 10),
-                required: true
-              })}
-            </div>
-            <div class="tic-budget-form-grid">
-              ${formField({
-                label: "الفئة",
-                name: "category",
-                value: expense.category || "other",
-                options: [
-                  { value: "flights", label: "الطيران" },
-                  { value: "hotels", label: "الفنادق" },
-                  { value: "food", label: "المطاعم" },
-                  { value: "transport", label: "المواصلات" },
-                  { value: "activities", label: "الأنشطة" },
-                  { value: "shopping", label: "التسوق" },
-                  { value: "insurance", label: "التأمين" },
-                  { value: "visa", label: "التأشيرة" },
-                  { value: "connectivity", label: "الاتصال" },
-                  { value: "other", label: "أخرى" }
-                ]
-              })}
-              ${formField({
-                label: "الرحلة",
-                name: "tripId",
-                value: firstDefined(payload.tripId, expense.tripId, ""),
-                options: tripOptions
-              })}
-            </div>
-            ${formField({
-              label: "طريقة الدفع",
-              name: "paymentMethod",
-              value: expense.paymentMethod || "card",
-              options: [
-                { value: "card", label: "بطاقة" },
-                { value: "cash", label: "نقداً" },
-                { value: "bank-transfer", label: "تحويل بنكي" },
-                { value: "apple-pay", label: "Apple Pay" },
-                { value: "other", label: "أخرى" }
-              ]
-            })}
-          </form>
-        `
-      });
-    }
 
-    if (name === "saving") {
-      html = renderDialogShell({
-        title: "إضافة مبلغ للادخار",
-        subtitle: "أضف إيداعاً جديداً إلى صندوق السفر.",
-        submitLabel: "إضافة الإيداع",
-        submitAction: "submit-saving",
-        body: `
-          <form class="tic-budget-form" data-budget-form="saving">
-            ${formField({ label: "القيمة", name: "amount", type: "number", required: true })}
+            ${formField({
+              label: "المصدر",
+              name: "title",
+              value:
+                payload.title ||
+                "إضافة رصيد",
+              placeholder:
+                "مثال: ادخار شهر يوليو"
+            })}
+
             ${formField({
               label: "التاريخ",
               name: "date",
               type: "date",
-              value: new Date().toISOString().slice(0, 10),
+              value: todayISO(),
               required: true
             })}
+
             ${formField({
-              label: "ملاحظة",
+              label: "ملاحظة اختيارية",
               name: "notes",
-              placeholder: "مثال: ادخار شهر يوليو"
+              placeholder:
+                "مثال: من الراتب"
             })}
           </form>
         `
       });
     }
 
-    if (name === "saving-plan") {
+    if (
+      name ===
+      DIALOGS.WITHDRAWAL
+    ) {
       html = renderDialogShell({
-        title: "تعديل خطة الادخار",
-        subtitle: "حدد المبلغ الشهري لصندوق السفر.",
-        submitLabel: "حفظ الخطة",
-        submitAction: "submit-saving-plan",
-        body: `
-          <form class="tic-budget-form" data-budget-form="saving-plan">
-            ${formField({
-              label: "الادخار الشهري",
-              name: "monthlySaving",
-              type: "number",
-              value: snapshot.savings?.monthlySaving || 0,
-              required: true
-            })}
-          </form>
-        `
-      });
-    }
-
-    if (name === "payment") {
-      const payment = payload.payment || {};
-
-      html = renderDialogShell({
-        title: payload.mode === "edit" ? "تعديل الدفعة" : "إضافة دفعة",
-        subtitle: "أضف دفعة حجز أو قسط وتاريخ الاستحقاق.",
-        submitLabel: payload.mode === "edit" ? "حفظ التعديل" : "إضافة الدفعة",
-        submitAction: "submit-payment",
+        title:
+          "سحب من رصيد السفر",
+        subtitle:
+          `رصيدك الحالي ${formatCurrency(
+            snapshot.balance,
+            snapshot.currency
+          )}.`,
+        submitLabel:
+          "تأكيد السحب",
+        submitAction:
+          "submit-withdrawal",
         body: `
           <form
             class="tic-budget-form"
-            data-budget-form="payment"
-            data-mode="${escapeHTML(payload.mode || "create")}"
-            data-payment-id="${escapeHTML(payment.id || "")}"
+            data-budget-form="withdrawal"
           >
             ${formField({
-              label: "اسم الدفعة",
-              name: "title",
-              value: payment.title || "",
-              placeholder: "مثال: دفعة الفندق",
-              required: true
-            })}
-            <div class="tic-budget-form-grid">
-              ${formField({
-                label: "القيمة",
-                name: "amount",
-                type: "number",
-                value: payment.amount || "",
-                required: true
-              })}
-              ${formField({
-                label: "تاريخ الاستحقاق",
-                name: "dueDate",
-                type: "date",
-                value: String(payment.dueDate || "").slice(0, 10),
-                required: true
-              })}
-            </div>
-            <div class="tic-budget-form-grid">
-              ${formField({
-                label: "النوع",
-                name: "type",
-                value: payment.type || "other",
-                options: [
-                  { value: "flight", label: "طيران" },
-                  { value: "hotel", label: "فندق" },
-                  { value: "transport", label: "مواصلات" },
-                  { value: "activity", label: "نشاط" },
-                  { value: "insurance", label: "تأمين" },
-                  { value: "visa", label: "تأشيرة" },
-                  { value: "installment", label: "قسط" },
-                  { value: "other", label: "أخرى" }
-                ]
-              })}
-              ${formField({
-                label: "طريقة الدفع",
-                name: "paymentMethod",
-                value: payment.paymentMethod || "card",
-                options: [
-                  { value: "card", label: "بطاقة" },
-                  { value: "cash", label: "نقداً" },
-                  { value: "bank-transfer", label: "تحويل بنكي" },
-                  { value: "apple-pay", label: "Apple Pay" },
-                  { value: "other", label: "أخرى" }
-                ]
-              })}
-            </div>
-          </form>
-        `
-      });
-    }
-
-    if (name === "pay-payment") {
-      html = renderDialogShell({
-        title: "تسجيل دفع",
-        subtitle: "أدخل المبلغ المدفوع لهذه الدفعة.",
-        submitLabel: "تسجيل الدفع",
-        submitAction: "submit-payment-record",
-        body: `
-          <form
-            class="tic-budget-form"
-            data-budget-form="payment-record"
-            data-payment-id="${escapeHTML(payload.paymentId)}"
-          >
-            ${formField({
-              label: "المبلغ المدفوع",
+              label: "المبلغ",
               name: "amount",
               type: "number",
-              value: payload.payment?.remainingAmount || "",
+              min: "1",
+              step: "1",
+              placeholder:
+                "مثال: 500",
               required: true
             })}
+
             ${formField({
-              label: "تاريخ الدفع",
-              name: "paidAt",
+              label: "سبب السحب",
+              name: "title",
+              value:
+                "سحب من صندوق السفر",
+              placeholder:
+                "مثال: ظرف طارئ"
+            })}
+
+            ${formField({
+              label: "التاريخ",
+              name: "date",
               type: "date",
-              value: new Date().toISOString().slice(0, 10),
+              value: todayISO(),
               required: true
+            })}
+
+            ${formField({
+              label: "ملاحظة اختيارية",
+              name: "notes",
+              placeholder:
+                "سبب السحب"
             })}
           </form>
         `
       });
     }
 
-    if (name === "ask-ai") {
+    if (
+      name === DIALOGS.EXPENSE
+    ) {
       html = renderDialogShell({
-        title: "اسأل الذكاء المالي",
-        subtitle: "اسأل عن الميزانية أو الادخار أو التوقعات.",
-        submitLabel: "إرسال السؤال",
-        submitAction: "submit-ai-question",
+        title:
+          "إضافة مصروف سفر",
+        subtitle:
+          "هذا المبلغ ينخصم من رصيد السفر ويسجل كمصروف.",
+        submitLabel:
+          "إضافة المصروف",
+        submitAction:
+          "submit-expense",
         body: `
-          <form class="tic-budget-form" data-budget-form="ai-question">
-            <label class="tic-budget-field">
-              <span>السؤال</span>
-              <textarea
-                name="question"
-                rows="4"
-                required
-                placeholder="مثال: وين أقدر أوفر؟"
-              ></textarea>
-            </label>
-            <div class="tic-budget-quick-questions">
-              <button type="button" data-ai-question="كم باقي من ميزانيتي؟">كم باقي؟</button>
-              <button type="button" data-ai-question="هل بتجاوز الميزانية؟">هل بتجاوز؟</button>
-              <button type="button" data-ai-question="وين أقدر أوفر؟">وين أوفر؟</button>
-              <button type="button" data-ai-question="سو لي خطة شهرية">خطة شهرية</button>
-            </div>
+          <form
+            class="tic-budget-form"
+            data-budget-form="expense"
+          >
+            ${formField({
+              label: "المبلغ",
+              name: "amount",
+              type: "number",
+              min: "1",
+              step: "1",
+              placeholder:
+                "مثال: 1200",
+              required: true
+            })}
+
+            ${formField({
+              label: "اسم المصروف",
+              name: "title",
+              value:
+                "مصروف سفر",
+              placeholder:
+                "مثال: تذكرة الطيران",
+              required: true
+            })}
+
+            ${formField({
+              label: "الفئة",
+              name: "category",
+              value: "other",
+              options: [
+                {
+                  value: "flights",
+                  label: "طيران"
+                },
+                {
+                  value: "hotels",
+                  label: "فندق"
+                },
+                {
+                  value: "transport",
+                  label: "مواصلات"
+                },
+                {
+                  value: "food",
+                  label: "مطاعم"
+                },
+                {
+                  value: "activities",
+                  label: "أنشطة"
+                },
+                {
+                  value: "visa",
+                  label: "تأشيرة"
+                },
+                {
+                  value: "insurance",
+                  label: "تأمين"
+                },
+                {
+                  value: "other",
+                  label: "أخرى"
+                }
+              ]
+            })}
+
+            ${formField({
+              label: "التاريخ",
+              name: "date",
+              type: "date",
+              value: todayISO(),
+              required: true
+            })}
+
+            ${formField({
+              label: "ملاحظة اختيارية",
+              name: "notes",
+              placeholder:
+                "تفاصيل إضافية"
+            })}
           </form>
-          <div data-ai-answer></div>
         `
       });
     }
 
-    if (name === "monthly-plan") {
-      const plan = payload.plan || {};
-
+    if (
+      name === DIALOGS.HISTORY
+    ) {
       html = renderDialogShell({
-        title: "الخطة الشهرية الذكية",
-        subtitle: "توزيع مقترح للمتبقي والادخار والاحتياطي.",
-        submitLabel: "إغلاق",
-        submitAction: "close-dialog",
+        title:
+          "سجل الحركات",
+        subtitle:
+          "جميع إضافات وسحوبات ومصروفات صندوق السفر.",
         body: `
-          <div class="tic-budget-plan-summary">
-            <article>
-              <small>حد الإنفاق الشهري</small>
-              <strong>${escapeHTML(currency(plan.monthlySpendingLimit, snapshot))}</strong>
-            </article>
-            <article>
-              <small>الادخار الشهري</small>
-              <strong>${escapeHTML(currency(plan.monthlySavingTarget, snapshot))}</strong>
-            </article>
-            <article>
-              <small>الاحتياطي</small>
-              <strong>${escapeHTML(currency(plan.reserve, snapshot))}</strong>
-            </article>
+          <div class="tic-budget-history-list">
+            ${
+              snapshot.wallet
+                .transactions.length
+                ? snapshot.wallet.transactions
+                    .map((item) =>
+                      renderTransaction(
+                        item,
+                        snapshot
+                      )
+                    )
+                    .join("")
+                : `
+                  <article class="tic-budget-empty-card">
+                    <h3>لا توجد حركات</h3>
+                    <p>
+                      أضف أول مبلغ حتى يبدأ السجل.
+                    </p>
+                  </article>
+                `
+            }
           </div>
-          <p class="tic-card-text">${escapeHTML(plan.summaryAr || "")}</p>
         `
       });
+    }
+
+    if (
+      name ===
+      DIALOGS.DESTINATION
+    ) {
+      const destination =
+        getDestination(
+          payload.destinationId
+        );
+
+      if (!destination) {
+        return false;
+      }
+
+      const missing = Math.max(
+        0,
+        destination.cost -
+          snapshot.balance
+      );
+
+      html = renderDialogShell({
+        title:
+          destination.title,
+        subtitle:
+          `${destination.country} • ${destination.days} أيام`,
+        submitLabel:
+          missing > 0
+            ? "أضف الفرق"
+            : "إضافة إلى رحلاتي",
+        submitAction:
+          missing > 0
+            ? "submit-destination-difference"
+            : "submit-destination-trip",
+        body: `
+          <article
+            class="tic-budget-destination-detail"
+            data-dialog-destination-id="${escapeHTML(
+              destination.id
+            )}"
+          >
+            <span>
+              ${escapeHTML(
+                destination.bestFor
+              )}
+            </span>
+
+            <h3>
+              ${escapeHTML(
+                formatCurrency(
+                  destination.cost,
+                  snapshot.currency
+                )
+              )}
+            </h3>
+
+            <p>
+              ${escapeHTML(
+                destination.summary
+              )}
+            </p>
+
+            <div class="tic-budget-destination-tags">
+              ${destination.tags
+                .map(
+                  (tag) =>
+                    `<span>${escapeHTML(
+                      tag
+                    )}</span>`
+                )
+                .join("")}
+            </div>
+
+            ${
+              missing > 0
+                ? `
+                  <div class="tic-budget-difference-box">
+                    <small>
+                      تحتاج زيادة
+                    </small>
+                    <strong>
+                      ${escapeHTML(
+                        formatCurrency(
+                          missing,
+                          snapshot.currency
+                        )
+                      )}
+                    </strong>
+                  </div>
+                `
+                : `
+                  <div class="tic-budget-ready-box">
+                    مناسبة لرصيدك الحالي
+                  </div>
+                `
+            }
+          </article>
+        `
+      });
+
+      state.selectedDestinationId =
+        destination.id;
     }
 
     if (!html) return false;
 
     root.innerHTML = html;
     state.activeDialog = name;
-    document.body.classList.add("tic-budget-dialog-open");
 
-    window.requestAnimationFrame(() => {
-      root.querySelector("input, select, textarea")?.focus();
-    });
+    document.body.classList.add(
+      "tic-budget-dialog-open"
+    );
+
+    window.requestAnimationFrame(
+      () => {
+        root.querySelector(
+          "input, select, textarea"
+        )?.focus();
+      }
+    );
 
     return true;
   };
 
   const closeDialog = () => {
-    if (!state.container) return false;
+    if (!state.container) {
+      return false;
+    }
 
-    const root = state.container.querySelector("[data-budget-dialog-root]");
-    if (root) root.innerHTML = "";
+    const root =
+      state.container.querySelector(
+        "[data-budget-dialog-root]"
+      );
+
+    if (root) {
+      root.innerHTML = "";
+    }
 
     state.activeDialog = null;
-    document.body.classList.remove("tic-budget-dialog-open");
+    state.selectedDestinationId =
+      null;
+
+    document.body.classList.remove(
+      "tic-budget-dialog-open"
+    );
+
+    if (state.pendingRefresh) {
+      state.pendingRefresh = false;
+      scheduleRefresh({
+        force: true,
+        delay: 80
+      });
+    }
+
     return true;
   };
 
-  const getFormData = (name) => {
-    const form = state.container?.querySelector(`[data-budget-form="${name}"]`);
-    if (!form || !form.reportValidity()) return null;
+  const getFormData = (
+    name
+  ) => {
+    const form =
+      state.container?.querySelector(
+        `[data-budget-form="${name}"]`
+      );
+
+    if (
+      !form ||
+      !form.reportValidity()
+    ) {
+      return null;
+    }
 
     return {
       form,
-      values: Object.fromEntries(new FormData(form).entries())
+      values: Object.fromEntries(
+        new FormData(form).entries()
+      )
     };
   };
 
-  const signature = (snapshot) => {
-    try {
-      return JSON.stringify({
-        view: state.activeView,
-        annualBudget: snapshot.annualBudget,
-        totalSpent: snapshot.totalSpent,
-        remaining: snapshot.remaining,
-        usagePercent: snapshot.usagePercent,
-        healthScore: snapshot.healthScore,
-        healthStatus: snapshot.healthStatus,
-        savings: snapshot.savings,
-        trips: snapshot.trips,
-        expenses: snapshot.expenses,
-        payments: snapshot.payments,
-        alerts: snapshot.alerts,
-        notifications: snapshot.notifications,
-        recommendations: snapshot.recommendations,
-        integrationHealth: snapshot.integrationHealth
-      });
-    } catch (error) {
-      return `${Date.now()}`;
-    }
+  /* =========================================================
+     Planned trips integration
+  ========================================================= */
+
+  const isDestinationPlanned = (
+    destination
+  ) => {
+    const raw = readStoreState();
+
+    return asArray(
+      raw.plannedTrips
+    ).some(
+      (trip) =>
+        String(
+          trip.sourceRecommendationId ||
+          trip.destinationId ||
+          ""
+        ) ===
+          String(destination.id) &&
+        ![
+          "archived",
+          "cancelled"
+        ].includes(trip.status)
+    );
   };
 
-  const markScrollActivity = () => {
-    if (!state.mounted || state.activeDialog) {
-      return;
-    }
+  const createPlannedTripPayload = (
+    destination
+  ) => ({
+    id: createId(
+      "planned_trip"
+    ),
+    title: destination.title,
+    destination:
+      destination.city,
+    destinationId:
+      destination.id,
+    country:
+      destination.country,
+    countryCode:
+      destination.countryCode,
+    city:
+      destination.city,
+    durationDays:
+      destination.days,
+    estimatedBudget:
+      destination.cost,
+    budget:
+      destination.cost,
+    currency:
+      state.snapshot?.currency ||
+      "AED",
+    planningStatus:
+      "planned",
+    status:
+      "planned",
+    sourceRecommendationId:
+      destination.id,
+    source:
+      "simple-budget-advisor",
+    notes:
+      destination.summary,
+    highlights:
+      clone(
+        destination.tags
+      ),
+    checklist: {
+      destinationApproved: true,
+      budgetApproved: true,
+      flightBooked: false,
+      hotelBooked: false,
+      insuranceReady: false,
+      visaReady: false,
+      documentsReady: false,
+      activitiesPlanned: false,
+      packingReady: false
+    },
+    createdAt:
+      nowISO(),
+    updatedAt:
+      nowISO()
+  });
 
-    state.isUserScrolling = true;
-    state.lastKnownScrollY = window.scrollY;
+  const addPlannedTrip = (
+    destinationId,
+    silent = false
+  ) => {
+    const destination =
+      getDestination(
+        destinationId
+      );
 
-    if (state.scrollIdleTimer) {
-      window.clearTimeout(state.scrollIdleTimer);
-    }
+    const store = getStore();
 
-    state.scrollIdleTimer = window.setTimeout(() => {
-      state.scrollIdleTimer = null;
-      state.isUserScrolling = false;
-      state.lastKnownScrollY = window.scrollY;
-
-      if (state.pendingRefresh) {
-        state.pendingRefresh = false;
-        scheduleRefresh({
-          force: false,
-          delay: 220
-        });
-      }
-    }, 420);
-  };
-
-  const bindScrollStability = () => {
     if (
-      state.eventBindings.some(
-        (binding) => binding.name === "budget-scroll"
+      !destination ||
+      !store
+    ) {
+      if (!silent) {
+        notify(
+          "تعذر إضافة الرحلة حالياً.",
+          "danger"
+        );
+      }
+      return false;
+    }
+
+    if (
+      isDestinationPlanned(
+        destination
       )
     ) {
+      if (!silent) {
+        notify(
+          "هذه الرحلة موجودة بالفعل ضمن الرحلات المخطط لها.",
+          "info"
+        );
+      }
+      return true;
+    }
+
+    const payload =
+      createPlannedTripPayload(
+        destination
+      );
+
+    let result = null;
+
+    try {
+      if (
+        typeof store.createPlannedTripFromRecommendation ===
+        "function"
+      ) {
+        result =
+          store.createPlannedTripFromRecommendation(
+            payload
+          );
+      } else if (
+        typeof store.createPlannedTrip ===
+        "function"
+      ) {
+        result =
+          store.createPlannedTrip(
+            payload
+          );
+      } else if (
+        typeof store.addPlannedTrip ===
+        "function"
+      ) {
+        result =
+          store.addPlannedTrip(
+            payload
+          );
+      } else if (
+        typeof store.dispatch ===
+        "function"
+      ) {
+        result =
+          store.dispatch(
+            "plannedTrips/add",
+            payload
+          );
+      } else if (
+        typeof store.set ===
+        "function"
+      ) {
+        const raw =
+          readStoreState();
+
+        const next =
+          [
+            ...asArray(
+              raw.plannedTrips
+            ),
+            payload
+          ];
+
+        store.set(
+          "plannedTrips",
+          next,
+          { immediate: true }
+        );
+
+        result = payload;
+      }
+    } catch (error) {
+      console.error(
+        "TIC Budget planned trip creation failed:",
+        error
+      );
+    }
+
+    if (!result) {
+      if (!silent) {
+        notify(
+          "تعذر إضافة الرحلة إلى الرحلات المخطط لها.",
+          "danger"
+        );
+      }
+      return false;
+    }
+
+    if (!silent) {
+      notify(
+        "تمت إضافة الرحلة إلى الرحلات المخطط لها.",
+        "success"
+      );
+    }
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "tic:budget-planned-trip-created",
+        {
+          detail: {
+            destinationId,
+            plannedTrip:
+              clone(result)
+          }
+        }
+      )
+    );
+
+    return true;
+  };
+
+  /* =========================================================
+     Actions
+  ========================================================= */
+
+  const handleAction = async (
+    action,
+    target
+  ) => {
+    const snapshot =
+      state.snapshot ||
+      buildSnapshot();
+
+    if (
+      action ===
+      "close-dialog"
+    ) {
+      closeDialog();
       return;
     }
 
-    const scrollHandler = () => {
-      markScrollActivity();
-    };
+    if (
+      action ===
+      "open-deposit"
+    ) {
+      openDialog(
+        DIALOGS.DEPOSIT
+      );
+      return;
+    }
 
-    const touchStartHandler = () => {
-      if (!state.mounted || state.activeDialog) {
+    if (
+      action ===
+      "open-withdrawal"
+    ) {
+      openDialog(
+        DIALOGS.WITHDRAWAL
+      );
+      return;
+    }
+
+    if (
+      action ===
+      "open-expense"
+    ) {
+      openDialog(
+        DIALOGS.EXPENSE
+      );
+      return;
+    }
+
+    if (
+      action ===
+      "open-history"
+    ) {
+      openDialog(
+        DIALOGS.HISTORY
+      );
+      return;
+    }
+
+    if (
+      action ===
+      "open-destination"
+    ) {
+      openDialog(
+        DIALOGS.DESTINATION,
+        {
+          destinationId:
+            target.dataset
+              .destinationId
+        }
+      );
+      return;
+    }
+
+    if (
+      action ===
+      "submit-deposit"
+    ) {
+      const result =
+        getFormData(
+          "deposit"
+        );
+
+      if (!result) return;
+
+      const saved =
+        addTransaction({
+          type:
+            TRANSACTION_TYPES.DEPOSIT,
+          amount:
+            result.values.amount,
+          title:
+            result.values.title ||
+            "إضافة رصيد",
+          notes:
+            result.values.notes,
+          date:
+            result.values.date
+        });
+
+      if (!saved.ok) {
+        notify(
+          "تعذر إضافة الرصيد.",
+          "danger"
+        );
         return;
       }
 
-      state.isUserScrolling = true;
-      state.lastKnownScrollY = window.scrollY;
-    };
+      closeDialog();
 
-    const touchEndHandler = () => {
-      markScrollActivity();
-    };
+      notify(
+        "تمت إضافة الرصيد وتحديث اقتراحات السفر.",
+        "success"
+      );
 
-    window.addEventListener(
-      "scroll",
-      scrollHandler,
-      { passive: true }
-    );
+      refresh({
+        force: true,
+        preserveScroll: true
+      });
 
-    window.addEventListener(
-      "touchstart",
-      touchStartHandler,
-      { passive: true }
-    );
+      return;
+    }
 
-    window.addEventListener(
-      "touchmove",
-      scrollHandler,
-      { passive: true }
-    );
+    if (
+      action ===
+      "submit-withdrawal"
+    ) {
+      const result =
+        getFormData(
+          "withdrawal"
+        );
 
-    window.addEventListener(
-      "touchend",
-      touchEndHandler,
-      { passive: true }
-    );
+      if (!result) return;
 
-    state.eventBindings.push(
-      {
-        name: "budget-scroll",
-        eventName: "scroll",
-        handler: scrollHandler,
-        target: window
-      },
-      {
-        name: "budget-touchstart",
-        eventName: "touchstart",
-        handler: touchStartHandler,
-        target: window
-      },
-      {
-        name: "budget-touchmove",
-        eventName: "touchmove",
-        handler: scrollHandler,
-        target: window
-      },
-      {
-        name: "budget-touchend",
-        eventName: "touchend",
-        handler: touchEndHandler,
-        target: window
+      const saved =
+        addTransaction({
+          type:
+            TRANSACTION_TYPES.WITHDRAWAL,
+          amount:
+            result.values.amount,
+          title:
+            result.values.title ||
+            "سحب من الرصيد",
+          notes:
+            result.values.notes,
+          date:
+            result.values.date
+        });
+
+      if (
+        !saved.ok &&
+        saved.reason ===
+          "insufficient-balance"
+      ) {
+        notify(
+          `المبلغ أكبر من رصيدك الحالي ${formatCurrency(
+            saved.balance,
+            snapshot.currency
+          )}.`,
+          "danger"
+        );
+        return;
       }
-    );
+
+      if (!saved.ok) {
+        notify(
+          "تعذر سحب المبلغ.",
+          "danger"
+        );
+        return;
+      }
+
+      closeDialog();
+
+      notify(
+        "تم سحب المبلغ وتحديث الرصيد.",
+        "success"
+      );
+
+      refresh({
+        force: true,
+        preserveScroll: true
+      });
+
+      return;
+    }
+
+    if (
+      action ===
+      "submit-expense"
+    ) {
+      const result =
+        getFormData(
+          "expense"
+        );
+
+      if (!result) return;
+
+      const saved =
+        addTransaction({
+          type:
+            TRANSACTION_TYPES.EXPENSE,
+          amount:
+            result.values.amount,
+          title:
+            result.values.title ||
+            "مصروف سفر",
+          category:
+            result.values.category,
+          notes:
+            result.values.notes,
+          date:
+            result.values.date
+        });
+
+      if (
+        !saved.ok &&
+        saved.reason ===
+          "insufficient-balance"
+      ) {
+        notify(
+          `المصروف أكبر من رصيدك الحالي ${formatCurrency(
+            saved.balance,
+            snapshot.currency
+          )}.`,
+          "danger"
+        );
+        return;
+      }
+
+      if (!saved.ok) {
+        notify(
+          "تعذر إضافة المصروف.",
+          "danger"
+        );
+        return;
+      }
+
+      closeDialog();
+
+      notify(
+        "تم تسجيل المصروف وتحديث الرصيد.",
+        "success"
+      );
+
+      refresh({
+        force: true,
+        preserveScroll: true
+      });
+
+      return;
+    }
+
+    if (
+      action ===
+      "quick-add-difference"
+    ) {
+      const destination =
+        getDestination(
+          target.dataset
+            .destinationId
+        );
+
+      if (!destination) return;
+
+      const difference =
+        Math.max(
+          0,
+          destination.cost -
+            snapshot.balance
+        );
+
+      openDialog(
+        DIALOGS.DEPOSIT,
+        {
+          amount:
+            difference,
+          title:
+            `إكمال ميزانية ${destination.title}`
+        }
+      );
+
+      return;
+    }
+
+    if (
+      action ===
+      "add-planned-trip"
+    ) {
+      addPlannedTrip(
+        target.dataset
+          .destinationId
+      );
+
+      refresh({
+        force: true,
+        preserveScroll: true
+      });
+
+      return;
+    }
+
+    if (
+      action ===
+      "add-multi-trip"
+    ) {
+      const option =
+        snapshot.analysis
+          .multiTripOptions.find(
+            (item) =>
+              item.id ===
+              target.dataset
+                .multiTripId
+          );
+
+      if (!option) return;
+
+      const results =
+        option.trips.map(
+          (trip) =>
+            addPlannedTrip(
+              trip.id,
+              true
+            )
+        );
+
+      if (
+        results.every(Boolean)
+      ) {
+        notify(
+          "تمت إضافة الرحلتين إلى الرحلات المخطط لها.",
+          "success"
+        );
+      } else {
+        notify(
+          "تمت إضافة الرحلات المتاحة، وتعذر إضافة بعضها.",
+          "info"
+        );
+      }
+
+      refresh({
+        force: true,
+        preserveScroll: true
+      });
+
+      return;
+    }
+
+    if (
+      action ===
+      "submit-destination-difference"
+    ) {
+      const destination =
+        getDestination(
+          state.selectedDestinationId
+        );
+
+      if (!destination) return;
+
+      const difference =
+        Math.max(
+          0,
+          destination.cost -
+            snapshot.balance
+        );
+
+      closeDialog();
+
+      openDialog(
+        DIALOGS.DEPOSIT,
+        {
+          amount:
+            difference,
+          title:
+            `إكمال ميزانية ${destination.title}`
+        }
+      );
+
+      return;
+    }
+
+    if (
+      action ===
+      "submit-destination-trip"
+    ) {
+      const destinationId =
+        state.selectedDestinationId;
+
+      closeDialog();
+
+      addPlannedTrip(
+        destinationId
+      );
+
+      refresh({
+        force: true,
+        preserveScroll: true
+      });
+    }
   };
+
+  const onContainerClick = (
+    event
+  ) => {
+    const target =
+      event.target.closest(
+        "[data-budget-action]"
+      );
+
+    if (!target) {
+      if (
+        event.target.matches(
+          "[data-budget-dialog-backdrop]"
+        )
+      ) {
+        closeDialog();
+      }
+      return;
+    }
+
+    event.preventDefault();
+
+    handleAction(
+      target.dataset
+        .budgetAction,
+      target
+    ).catch((error) => {
+      console.error(
+        "TIC Budget action failed:",
+        error
+      );
+
+      notify(
+        "حدث خطأ أثناء تنفيذ العملية.",
+        "danger"
+      );
+    });
+  };
+
+  const bindContainerEvents =
+    () => {
+      if (!state.container) {
+        return;
+      }
+
+      state.container.removeEventListener(
+        "click",
+        onContainerClick
+      );
+
+      state.container.addEventListener(
+        "click",
+        onContainerClick
+      );
+    };
+
+  /* =========================================================
+     Scroll stability and refresh
+  ========================================================= */
+
+  const signature = (
+    snapshot
+  ) => {
+    try {
+      return JSON.stringify({
+        balance:
+          snapshot.balance,
+        currency:
+          snapshot.currency,
+        totals:
+          snapshot.totals,
+        transactions:
+          snapshot.wallet.transactions.map(
+            (item) => [
+              item.id,
+              item.type,
+              item.amount,
+              item.createdAt
+            ]
+          ),
+        advice: {
+          tone:
+            snapshot.analysis.tone,
+          bestNow:
+            snapshot.analysis
+              .bestNow?.id ||
+            null,
+          nextUpgrade:
+            snapshot.analysis
+              .nextUpgrade?.id ||
+            null,
+          multi:
+            snapshot.analysis
+              .multiTripOptions.map(
+                (item) =>
+                  item.id
+              )
+        }
+      });
+    } catch (_) {
+      return String(
+        Date.now()
+      );
+    }
+  };
+
+  const markScrollActivity =
+    () => {
+      if (
+        !state.mounted ||
+        state.activeDialog
+      ) {
+        return;
+      }
+
+      state.isUserScrolling =
+        true;
+
+      state.lastKnownScrollY =
+        window.scrollY;
+
+      if (
+        state.scrollIdleTimer
+      ) {
+        window.clearTimeout(
+          state.scrollIdleTimer
+        );
+      }
+
+      state.scrollIdleTimer =
+        window.setTimeout(
+          () => {
+            state.scrollIdleTimer =
+              null;
+
+            state.isUserScrolling =
+              false;
+
+            state.lastKnownScrollY =
+              window.scrollY;
+
+            if (
+              state.pendingRefresh
+            ) {
+              state.pendingRefresh =
+                false;
+
+              scheduleRefresh({
+                force: false,
+                delay: 180
+              });
+            }
+          },
+          420
+        );
+    };
+
+  const bindScrollStability =
+    () => {
+      if (
+        state.eventBindings.some(
+          (binding) =>
+            binding.name ===
+            "budget-scroll"
+        )
+      ) {
+        return;
+      }
+
+      const scrollHandler =
+        () => {
+          markScrollActivity();
+        };
+
+      const touchStartHandler =
+        () => {
+          if (
+            !state.mounted ||
+            state.activeDialog
+          ) {
+            return;
+          }
+
+          state.isUserScrolling =
+            true;
+
+          state.lastKnownScrollY =
+            window.scrollY;
+        };
+
+      const touchEndHandler =
+        () => {
+          markScrollActivity();
+        };
+
+      window.addEventListener(
+        "scroll",
+        scrollHandler,
+        { passive: true }
+      );
+
+      window.addEventListener(
+        "touchstart",
+        touchStartHandler,
+        { passive: true }
+      );
+
+      window.addEventListener(
+        "touchmove",
+        scrollHandler,
+        { passive: true }
+      );
+
+      window.addEventListener(
+        "touchend",
+        touchEndHandler,
+        { passive: true }
+      );
+
+      state.eventBindings.push(
+        {
+          name:
+            "budget-scroll",
+          eventName:
+            "scroll",
+          handler:
+            scrollHandler,
+          target:
+            window
+        },
+        {
+          name:
+            "budget-touchstart",
+          eventName:
+            "touchstart",
+          handler:
+            touchStartHandler,
+          target:
+            window
+        },
+        {
+          name:
+            "budget-touchmove",
+          eventName:
+            "touchmove",
+          handler:
+            scrollHandler,
+          target:
+            window
+        },
+        {
+          name:
+            "budget-touchend",
+          eventName:
+            "touchend",
+          handler:
+            touchEndHandler,
+          target:
+            window
+        }
+      );
+    };
 
   const refresh = ({
     preserveScroll = true,
@@ -1898,21 +3139,29 @@
 
     if (
       !force &&
-      (state.isUserScrolling || state.activeDialog)
+      (
+        state.isUserScrolling ||
+        state.activeDialog
+      )
     ) {
-      state.pendingRefresh = true;
+      state.pendingRefresh =
+        true;
       return false;
     }
 
     state.refreshing = true;
 
     try {
-      const snapshot = buildSnapshot();
-      const nextSignature = signature(snapshot);
+      const snapshot =
+        buildSnapshot();
+
+      const nextSignature =
+        signature(snapshot);
 
       if (
         !force &&
-        nextSignature === state.lastSignature
+        nextSignature ===
+          state.lastSignature
       ) {
         return false;
       }
@@ -1925,33 +3174,30 @@
 
       bindContainerEvents();
 
-      /*
-       * Important:
-       * Do not restore window.scrollY after automatic refresh.
-       * Replacing the page content and immediately calling scrollTo()
-       * during iPhone momentum scrolling is what caused the page jump.
-       */
       if (!preserveScroll) {
-        window.requestAnimationFrame(() => {
-          window.scrollTo({
-            top: 0,
-            behavior: "auto"
-          });
-        });
+        window.requestAnimationFrame(
+          () => {
+            window.scrollTo({
+              top: 0,
+              behavior: "auto"
+            });
+          }
+        );
       } else {
         state.lastKnownScrollY =
           window.scrollY;
       }
 
       emit("refreshed", {
-        annualBudget:
-          snapshot.annualBudget,
-        totalSpent:
-          snapshot.totalSpent,
-        usagePercent:
-          snapshot.usagePercent,
-        activeView:
-          state.activeView
+        balance:
+          snapshot.balance,
+        transactionCount:
+          snapshot.wallet
+            .transactions.length,
+        bestDestination:
+          snapshot.analysis
+            .bestNow?.id ||
+          null
       });
 
       return true;
@@ -1962,7 +3208,7 @@
 
   const scheduleRefresh = ({
     force = false,
-    delay = 260
+    delay = 220
   } = {}) => {
     if (!state.mounted) {
       return false;
@@ -1970,9 +3216,13 @@
 
     if (
       !force &&
-      (state.isUserScrolling || state.activeDialog)
+      (
+        state.isUserScrolling ||
+        state.activeDialog
+      )
     ) {
-      state.pendingRefresh = true;
+      state.pendingRefresh =
+        true;
       return false;
     }
 
@@ -1983,529 +3233,179 @@
     }
 
     state.refreshTimer =
-      window.setTimeout(() => {
-        state.refreshTimer = null;
+      window.setTimeout(
+        () => {
+          state.refreshTimer =
+            null;
 
-        if (!state.mounted) {
-          return;
-        }
+          if (!state.mounted) {
+            return;
+          }
 
-        if (
-          !force &&
-          (state.isUserScrolling || state.activeDialog)
-        ) {
-          state.pendingRefresh = true;
-          return;
-        }
+          if (
+            !force &&
+            (
+              state.isUserScrolling ||
+              state.activeDialog
+            )
+          ) {
+            state.pendingRefresh =
+              true;
+            return;
+          }
 
-        refresh({
-          preserveScroll: true,
-          force
-        });
-      }, delay);
+          refresh({
+            preserveScroll: true,
+            force
+          });
+        },
+        delay
+      );
 
     return true;
   };
 
-  const switchView = (view) => {
-    if (!Object.values(VIEWS).includes(view)) return false;
-
-    state.activeView = view;
-    refresh({ preserveScroll: false, force: true });
-
-    window.requestAnimationFrame(() => {
-      const platform = state.container?.querySelector(".tic-budget-platform");
-      if (!platform) return;
-
-      const top = platform.getBoundingClientRect().top + window.scrollY;
-      window.scrollTo({ top: Math.max(0, top - 112), behavior: "auto" });
-    });
-
-    return true;
-  };
-
-  const executeSourceAction = (sourceItem) => {
-    const action = sourceItem?.action;
-    if (!action?.name) return false;
-
-    const name = action.name;
-    const payload = action.payload || {};
-
-    if (name.includes("trip") && payload.tripId) {
-      getRouter()?.go?.("trips", { view: "details", tripId: payload.tripId });
-      return true;
-    }
-
-    if (name.includes("payment")) return switchView(VIEWS.PAYMENTS);
-    if (name.includes("expense")) return switchView(VIEWS.EXPENSES);
-    if (name.includes("saving")) return switchView(VIEWS.SAVINGS);
-    if (name.includes("report") || name.includes("forecast")) return switchView(VIEWS.REPORTS);
-
-    return false;
-  };
-
-  const handleAction = async (action, target) => {
-    const modules = engines();
-    const snapshot = state.lastSnapshot || buildSnapshot();
-
-    if (action === "close-dialog") return void closeDialog();
-    if (action === "add-expense") return void openDialog("expense", { tripId: target.dataset.tripId || "" });
-    if (action === "add-saving") return void openDialog("saving");
-    if (action === "edit-saving-plan") return void openDialog("saving-plan");
-    if (action === "add-payment") return void openDialog("payment");
-    if (action === "ask-ai") return void openDialog("ask-ai");
-    if (action === "switch-payments") return void switchView(VIEWS.PAYMENTS);
-    if (action === "open-trips") return void getRouter()?.go?.("trips");
-
-    if (action === "open-trip") {
-      return void getRouter()?.go?.("trips", {
-        view: "details",
-        tripId: target.dataset.tripId
-      });
-    }
-
-    if (action === "edit-expense") {
-      const expense = snapshot.expenses.find(
-        (item) => String(firstDefined(item.id, item._id)) === String(target.dataset.expenseId)
-      );
-      if (expense) openDialog("expense", { mode: "edit", expense });
-      return;
-    }
-
-    if (action === "submit-expense") {
-      const result = getFormData("expense");
-      if (!result) return;
-
-      const { form, values } = result;
-      const payload = {
-        title: values.title,
-        amount: nonNegative(values.amount),
-        date: values.date,
-        category: values.category,
-        tripId: values.tripId || null,
-        paymentMethod: values.paymentMethod,
-        currency: snapshot.currency,
-        status: "paid"
-      };
-
-      const saved =
-        form.dataset.mode === "edit"
-          ? callEngine(modules.expense, ["updateExpense", "update"], [
-              form.dataset.expenseId,
-              payload,
-              { store: getStore() }
-            ])
-          : callEngine(modules.expense, ["createExpense", "create", "addExpense"], [
-              payload,
-              { store: getStore() }
-            ]);
-
-      if (saved === null) return notify("تعذر حفظ المصروف.", "danger");
-
-      closeDialog();
-      notify(form.dataset.mode === "edit" ? "تم تعديل المصروف." : "تمت إضافة المصروف.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "delete-expense") {
-      if (!window.confirm("هل تريد حذف هذا المصروف؟")) return;
-
-      const result = callEngine(modules.expense, ["deleteExpense", "removeExpense", "delete"], [
-        target.dataset.expenseId,
-        { store: getStore() }
-      ]);
-
-      if (result === null) return notify("تعذر حذف المصروف.", "danger");
-
-      notify("تم حذف المصروف.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "submit-saving") {
-      const result = getFormData("saving");
-      if (!result) return;
-
-      const saved = callEngine(modules.savings, ["addDeposit", "createEntry", "addEntry", "deposit"], [
-        {
-          amount: nonNegative(result.values.amount),
-          date: result.values.date,
-          notes: result.values.notes,
-          type: "deposit"
-        },
-        { store: getStore() }
-      ]);
-
-      if (saved === null) return notify("تعذر إضافة مبلغ الادخار.", "danger");
-
-      closeDialog();
-      notify("تمت إضافة مبلغ الادخار.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "submit-saving-plan") {
-      const result = getFormData("saving-plan");
-      if (!result) return;
-
-      const saved = callEngine(modules.savings, ["setMonthlySaving", "updatePlan", "setPlan", "savePlan"], [
-        { monthlySaving: nonNegative(result.values.monthlySaving) },
-        { store: getStore() }
-      ]);
-
-      if (saved === null) return notify("تعذر حفظ خطة الادخار.", "danger");
-
-      closeDialog();
-      notify("تم تحديث خطة الادخار.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "create-monthly-plan") {
-      const plan = callEngine(modules.ai, ["createMonthlyPlan"], [
-        { store: getStore() }
-      ]);
-
-      if (!plan) return notify("تعذر إنشاء الخطة الذكية.", "danger");
-      return void openDialog("monthly-plan", { plan });
-    }
-
-    if (action === "edit-payment") {
-      const payment = asArray(snapshot.payments?.payments).find(
-        (item) => String(item.id) === String(target.dataset.paymentId)
-      );
-
-      if (payment) openDialog("payment", { mode: "edit", payment });
-      return;
-    }
-
-    if (action === "submit-payment") {
-      const result = getFormData("payment");
-      if (!result) return;
-
-      const { form, values } = result;
-      const payload = {
-        title: values.title,
-        amount: nonNegative(values.amount),
-        dueDate: values.dueDate,
-        type: values.type,
-        paymentMethod: values.paymentMethod,
-        currency: snapshot.currency,
-        status: "pending"
-      };
-
-      const saved =
-        form.dataset.mode === "edit"
-          ? callEngine(modules.payments, ["updatePayment"], [
-              form.dataset.paymentId,
-              payload,
-              { store: getStore() }
-            ])
-          : callEngine(modules.payments, ["createPayment"], [
-              payload,
-              { store: getStore() }
-            ]);
-
-      if (!saved) return notify("تعذر حفظ الدفعة.", "danger");
-
-      closeDialog();
-      notify("تم حفظ الدفعة.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "pay-payment") {
-      const id = target.dataset.paymentId;
-      const payment = asArray(snapshot.payments?.payments).find(
-        (item) => String(item.id) === String(id)
-      );
-
-      return void openDialog("pay-payment", { paymentId: id, payment });
-    }
-
-    if (action === "submit-payment-record") {
-      const result = getFormData("payment-record");
-      if (!result) return;
-
-      const saved = callEngine(modules.payments, ["recordPayment", "markPaid"], [
-        result.form.dataset.paymentId,
-        {
-          amount: nonNegative(result.values.amount),
-          paidAt: result.values.paidAt,
-          createExpense: true
-        },
-        { store: getStore() }
-      ]);
-
-      if (!saved) return notify("تعذر تسجيل الدفع.", "danger");
-
-      closeDialog();
-      notify("تم تسجيل الدفع وربطه بالمصروفات.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "delete-payment") {
-      if (!window.confirm("هل تريد حذف هذه الدفعة؟")) return;
-
-      const result = callEngine(modules.payments, ["deletePayment"], [
-        target.dataset.paymentId,
-        { store: getStore() }
-      ]);
-
-      if (!result) return notify("تعذر حذف الدفعة.", "danger");
-
-      notify("تم حذف الدفعة.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "submit-ai-question") {
-      const result = getFormData("ai-question");
-      if (!result) return;
-
-      const answer = callEngine(modules.ai, ["answerQuestion", "ask"], [
-        result.values.question,
-        { store: getStore() }
-      ]);
-
-      const output = state.container?.querySelector("[data-ai-answer]");
-      if (!answer || !output) return notify("تعذر الحصول على إجابة.", "danger");
-
-      output.innerHTML = `
-        <article class="tic-card tic-card-body tic-budget-ai-answer">
-          <span class="tic-chip">AI ANSWER</span>
-          <p>${escapeHTML(answer.answerAr || answer.answer || "")}</p>
-        </article>
-      `;
-      return;
-    }
-
-    if (action === "run-recommendation") {
-      const item = snapshot.recommendations.find(
-        (entry) => String(entry.id) === String(target.dataset.recommendationId)
-      );
-
-      if (!executeSourceAction(item)) {
-        notify(item?.messageAr || "تم فتح التوصية.", "info");
-      }
-      return;
-    }
-
-    if (action === "dismiss-recommendation") {
-      callEngine(modules.ai, ["dismissRecommendation"], [
-        target.dataset.recommendationId,
-        { store: getStore() }
-      ]);
-
-      notify("تم إخفاء التوصية.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "run-alert-action") {
-      const item = snapshot.activeAlerts.find(
-        (entry) => String(entry.id) === String(target.dataset.alertId)
-      );
-
-      if (!executeSourceAction(item)) {
-        notify(item?.messageAr || "تم فتح التنبيه.", "info");
-      }
-      return;
-    }
-
-    if (action === "acknowledge-alert") {
-      callEngine(modules.alerts, ["acknowledgeAlert"], [
-        target.dataset.alertId,
-        { store: getStore() }
-      ]);
-
-      notify("تمت مراجعة التنبيه.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "snooze-alert") {
-      callEngine(modules.alerts, ["snoozeAlert"], [
-        target.dataset.alertId,
-        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        { store: getStore() }
-      ]);
-
-      notify("تم تأجيل التنبيه ليوم واحد.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "refresh-alerts") {
-      callEngine(modules.alerts, ["refresh"], [{ store: getStore() }]);
-      notify("تم تحديث التنبيهات.", "success");
-      return void refresh({ preserveScroll: true, force: true });
-    }
-
-    if (action === "export-csv") {
-      return void callEngine(modules.export, ["downloadReport"], [
-        { store: getStore(), report: "expenses", format: "csv" }
-      ]);
-    }
-
-    if (action === "export-json") {
-      return void callEngine(modules.export, ["downloadReport"], [
-        { store: getStore(), report: "full", format: "json" }
-      ]);
-    }
-
-    if (action === "print-report") {
-      return void callEngine(modules.export, ["printReport"], [
-        { store: getStore(), report: "executive", format: "html" }
-      ]);
-    }
-  };
-
-  const onContainerClick = (event) => {
-    const question = event.target.closest("[data-ai-question]");
-
-    if (question) {
-      const textarea = state.container?.querySelector(
-        '[data-budget-form="ai-question"] textarea'
-      );
-
-      if (textarea) {
-        textarea.value = question.dataset.aiQuestion;
-        textarea.focus();
-      }
-      return;
-    }
-
-    const view = event.target.closest("[data-budget-view]");
-
-    if (view) {
-      switchView(view.dataset.budgetView);
-      return;
-    }
-
-    const target = event.target.closest("[data-budget-action]");
-
-    if (!target) {
-      if (event.target.matches("[data-budget-dialog-backdrop]")) closeDialog();
-      return;
-    }
-
-    event.preventDefault();
-
-    handleAction(target.dataset.budgetAction, target).catch((error) => {
-      console.error("TIC Budget action failed:", error);
-      notify("حدث خطأ أثناء تنفيذ العملية.", "danger");
-    });
-  };
-
-  const bindContainerEvents = () => {
-    if (!state.container) return;
-
-    state.container.removeEventListener("click", onContainerClick);
-    state.container.addEventListener("click", onContainerClick);
-  };
+  /* =========================================================
+     Registration and subscriptions
+  ========================================================= */
 
   const registerActions = () => {
     const ui = getUI();
 
-    if (!ui || typeof ui.registerAction !== "function") return;
+    if (
+      !ui ||
+      typeof ui.registerAction !==
+        "function"
+    ) {
+      return;
+    }
 
-    const register = (name, handler) => {
-      if (ui.hasAction?.(name)) return;
+    const register = (
+      name,
+      handler
+    ) => {
+      if (
+        typeof ui.hasAction ===
+          "function" &&
+        ui.hasAction(name)
+      ) {
+        return;
+      }
 
-      const unsubscribe = ui.registerAction(name, handler);
+      const unsubscribe =
+        ui.registerAction(
+          name,
+          handler
+        );
 
-      if (typeof unsubscribe === "function") {
-        state.actionUnsubscribers.push(unsubscribe);
+      if (
+        typeof unsubscribe ===
+        "function"
+      ) {
+        state.actionUnsubscribers.push(
+          unsubscribe
+        );
       }
     };
 
-    register("budget-add-expense", () => openDialog("expense"));
-    register("budget-ask-ai", () => openDialog("ask-ai"));
-    register("budget-open-trips", () => getRouter()?.go?.("trips"));
+    register(
+      "budget-add-balance",
+      () =>
+        openDialog(
+          DIALOGS.DEPOSIT
+        )
+    );
+
+    register(
+      "budget-withdraw-balance",
+      () =>
+        openDialog(
+          DIALOGS.WITHDRAWAL
+        )
+    );
+
+    register(
+      "budget-add-expense",
+      () =>
+        openDialog(
+          DIALOGS.EXPENSE
+        )
+    );
   };
 
   const subscribeToStore = () => {
     const store = getStore();
 
-    if (!store || typeof store.subscribe !== "function" || state.unsubscribeStore) return;
-
-    state.unsubscribeStore = store.subscribe(() => {
-      if (state.mounted && !state.activeDialog) scheduleRefresh();
-    });
-  };
-
-  const subscribeToIntegration = () => {
-    const integration = engines().integration;
-
     if (
-      !integration ||
-      typeof integration.subscribe !== "function" ||
-      state.integrationUnsubscribe
+      !store ||
+      typeof store.subscribe !==
+        "function" ||
+      state.unsubscribeStore
     ) {
       return;
     }
 
-    state.integrationUnsubscribe = integration.subscribe(
-      () => {
-        if (state.mounted && !state.activeDialog) scheduleRefresh();
-      },
-      { immediate: false }
-    );
+    state.unsubscribeStore =
+      store.subscribe(() => {
+        if (
+          state.mounted &&
+          !state.activeDialog
+        ) {
+          scheduleRefresh();
+        }
+      });
   };
 
   const bindGlobalEvents = () => {
-    if (state.eventBindings.length) return;
+    const events = [
+      "tic:budget-wallet-changed",
+      "tic:store-change",
+      "store:changed",
+      "tic:planned-trips-changed",
+      "tic:page:trips:refreshed"
+    ];
 
-    [
-      "tic:expenses-changed",
-      "tic:savings-changed",
-      "tic:payments-changed",
-      "tic:budget-analytics-changed",
-      "tic:budget-ai-recommendations-changed",
-      "tic:expense-alerts-changed",
-      "tic:budget-notifications-changed",
-      "tic:budget-integration-sync-completed"
-    ].forEach((name) => {
-      const handler = () => {
-        if (state.mounted && !state.activeDialog) scheduleRefresh();
-      };
+    events.forEach(
+      (eventName) => {
+        if (
+          state.eventBindings.some(
+            (binding) =>
+              binding.name ===
+              eventName
+          )
+        ) {
+          return;
+        }
 
-      window.addEventListener(name, handler);
-      state.eventBindings.push({ name, handler });
-    });
-  };
+        const handler = () => {
+          if (
+            state.mounted &&
+            !state.activeDialog
+          ) {
+            scheduleRefresh();
+          }
+        };
 
-  const bootstrapEngines = () => {
-    const modules = engines();
+        window.addEventListener(
+          eventName,
+          handler
+        );
 
-    if (
-      modules.integration &&
-      typeof modules.integration.initialize === "function"
-    ) {
-      try {
-        modules.integration.initialize({
-          store: getStore(),
-          strictMode: false,
-          autoSync: true
+        state.eventBindings.push({
+          name:
+            eventName,
+          eventName,
+          handler,
+          target:
+            window
         });
-      } catch (error) {
-        console.warn("TIC Budget integration bootstrap warning:", error);
       }
-      return;
-    }
-
-    Object.values(modules).forEach((engine) => {
-      if (!engine) return;
-
-      const method =
-        typeof engine.initialize === "function"
-          ? "initialize"
-          : typeof engine.init === "function"
-            ? "init"
-            : null;
-
-      if (!method) return;
-
-      try {
-        engine[method]({ store: getStore() });
-      } catch (error) {
-        console.warn("TIC Budget engine bootstrap warning:", error);
-      }
-    });
+    );
   };
+
+  /* =========================================================
+     Public page module
+  ========================================================= */
 
   const BudgetPage = {
     id: PAGE_ID,
@@ -2514,22 +3414,26 @@
     version: PAGE_VERSION,
 
     init() {
-      if (state.initialized) return this.diagnostics();
+      if (state.initialized) {
+        return this.diagnostics();
+      }
 
-      bootstrapEngines();
       registerActions();
       subscribeToStore();
-      subscribeToIntegration();
       bindGlobalEvents();
       bindScrollStability();
 
       state.initialized = true;
 
       emit("initialized", {
-        version: PAGE_VERSION,
-        engines: Object.fromEntries(
-          Object.entries(engines()).map(([key, value]) => [key, Boolean(value)])
-        )
+        version:
+          PAGE_VERSION,
+        storeAvailable:
+          Boolean(getStore()),
+        routerAvailable:
+          Boolean(getRouter()),
+        uiAvailable:
+          Boolean(getUI())
       });
 
       return this.diagnostics();
@@ -2537,45 +3441,72 @@
 
     render() {
       this.init();
-      return renderPage(buildSnapshot());
+      return renderPage(
+        buildSnapshot()
+      );
     },
 
     mount(context = {}) {
       this.init();
 
-      const container = resolveContainer(context.container);
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (!container) {
-        throw new Error("TIC Budget Error: route container not found.");
+        throw new Error(
+          "TIC Budget Error: route container not found."
+        );
       }
 
-      state.container = container;
-      state.mounted = true;
+      state.container =
+        container;
 
-      const snapshot = buildSnapshot();
+      state.mounted =
+        true;
 
-      container.innerHTML = renderPage(snapshot);
-      state.lastSignature = signature(snapshot);
-      state.lastKnownScrollY = window.scrollY;
+      const snapshot =
+        buildSnapshot();
+
+      container.innerHTML =
+        renderPage(snapshot);
+
+      state.lastSignature =
+        signature(snapshot);
+
+      state.lastKnownScrollY =
+        window.scrollY;
 
       bindContainerEvents();
       bindScrollStability();
 
       emit("mounted", {
-        annualBudget: snapshot.annualBudget,
-        totalSpent: snapshot.totalSpent,
-        healthScore: snapshot.healthScore
+        balance:
+          snapshot.balance,
+        transactionCount:
+          snapshot.wallet
+            .transactions.length,
+        bestDestination:
+          snapshot.analysis
+            .bestNow?.id ||
+          null
       });
 
       return container;
     },
 
     afterEnter(context = {}) {
-      const container = resolveContainer(context.container);
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (container) {
-        state.container = container;
-        state.mounted = true;
+        state.container =
+          container;
+        state.mounted =
+          true;
       }
 
       bindContainerEvents();
@@ -2598,11 +3529,17 @@
       closeDialog();
 
       if (state.container) {
-        state.container.removeEventListener("click", onContainerClick);
+        state.container.removeEventListener(
+          "click",
+          onContainerClick
+        );
       }
 
-      state.mounted = false;
-      state.container = null;
+      state.mounted =
+        false;
+
+      state.container =
+        null;
 
       emit("unmounted");
       return true;
@@ -2610,1494 +3547,347 @@
 
     refresh,
 
-    setView(view) {
-      return switchView(view);
-    },
-
-    getView() {
-      return state.activeView;
-    },
-
     getSnapshot() {
-      return clone(state.lastSnapshot || buildSnapshot());
+      return clone(
+        state.snapshot ||
+        buildSnapshot()
+      );
     },
 
-    getDashboard() {
-      return this.getSnapshot();
+    getWallet() {
+      return clone(
+        getWallet()
+      );
+    },
+
+    getBalance() {
+      return getWallet().balance;
+    },
+
+    addBalance(payload = {}) {
+      const result =
+        addTransaction({
+          type:
+            TRANSACTION_TYPES.DEPOSIT,
+          amount:
+            payload.amount,
+          title:
+            payload.title ||
+            "إضافة رصيد",
+          notes:
+            payload.notes,
+          date:
+            payload.date ||
+            todayISO()
+        });
+
+      if (
+        result.ok &&
+        state.mounted
+      ) {
+        refresh({
+          force: true,
+          preserveScroll: true
+        });
+      }
+
+      return clone(result);
+    },
+
+    withdrawBalance(payload = {}) {
+      const result =
+        addTransaction({
+          type:
+            TRANSACTION_TYPES.WITHDRAWAL,
+          amount:
+            payload.amount,
+          title:
+            payload.title ||
+            "سحب من الرصيد",
+          notes:
+            payload.notes,
+          date:
+            payload.date ||
+            todayISO()
+        });
+
+      if (
+        result.ok &&
+        state.mounted
+      ) {
+        refresh({
+          force: true,
+          preserveScroll: true
+        });
+      }
+
+      return clone(result);
+    },
+
+    addExpense(payload = {}) {
+      const result =
+        addTransaction({
+          type:
+            TRANSACTION_TYPES.EXPENSE,
+          amount:
+            payload.amount,
+          title:
+            payload.title ||
+            "مصروف سفر",
+          category:
+            payload.category ||
+            "other",
+          notes:
+            payload.notes,
+          date:
+            payload.date ||
+            todayISO()
+        });
+
+      if (
+        result.ok &&
+        state.mounted
+      ) {
+        refresh({
+          force: true,
+          preserveScroll: true
+        });
+      }
+
+      return clone(result);
+    },
+
+    getSuggestions() {
+      const snapshot =
+        state.snapshot ||
+        buildSnapshot();
+
+      return clone({
+        advice:
+          snapshot.analysis,
+        destinations:
+          DESTINATIONS
+      });
     },
 
     subscribe(listener) {
-      if (typeof listener !== "function") {
-        throw new TypeError("TIC Budget subscriber must be a function.");
+      if (
+        typeof listener !==
+        "function"
+      ) {
+        throw new TypeError(
+          "TIC Budget subscriber must be a function."
+        );
       }
 
-      state.subscribers.add(listener);
-      return () => state.subscribers.delete(listener);
+      state.subscribers.add(
+        listener
+      );
+
+      return () =>
+        state.subscribers.delete(
+          listener
+        );
     },
 
     destroy() {
       this.unmount();
 
-      if (typeof state.unsubscribeStore === "function") state.unsubscribeStore();
-      if (typeof state.integrationUnsubscribe === "function") state.integrationUnsubscribe();
+      if (
+        typeof state.unsubscribeStore ===
+        "function"
+      ) {
+        state.unsubscribeStore();
+      }
 
-      state.actionUnsubscribers.forEach((unsubscribe) => {
-        if (typeof unsubscribe === "function") unsubscribe();
-      });
+      state.actionUnsubscribers.forEach(
+        (unsubscribe) => {
+          if (
+            typeof unsubscribe ===
+            "function"
+          ) {
+            unsubscribe();
+          }
+        }
+      );
 
-      state.eventBindings.forEach(({
-        name,
-        eventName,
-        handler,
-        target = window
-      }) => {
-        target.removeEventListener(
-          eventName || name,
-          handler
+      state.eventBindings.forEach(
+        ({
+          name,
+          eventName,
+          handler,
+          target = window
+        }) => {
+          target.removeEventListener(
+            eventName || name,
+            handler
+          );
+        }
+      );
+
+      if (
+        state.refreshTimer
+      ) {
+        window.clearTimeout(
+          state.refreshTimer
         );
-      });
-
-      if (state.refreshTimer) {
-        window.clearTimeout(state.refreshTimer);
       }
 
-      if (state.scrollIdleTimer) {
-        window.clearTimeout(state.scrollIdleTimer);
+      if (
+        state.scrollIdleTimer
+      ) {
+        window.clearTimeout(
+          state.scrollIdleTimer
+        );
       }
 
-      state.unsubscribeStore = null;
-      state.integrationUnsubscribe = null;
-      state.actionUnsubscribers = [];
-      state.eventBindings = [];
-      state.refreshTimer = null;
-      state.scrollIdleTimer = null;
-      state.isUserScrolling = false;
-      state.pendingRefresh = false;
-      state.lastKnownScrollY = 0;
+      state.unsubscribeStore =
+        null;
+
+      state.actionUnsubscribers =
+        [];
+
+      state.eventBindings =
+        [];
+
+      state.refreshTimer =
+        null;
+
+      state.scrollIdleTimer =
+        null;
+
+      state.isUserScrolling =
+        false;
+
+      state.pendingRefresh =
+        false;
+
+      state.lastKnownScrollY =
+        0;
+
       state.subscribers.clear();
-      state.lastSnapshot = null;
-      state.lastSignature = "";
-      state.activeView = VIEWS.OVERVIEW;
-      state.initialized = false;
-      state.refreshing = false;
+
+      state.snapshot =
+        null;
+
+      state.lastSignature =
+        "";
+
+      state.activeDialog =
+        null;
+
+      state.selectedDestinationId =
+        null;
+
+      state.initialized =
+        false;
+
+      state.refreshing =
+        false;
 
       return true;
     },
 
     diagnostics() {
-      const availableEngines = Object.fromEntries(
-        Object.entries(engines()).map(([key, engine]) => [key, Boolean(engine)])
-      );
+      const wallet =
+        getWallet();
 
       return {
-        id: this.id,
-        title: this.title,
-        version: this.version,
-        initialized: state.initialized,
-        mounted: state.mounted,
-        activeView: state.activeView,
-        activeDialog: state.activeDialog,
-        hasContainer: Boolean(state.container),
-        storeAvailable: Boolean(getStore()),
-        routerAvailable: Boolean(getRouter()),
-        uiAvailable: Boolean(getUI()),
-        engines: availableEngines,
-        connectedEngineCount: Object.values(availableEngines).filter(Boolean).length,
-        actionCount: state.actionUnsubscribers.length,
-        eventBindingCount: state.eventBindings.length,
-        subscriberCount: state.subscribers.size,
-        hasSnapshot: Boolean(state.lastSnapshot),
-        integrationHealth: clone(state.lastSnapshot?.integrationHealth || null)
+        id:
+          this.id,
+        title:
+          this.title,
+        version:
+          this.version,
+        initialized:
+          state.initialized,
+        mounted:
+          state.mounted,
+        activeDialog:
+          state.activeDialog,
+        hasContainer:
+          Boolean(
+            state.container
+          ),
+        storeAvailable:
+          Boolean(
+            getStore()
+          ),
+        routerAvailable:
+          Boolean(
+            getRouter()
+          ),
+        uiAvailable:
+          Boolean(
+            getUI()
+          ),
+        balance:
+          wallet.balance,
+        transactionCount:
+          wallet.transactions
+            .length,
+        destinationCount:
+          DESTINATIONS.length,
+        subscriberCount:
+          state.subscribers.size,
+        eventBindingCount:
+          state.eventBindings.length
       };
     }
   };
 
-  window.TIC = window.TIC || {};
-  window.TIC.Pages = window.TIC.Pages || {};
-  window.TIC.Pages.budget = BudgetPage;
-  window.TICBudgetPage = BudgetPage;
+  /* =========================================================
+     Global registration
+  ========================================================= */
 
-  const router = getRouter();
+  window.TIC =
+    window.TIC || {};
 
-  if (router && typeof router.register === "function") {
-    if (!router.has?.("budget")) {
-      router.register("budget", {
-        id: "budget",
-        title: "الميزانية",
-        module: "budget",
-        icon: "◈",
-        visible: true,
-        order: 4
-      });
+  window.TIC.Pages =
+    window.TIC.Pages || {};
+
+  window.TIC.Pages.budget =
+    BudgetPage;
+
+  window.TICBudgetPage =
+    BudgetPage;
+
+  const router =
+    getRouter();
+
+  if (
+    router &&
+    typeof router.register ===
+      "function"
+  ) {
+    if (
+      typeof router.has !==
+        "function" ||
+      !router.has("budget")
+    ) {
+      router.register(
+        "budget",
+        {
+          id: "budget",
+          title: "الميزانية",
+          module: "budget",
+          icon: "◈",
+          visible: true,
+          order: 4
+        }
+      );
     }
 
-    if (typeof router.registerPage === "function") {
-      router.registerPage("budget", BudgetPage);
+    if (
+      typeof router.registerPage ===
+      "function"
+    ) {
+      router.registerPage(
+        "budget",
+        BudgetPage
+      );
     }
   }
 
   BudgetPage.init();
 })(window, document);
-
-/* =========================================================
-   Travel Intelligence Center
-   Budget Travel Intelligence Additive Integration V1.0.0
-
-   Append this block AFTER the existing closing line:
-   })(window, document);
-
-   This extension preserves Budget Page V3.1.1 without replacing
-   or removing any existing code.
-========================================================= */
-
-(function budgetTravelIntelligencePageExtension(window, document) {
-  "use strict";
-
-  const EXTENSION_VERSION = "1.0.0";
-  const PAGE_SELECTOR = '.tic-budget-platform[data-page="budget"]';
-  const INJECTION_SELECTOR = "[data-budget-travel-intelligence]";
-  const MONTHS_AR = Object.freeze([
-    "",
-    "يناير",
-    "فبراير",
-    "مارس",
-    "أبريل",
-    "مايو",
-    "يونيو",
-    "يوليو",
-    "أغسطس",
-    "سبتمبر",
-    "أكتوبر",
-    "نوفمبر",
-    "ديسمبر"
-  ]);
-
-  const runtime = {
-    initialized: false,
-    observer: null,
-    rendering: false,
-    clickBound: false,
-    eventHandlers: [],
-    lastSignature: ""
-  };
-
-  const clone = (value) => {
-    if (value === undefined) return undefined;
-
-    if (typeof structuredClone === "function") {
-      try {
-        return structuredClone(value);
-      } catch (_) {}
-    }
-
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch (_) {
-      return value;
-    }
-  };
-
-  const text = (value, fallback = "") =>
-    String(value === undefined || value === null ? fallback : value).trim();
-
-  const number = (value, fallback = 0) => {
-    const result = Number(value);
-    return Number.isFinite(result) ? result : fallback;
-  };
-
-  const nonNegative = (value, fallback = 0) =>
-    Math.max(0, number(value, fallback));
-
-  const array = (value) =>
-    Array.isArray(value) ? clone(value) : [];
-
-  const object = (value) =>
-    value && typeof value === "object" && !Array.isArray(value)
-      ? value
-      : {};
-
-  const escapeHTML = (value) =>
-    text(value)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-
-  const getStore = () =>
-    window.TIC?.Store ||
-    window.TICStore ||
-    window.Store ||
-    window.TravelStore ||
-    null;
-
-  const getRouter = () =>
-    window.TIC?.Router ||
-    window.TICRouter ||
-    null;
-
-  const getUI = () =>
-    window.TIC?.UI ||
-    window.TICUI ||
-    null;
-
-  const notify = (message, tone = "info") => {
-    const ui = getUI();
-
-    if (typeof ui?.toast === "function") {
-      return ui.toast(message, { tone });
-    }
-
-    if (typeof ui?.showToast === "function") {
-      return ui.showToast(message, tone);
-    }
-
-    console.log(`[BudgetTravel:${tone}] ${message}`);
-    return null;
-  };
-
-  const formatCurrency = (value, currencyCode = "AED") => {
-    try {
-      return new Intl.NumberFormat("ar-AE", {
-        style: "currency",
-        currency: currencyCode || "AED",
-        maximumFractionDigits: 0
-      }).format(number(value));
-    } catch (_) {
-      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${
-        currencyCode || "AED"
-      }`;
-    }
-  };
-
-  const getStoreState = () => {
-    const store = getStore();
-    if (!store) return {};
-
-    try {
-      if (typeof store.getState === "function") {
-        return object(store.getState());
-      }
-
-      if (typeof store.get === "function") {
-        const fullState = store.get();
-
-        if (fullState && typeof fullState === "object") {
-          return object(fullState);
-        }
-
-        return {
-          profile: store.get("profile"),
-          trips: store.get("trips"),
-          plannedTrips: store.get("plannedTrips"),
-          budgets: store.get("budgets"),
-          savings: store.get("savings"),
-          guideIntelligence: store.get("guideIntelligence"),
-          budgetTravelIntelligence: store.get("budgetTravelIntelligence")
-        };
-      }
-    } catch (error) {
-      console.warn("Budget Travel Intelligence: Store read failed.", error);
-    }
-
-    return {};
-  };
-
-  const getTravelEngine = () =>
-    window.TravelBudgetIntelligence ||
-    window.BudgetTravelAI ||
-    window.TIC?.Features?.travelBudgetIntelligence ||
-    window.TIC?.Features?.budgetTravelAI ||
-    null;
-
-  const buildFallbackRecommendations = (context) => {
-    const balance = context.balance;
-    const monthlySaving = context.monthlySaving;
-    const travelers = context.travelers;
-    const currentMonth = new Date().getMonth() + 1;
-
-    const catalog = [
-      {
-        id: "budget_trip_baku",
-        country: "أذربيجان",
-        countryCode: "AZ",
-        city: "باكو",
-        durationDays: 5,
-        baseCost: 5000,
-        bestMonths: [4, 5, 6, 9, 10],
-        fit: ["family", "premium-family", "quiet", "mild"],
-        highlights: ["مدينة هادئة", "مطاعم حلال", "رحلة قصيرة", "طبيعة قريبة"]
-      },
-      {
-        id: "budget_trip_sarajevo",
-        country: "البوسنة والهرسك",
-        countryCode: "BA",
-        city: "سراييفو",
-        durationDays: 6,
-        baseCost: 6500,
-        bestMonths: [5, 6, 7, 8, 9, 10],
-        fit: ["family", "quiet", "nature", "halal"],
-        highlights: ["طبيعة", "أكل حلال", "هدوء", "تكلفة مناسبة"]
-      },
-      {
-        id: "budget_trip_budapest",
-        country: "المجر",
-        countryCode: "HU",
-        city: "بودابست",
-        durationDays: 7,
-        baseCost: 10000,
-        bestMonths: [4, 5, 6, 9, 10, 12],
-        fit: ["premium-family", "city", "mild"],
-        highlights: ["إطلالات نهرية", "فنادق راقية", "مدينة منظمة", "أنشطة متنوعة"]
-      },
-      {
-        id: "budget_trip_georgia",
-        country: "جورجيا",
-        countryCode: "GE",
-        city: "تبليسي",
-        durationDays: 6,
-        baseCost: 7500,
-        bestMonths: [4, 5, 6, 7, 8, 9, 10],
-        fit: ["family", "nature", "quiet"],
-        highlights: ["طبيعة", "أجواء معتدلة", "رحلات يومية", "ميزانية متوسطة"]
-      },
-      {
-        id: "budget_trip_switzerland",
-        country: "سويسرا",
-        countryCode: "CH",
-        city: "إنترلاكن",
-        durationDays: 7,
-        baseCost: 15000,
-        bestMonths: [5, 6, 7, 8, 9, 12],
-        fit: ["premium-family", "nature", "quiet"],
-        highlights: ["طبيعة فاخرة", "هدوء", "قطارات", "مناظر جبلية"]
-      },
-      {
-        id: "budget_trip_maldives",
-        country: "المالديف",
-        countryCode: "MV",
-        city: "منتجع جزيرة",
-        durationDays: 5,
-        baseCost: 18000,
-        bestMonths: [1, 2, 3, 4, 11, 12],
-        fit: ["premium-family", "sea", "privacy", "quiet"],
-        highlights: ["خصوصية", "بحر", "منتجع هادئ", "إقامة فاخرة"]
-      }
-    ];
-
-    const travelStyle = text(context.travelStyle).toLowerCase();
-    const preferredClimate = text(context.preferredClimate).toLowerCase();
-    const availableNow = balance;
-    const futureThreeMonths = balance + monthlySaving * 3;
-    const futureSixMonths = balance + monthlySaving * 6;
-
-    return catalog
-      .map((destination) => {
-        const familyMultiplier = Math.max(1, travelers) <= 2
-          ? 1
-          : 1 + (Math.max(1, travelers) - 2) * 0.28;
-
-        const estimatedCost = Math.round(
-          destination.baseCost * familyMultiplier / 100
-        ) * 100;
-
-        let availableBudget = availableNow;
-        let monthsToReady = 0;
-
-        if (availableNow < estimatedCost && futureThreeMonths >= estimatedCost) {
-          availableBudget = futureThreeMonths;
-          monthsToReady = 3;
-        } else if (
-          availableNow < estimatedCost &&
-          futureSixMonths >= estimatedCost
-        ) {
-          availableBudget = futureSixMonths;
-          monthsToReady = 6;
-        }
-
-        const affordable = availableBudget >= estimatedCost;
-        const missingAmount = Math.max(0, estimatedCost - availableNow);
-        const suggestedMonth =
-          destination.bestMonths.find((month) => month >= currentMonth) ||
-          destination.bestMonths[0];
-
-        let matchScore = 72;
-
-        if (
-          destination.fit.some((item) =>
-            travelStyle.includes(item)
-          )
-        ) {
-          matchScore += 10;
-        }
-
-        if (
-          preferredClimate &&
-          destination.fit.includes(preferredClimate)
-        ) {
-          matchScore += 5;
-        }
-
-        if (context.halalPreference && destination.fit.includes("halal")) {
-          matchScore += 8;
-        }
-
-        if (context.quietPreference && destination.fit.includes("quiet")) {
-          matchScore += 5;
-        }
-
-        return {
-          id: destination.id,
-          recommendationId: destination.id,
-          title: `رحلة ${destination.city}`,
-          country: destination.country,
-          countryCode: destination.countryCode,
-          city: destination.city,
-          durationDays: destination.durationDays,
-          travelers,
-          estimatedCost,
-          availableBudget,
-          missingAmount,
-          monthsToReady,
-          affordable,
-          suggestedMonth,
-          bestMonths: clone(destination.bestMonths),
-          matchScore: Math.min(99, matchScore),
-          confidence: Math.min(0.99, matchScore / 100),
-          highlights: clone(destination.highlights),
-          currency: context.currency,
-          source: "budget-page-fallback",
-          costBreakdown: {
-            flights: Math.round(estimatedCost * 0.28),
-            accommodation: Math.round(estimatedCost * 0.38),
-            food: Math.round(estimatedCost * 0.14),
-            transport: Math.round(estimatedCost * 0.08),
-            activities: Math.round(estimatedCost * 0.08),
-            reserve: Math.round(estimatedCost * 0.04)
-          }
-        };
-      })
-      .sort((a, b) => {
-        if (a.affordable !== b.affordable) return a.affordable ? -1 : 1;
-        if (a.monthsToReady !== b.monthsToReady) {
-          return a.monthsToReady - b.monthsToReady;
-        }
-        return b.matchScore - a.matchScore;
-      })
-      .slice(0, 5);
-  };
-
-  const buildFallbackAnalysis = (raw) => {
-    const profile = object(raw.profile);
-    const savings = object(raw.savings);
-    const budgets = object(raw.budgets);
-    const guideIntelligence = object(raw.guideIntelligence);
-
-    const balance = nonNegative(
-      savings.balance ??
-      savings.currentBalance ??
-      budgets.savingsBalance ??
-      0
-    );
-
-    const monthlySaving = nonNegative(
-      savings.monthlySaving ??
-      savings.monthlySavingTarget ??
-      budgets.monthlySavingTarget ??
-      profile.monthlySaving ??
-      profile.monthlyTravelSaving ??
-      1500
-    );
-
-    const travelers = Math.max(
-      1,
-      number(
-        profile.defaultTravelers ??
-        profile.travelers ??
-        2,
-        2
-      )
-    );
-
-    const context = {
-      balance,
-      monthlySaving,
-      travelers,
-      currency: text(profile.currency, "AED") || "AED",
-      travelStyle: text(
-        profile.travelStyle ||
-        guideIntelligence.travelDNA?.travelStyle,
-        "premium-family"
-      ),
-      preferredClimate: text(
-        profile.preferredClimate ||
-        guideIntelligence.travelDNA?.preferredClimate,
-        "mild"
-      ),
-      halalPreference:
-        profile.halalPreference !== false,
-      quietPreference:
-        profile.quietPreference !== false,
-      shattafRequired:
-        profile.shattafRequired !== false
-    };
-
-    const recommendations = buildFallbackRecommendations(context);
-    const topRecommendation = recommendations[0] || null;
-
-    let advice = "ابدأ بتقوية صندوق السفر، وكل زيادة تقرّبك من خيارات أجمل.";
-
-    if (topRecommendation) {
-      if (topRecommendation.affordable) {
-        advice =
-          `رصيدك الحالي يكفي لترتيب رحلة ${topRecommendation.city} لمدة ` +
-          `${topRecommendation.durationDays} أيام تقريباً.`;
-      } else if (topRecommendation.missingAmount > 0) {
-        advice =
-          `باقي لك تقريباً ${formatCurrency(
-            topRecommendation.missingAmount,
-            context.currency
-          )} للوصول إلى رحلة ${topRecommendation.city} المناسبة لذوقك.`;
-      }
-    }
-
-    const affordableRecommendations = recommendations.filter(
-      (item) => item.affordable
-    );
-
-    const multiTripPlan =
-      balance >= 19000 && affordableRecommendations.length >= 2
-        ? {
-            enabled: true,
-            totalBudget: balance,
-            trips: [
-              affordableRecommendations[0],
-              affordableRecommendations.find(
-                (item) =>
-                  item.id !== affordableRecommendations[0].id &&
-                  item.estimatedCost <=
-                    balance - affordableRecommendations[0].estimatedCost
-              )
-            ].filter(Boolean)
-          }
-        : null;
-
-    return {
-      id: `budget_analysis_${Date.now()}`,
-      generatedAt: new Date().toISOString(),
-      source: "budget-page-fallback",
-      context,
-      balance,
-      monthlySaving,
-      advice,
-      recommendations,
-      multiTripPlan,
-      timeline: recommendations.map((item) => ({
-        recommendationId: item.id,
-        month: item.suggestedMonth,
-        monthsToReady: item.monthsToReady,
-        estimatedCost: item.estimatedCost
-      }))
-    };
-  };
-
-  const generateAnalysis = () => {
-    const raw = getStoreState();
-    const engine = getTravelEngine();
-    let analysis = null;
-
-    if (engine) {
-      const methods = [
-        "analyze",
-        "generate",
-        "generateRecommendations",
-        "buildPlan",
-        "getRecommendations"
-      ];
-
-      for (const method of methods) {
-        if (typeof engine[method] !== "function") continue;
-
-        try {
-          analysis = engine[method]({
-            store: getStore(),
-            state: raw,
-            profile: raw.profile,
-            savings: raw.savings,
-            budgets: raw.budgets,
-            trips: raw.trips,
-            plannedTrips: raw.plannedTrips
-          });
-
-          if (analysis) break;
-        } catch (error) {
-          console.warn(
-            `Budget Travel Intelligence method failed: ${method}`,
-            error
-          );
-        }
-      }
-    }
-
-    if (!analysis || typeof analysis !== "object") {
-      analysis = buildFallbackAnalysis(raw);
-    }
-
-    if (Array.isArray(analysis)) {
-      analysis = {
-        id: `budget_analysis_${Date.now()}`,
-        generatedAt: new Date().toISOString(),
-        recommendations: analysis
-      };
-    }
-
-    analysis.recommendations = array(
-      analysis.recommendations ||
-      analysis.items ||
-      analysis.destinations
-    );
-
-    if (!analysis.recommendations.length) {
-      analysis = buildFallbackAnalysis(raw);
-    }
-
-    return analysis;
-  };
-
-  const saveAnalysis = (analysis) => {
-    const store = getStore();
-    if (!store || !analysis) return false;
-
-    try {
-      if (typeof store.setBudgetTravelAnalysis === "function") {
-        store.setBudgetTravelAnalysis(analysis);
-        return true;
-      }
-
-      if (typeof store.saveBudgetTravelAnalysis === "function") {
-        store.saveBudgetTravelAnalysis(analysis);
-        return true;
-      }
-
-      if (typeof store.set === "function") {
-        store.set("budgetTravelIntelligence", {
-          currentAnalysis: clone(analysis),
-          recommendations: array(analysis.recommendations),
-          timeline: array(analysis.timeline),
-          multiTripPlan: analysis.multiTripPlan
-            ? clone(analysis.multiTripPlan)
-            : null,
-          lastGeneratedAt:
-            analysis.generatedAt ||
-            new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }, { immediate: true });
-
-        return true;
-      }
-    } catch (error) {
-      console.warn("Budget Travel Intelligence save failed.", error);
-    }
-
-    return false;
-  };
-
-  const getAnalysis = () => {
-    const raw = getStoreState();
-    const saved = object(raw.budgetTravelIntelligence);
-    const current = object(saved.currentAnalysis);
-
-    if (current && array(current.recommendations).length) {
-      return current;
-    }
-
-    if (array(saved.recommendations).length) {
-      return {
-        id: `stored_budget_analysis`,
-        generatedAt: saved.lastGeneratedAt,
-        recommendations: array(saved.recommendations),
-        timeline: array(saved.timeline),
-        multiTripPlan: saved.multiTripPlan
-          ? clone(saved.multiTripPlan)
-          : null,
-        context: {
-          balance: nonNegative(
-            raw.savings?.balance ??
-            raw.savings?.currentBalance ??
-            raw.budgets?.savingsBalance
-          ),
-          monthlySaving: nonNegative(
-            raw.savings?.monthlySaving ??
-            raw.budgets?.monthlySavingTarget
-          ),
-          currency: text(raw.profile?.currency, "AED")
-        }
-      };
-    }
-
-    const analysis = generateAnalysis();
-    saveAnalysis(analysis);
-    return analysis;
-  };
-
-  const isRecommendationAdded = (recommendation) => {
-    const raw = getStoreState();
-    const recommendationId =
-      recommendation.recommendationId ||
-      recommendation.id;
-
-    return array(raw.plannedTrips).some(
-      (trip) =>
-        String(trip.sourceRecommendationId || "") ===
-          String(recommendationId) &&
-        !["archived", "cancelled"].includes(trip.status)
-    );
-  };
-
-  const buildRecommendationCard = (
-    recommendation,
-    analysis,
-    currencyCode
-  ) => {
-    const id =
-      recommendation.recommendationId ||
-      recommendation.id;
-
-    const alreadyAdded =
-      isRecommendationAdded(recommendation);
-
-    const month =
-      MONTHS_AR[number(recommendation.suggestedMonth)] ||
-      "موعد مناسب";
-
-    const cost = nonNegative(
-      recommendation.estimatedCost ??
-      recommendation.totalCost ??
-      recommendation.budget
-    );
-
-    const missing = nonNegative(
-      recommendation.missingAmount ??
-      Math.max(
-        0,
-        cost - nonNegative(
-          analysis.balance ??
-          analysis.context?.balance
-        )
-      )
-    );
-
-    const affordable =
-      recommendation.affordable === true ||
-      missing <= 0;
-
-    return `
-      <article
-        class="tic-card tic-card-body tic-budget-travel-card"
-        data-budget-travel-recommendation="${escapeHTML(id)}"
-      >
-        <div class="tic-feature-row">
-          <div>
-            <span class="tic-chip">
-              ${escapeHTML(month)}
-            </span>
-            <h3 class="tic-card-title">
-              ${escapeHTML(
-                recommendation.title ||
-                `رحلة ${recommendation.city || recommendation.country || ""}`
-              )}
-            </h3>
-            <p class="tic-card-text">
-              ${escapeHTML(
-                [
-                  recommendation.country,
-                  recommendation.city,
-                  `${number(recommendation.durationDays, 5)} أيام`
-                ].filter(Boolean).join(" • ")
-              )}
-            </p>
-          </div>
-
-          <span class="tic-badge tic-badge-${
-            affordable ? "success" : "warning"
-          }">
-            ${
-              affordable
-                ? "مناسبة الآن"
-                : `ينقصك ${escapeHTML(
-                    formatCurrency(missing, currencyCode)
-                  )}`
-            }
-          </span>
-        </div>
-
-        <div class="tic-trip-meta">
-          <div>
-            <small>التكلفة المتوقعة</small>
-            <strong>
-              ${escapeHTML(formatCurrency(cost, currencyCode))}
-            </strong>
-          </div>
-          <div>
-            <small>مطابقة ذوقك</small>
-            <strong>
-              ${Math.round(
-                nonNegative(
-                  recommendation.matchScore ??
-                  recommendation.score ??
-                  number(recommendation.confidence) * 100,
-                  75
-                )
-              )}%
-            </strong>
-          </div>
-          <div>
-            <small>الجاهزية</small>
-            <strong>
-              ${
-                affordable
-                  ? "جاهزة للتخطيط"
-                  : recommendation.monthsToReady
-                    ? `بعد ${recommendation.monthsToReady} أشهر`
-                    : "تحتاج ادخار"
-              }
-            </strong>
-          </div>
-        </div>
-
-        ${
-          array(recommendation.highlights).length
-            ? `
-              <div class="tic-budget-travel-highlights">
-                ${array(recommendation.highlights)
-                  .slice(0, 4)
-                  .map(
-                    (item) =>
-                      `<span class="tic-chip">${escapeHTML(item)}</span>`
-                  )
-                  .join("")}
-              </div>
-            `
-            : ""
-        }
-
-        <div class="tic-budget-inline-actions">
-          <button
-            type="button"
-            class="tic-btn tic-btn-primary"
-            data-budget-travel-action="add-planned-trip"
-            data-recommendation-id="${escapeHTML(id)}"
-            ${alreadyAdded ? "disabled" : ""}
-          >
-            <span>
-              ${
-                alreadyAdded
-                  ? "مضافة إلى الرحلات المخطط لها"
-                  : "إضافة إلى الرحلات المخطط لها"
-              }
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="tic-btn tic-btn-secondary"
-            data-budget-travel-action="open-guide"
-            data-country-code="${escapeHTML(
-              recommendation.countryCode || ""
-            )}"
-          >
-            <span>عرض دليل الوجهة</span>
-          </button>
-        </div>
-      </article>
-    `;
-  };
-
-  const buildSectionHTML = (analysis) => {
-    const raw = getStoreState();
-    const currencyCode = text(
-      analysis.context?.currency ||
-      raw.profile?.currency,
-      "AED"
-    );
-
-    const balance = nonNegative(
-      analysis.balance ??
-      analysis.context?.balance ??
-      raw.savings?.balance ??
-      raw.savings?.currentBalance ??
-      raw.budgets?.savingsBalance
-    );
-
-    const monthlySaving = nonNegative(
-      analysis.monthlySaving ??
-      analysis.context?.monthlySaving ??
-      raw.savings?.monthlySaving ??
-      raw.budgets?.monthlySavingTarget
-    );
-
-    const recommendations = array(
-      analysis.recommendations
-    );
-
-    const multiTrips = array(
-      analysis.multiTripPlan?.trips
-    );
-
-    return `
-      <section
-        class="tic-budget-travel-intelligence"
-        data-budget-travel-intelligence
-        data-extension-version="${EXTENSION_VERSION}"
-      >
-        <div class="tic-budget-section-heading">
-          <div>
-            <small>TRAVEL BUDGET INTELLIGENCE</small>
-            <h2>شو تقدر تسافر بميزانيتك؟</h2>
-            <p>
-              اقتراحات وجهات وتواريخ ومدد مبنية على رصيدك،
-              ادخارك، وعدد المسافرين وذوقك.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            class="tic-btn tic-btn-secondary"
-            data-budget-travel-action="regenerate"
-          >
-            <span>تحديث الاقتراحات</span>
-          </button>
-        </div>
-
-        <article class="tic-card tic-card-body tic-budget-ai-card">
-          <div class="tic-feature-row">
-            <div>
-              <span class="tic-chip">SMART TRAVEL ADVICE</span>
-              <h3 class="tic-card-title">
-                ${escapeHTML(
-                  analysis.advice ||
-                  analysis.summaryAr ||
-                  "كل زيادة في صندوق السفر تفتح لك خيارات أجمل."
-                )}
-              </h3>
-              <p class="tic-card-text">
-                رصيد السفر:
-                ${escapeHTML(formatCurrency(balance, currencyCode))}
-                • الادخار الشهري:
-                ${escapeHTML(formatCurrency(monthlySaving, currencyCode))}
-              </p>
-            </div>
-
-            <span class="tic-badge tic-badge-info">
-              ${recommendations.length} اقتراحات
-            </span>
-          </div>
-        </article>
-
-        ${
-          multiTrips.length > 1
-            ? `
-              <article class="tic-card tic-card-body">
-                <div class="tic-feature-row">
-                  <div>
-                    <span class="tic-chip">MULTI TRIP PLAN</span>
-                    <h3 class="tic-card-title">
-                      ميزانيتك تسمح بخطة أكثر من سفرة
-                    </h3>
-                    <p class="tic-card-text">
-                      نقدر نوزع الرصيد على رحلتين بدل استهلاكه في رحلة واحدة.
-                    </p>
-                  </div>
-                  <span class="tic-badge tic-badge-success">
-                    ${multiTrips.length} رحلات
-                  </span>
-                </div>
-
-                <div class="tic-settings-list">
-                  ${multiTrips
-                    .map(
-                      (trip) => `
-                        <div class="tic-budget-report-row">
-                          <span>
-                            ${escapeHTML(
-                              trip.title ||
-                              trip.city ||
-                              trip.country ||
-                              "رحلة"
-                            )}
-                          </span>
-                          <strong>
-                            ${escapeHTML(
-                              formatCurrency(
-                                trip.estimatedCost ||
-                                trip.totalCost,
-                                currencyCode
-                              )
-                            )}
-                          </strong>
-                        </div>
-                      `
-                    )
-                    .join("")}
-                </div>
-              </article>
-            `
-            : ""
-        }
-
-        <div class="tic-settings-list">
-          ${
-            recommendations.length
-              ? recommendations
-                  .slice(0, 5)
-                  .map((item) =>
-                    buildRecommendationCard(
-                      item,
-                      analysis,
-                      currencyCode
-                    )
-                  )
-                  .join("")
-              : `
-                <article class="tic-card tic-card-body">
-                  <h3 class="tic-card-title">
-                    نحتاج بيانات ادخار أكثر
-                  </h3>
-                  <p class="tic-card-text">
-                    أضف رصيد صندوق السفر والادخار الشهري حتى
-                    نبني لك اقتراحات مناسبة.
-                  </p>
-                </article>
-              `
-          }
-        </div>
-      </section>
-    `;
-  };
-
-  const getOverviewPanel = () =>
-    document.querySelector(
-      `${PAGE_SELECTOR} [data-budget-panel="overview"]`
-    );
-
-  const inject = (force = false) => {
-    if (runtime.rendering) return false;
-
-    const page = document.querySelector(PAGE_SELECTOR);
-    const overview = getOverviewPanel();
-
-    if (!page || !overview) return false;
-
-    runtime.rendering = true;
-
-    try {
-      const analysis = getAnalysis();
-      const signature = JSON.stringify({
-        analysisId: analysis.id,
-        generatedAt: analysis.generatedAt,
-        balance:
-          analysis.balance ??
-          analysis.context?.balance,
-        monthlySaving:
-          analysis.monthlySaving ??
-          analysis.context?.monthlySaving,
-        recommendationIds: array(
-          analysis.recommendations
-        ).map((item) => [
-          item.id,
-          item.recommendationId,
-          item.estimatedCost,
-          item.suggestedMonth
-        ]),
-        plannedTripIds: array(
-          getStoreState().plannedTrips
-        ).map((item) => [
-          item.id,
-          item.sourceRecommendationId,
-          item.status
-        ])
-      });
-
-      if (!force && signature === runtime.lastSignature) {
-        return false;
-      }
-
-      const current = overview.querySelector(
-        INJECTION_SELECTOR
-      );
-
-      if (current) current.remove();
-
-      overview.insertAdjacentHTML(
-        "afterbegin",
-        buildSectionHTML(analysis)
-      );
-
-      runtime.lastSignature = signature;
-      return true;
-    } finally {
-      runtime.rendering = false;
-    }
-  };
-
-  const findRecommendation = (recommendationId) => {
-    const analysis = getAnalysis();
-
-    return array(analysis.recommendations).find(
-      (item) =>
-        String(item.id) === String(recommendationId) ||
-        String(item.recommendationId) === String(recommendationId)
-    ) || null;
-  };
-
-  const addPlannedTrip = (recommendationId) => {
-    const store = getStore();
-    const recommendation =
-      findRecommendation(recommendationId);
-
-    if (!store || !recommendation) {
-      notify("تعذر العثور على بيانات الاقتراح.", "danger");
-      return false;
-    }
-
-    try {
-      let result = null;
-
-      if (
-        typeof store.createPlannedTripFromRecommendation ===
-        "function"
-      ) {
-        result =
-          store.createPlannedTripFromRecommendation(
-            recommendation
-          );
-      } else {
-        const payload = {
-          title:
-            recommendation.title ||
-            `رحلة ${recommendation.city || recommendation.country || ""}`,
-          destinationId:
-            recommendation.destinationId ||
-            recommendation.id,
-          country: recommendation.country,
-          countryCode: recommendation.countryCode,
-          city: recommendation.city,
-          suggestedMonth:
-            recommendation.suggestedMonth,
-          durationDays:
-            number(recommendation.durationDays, 5),
-          travelers:
-            number(recommendation.travelers, 2),
-          estimatedBudget:
-            nonNegative(
-              recommendation.estimatedCost ??
-              recommendation.totalCost ??
-              recommendation.budget
-            ),
-          currency:
-            recommendation.currency ||
-            getStoreState().profile?.currency ||
-            "AED",
-          sourceRecommendationId:
-            recommendation.recommendationId ||
-            recommendation.id,
-          sourceAnalysisId:
-            getAnalysis().id ||
-            null,
-          source: {
-            engine:
-              recommendation.source ||
-              "BudgetTravelIntelligence",
-            confidence:
-              number(recommendation.confidence, 0)
-          },
-          costBreakdown:
-            clone(recommendation.costBreakdown || {}),
-          highlights:
-            array(recommendation.highlights),
-          checklist: {
-            destinationApproved: true,
-            budgetApproved: true,
-            flightBooked: false,
-            hotelBooked: false,
-            insuranceReady: false,
-            visaReady: false,
-            documentsReady: false,
-            activitiesPlanned: false,
-            packingReady: false
-          }
-        };
-
-        if (
-          typeof store.createPlannedTrip === "function"
-        ) {
-          result = store.createPlannedTrip(payload);
-        } else if (
-          typeof store.addPlannedTrip === "function"
-        ) {
-          result = store.addPlannedTrip(payload);
-        } else if (
-          typeof store.dispatch === "function"
-        ) {
-          result = store.dispatch(
-            "plannedTrips/add",
-            payload
-          );
-        }
-      }
-
-      if (!result) {
-        notify(
-          "تعذر إضافة الرحلة. تأكد من اعتماد Store V2.3.0.",
-          "danger"
-        );
-        return false;
-      }
-
-      notify(
-        "تمت إضافة الرحلة إلى الرحلات المخطط لها.",
-        "success"
-      );
-
-      window.dispatchEvent(
-        new CustomEvent(
-          "tic:budget-travel-planned-trip-created",
-          {
-            detail: {
-              recommendationId,
-              plannedTrip: clone(result)
-            }
-          }
-        )
-      );
-
-      inject(true);
-      return true;
-    } catch (error) {
-      console.error(
-        "Budget Travel Intelligence planned trip creation failed.",
-        error
-      );
-
-      notify(
-        error?.message ||
-        "تعذر إضافة الرحلة المخطط لها.",
-        "danger"
-      );
-
-      return false;
-    }
-  };
-
-  const regenerate = () => {
-    const analysis = generateAnalysis();
-    saveAnalysis(analysis);
-    runtime.lastSignature = "";
-    inject(true);
-    notify("تم تحديث اقتراحات السفر.", "success");
-  };
-
-  const openGuide = (countryCode) => {
-    const router = getRouter();
-
-    if (typeof router?.go === "function") {
-      router.go("guide", {
-        countryCode,
-        view: "country"
-      });
-      return true;
-    }
-
-    window.location.hash = countryCode
-      ? `#guide?countryCode=${encodeURIComponent(countryCode)}`
-      : "#guide";
-
-    return true;
-  };
-
-  const onClick = (event) => {
-    const target = event.target.closest(
-      "[data-budget-travel-action]"
-    );
-
-    if (!target) return;
-
-    event.preventDefault();
-
-    const action =
-      target.dataset.budgetTravelAction;
-
-    if (action === "regenerate") {
-      regenerate();
-      return;
-    }
-
-    if (action === "add-planned-trip") {
-      addPlannedTrip(
-        target.dataset.recommendationId
-      );
-      return;
-    }
-
-    if (action === "open-guide") {
-      openGuide(target.dataset.countryCode || "");
-    }
-  };
-
-  const observePage = () => {
-    if (runtime.observer) return;
-
-    runtime.observer = new MutationObserver(() => {
-      window.requestAnimationFrame(() => {
-        inject(false);
-      });
-    });
-
-    runtime.observer.observe(
-      document.documentElement,
-      {
-        childList: true,
-        subtree: true
-      }
-    );
-  };
-
-  const bindEvents = () => {
-    if (!runtime.clickBound) {
-      document.addEventListener("click", onClick);
-      runtime.clickBound = true;
-    }
-
-    [
-      "tic:page:budget:mounted",
-      "tic:page:budget:refreshed",
-      "tic:savings-changed",
-      "tic:budget-integration-sync-completed",
-      "tic:store-change",
-      "store:changed"
-    ].forEach((eventName) => {
-      const handler = () => {
-        window.requestAnimationFrame(() => {
-          inject(false);
-        });
-      };
-
-      window.addEventListener(eventName, handler);
-      runtime.eventHandlers.push({
-        eventName,
-        handler
-      });
-    });
-  };
-
-  const patchBudgetPage = () => {
-    const page =
-      window.TIC?.Pages?.budget ||
-      window.TICBudgetPage;
-
-    if (!page || page.__budgetTravelPatched) {
-      return false;
-    }
-
-    ["mount", "afterEnter", "refresh", "setView"].forEach(
-      (methodName) => {
-        if (typeof page[methodName] !== "function") return;
-
-        const original = page[methodName].bind(page);
-
-        page[methodName] = function patchedBudgetMethod(
-          ...args
-        ) {
-          const result = original(...args);
-
-          window.requestAnimationFrame(() => {
-            inject(true);
-          });
-
-          return result;
-        };
-      }
-    );
-
-    Object.defineProperty(
-      page,
-      "__budgetTravelPatched",
-      {
-        value: true,
-        configurable: false,
-        enumerable: false,
-        writable: false
-      }
-    );
-
-    page.getTravelBudgetAnalysis = () =>
-      clone(getAnalysis());
-
-    page.regenerateTravelBudgetAnalysis = () => {
-      regenerate();
-      return clone(getAnalysis());
-    };
-
-    return true;
-  };
-
-  const init = () => {
-    if (runtime.initialized) return true;
-
-    bindEvents();
-    observePage();
-    patchBudgetPage();
-
-    runtime.initialized = true;
-
-    window.requestAnimationFrame(() => {
-      inject(true);
-    });
-
-    window.TIC = window.TIC || {};
-    window.TIC.Features =
-      window.TIC.Features || {};
-
-    window.TIC.Features.budgetTravelPageIntegration =
-      Object.freeze({
-        version: EXTENSION_VERSION,
-        inject: () => inject(true),
-        regenerate,
-        getAnalysis: () => clone(getAnalysis()),
-        addPlannedTrip,
-        diagnostics() {
-          return {
-            version: EXTENSION_VERSION,
-            initialized: runtime.initialized,
-            pageAvailable: Boolean(
-              document.querySelector(PAGE_SELECTOR)
-            ),
-            sectionInjected: Boolean(
-              document.querySelector(
-                INJECTION_SELECTOR
-              )
-            ),
-            storeAvailable: Boolean(getStore()),
-            travelEngineAvailable: Boolean(
-              getTravelEngine()
-            ),
-            lastSignature:
-              runtime.lastSignature
-          };
-        }
-      });
-
-    return true;
-  };
-
-  if (document.readyState === "loading") {
-    document.addEventListener(
-      "DOMContentLoaded",
-      init,
-      { once: true }
-    );
-  } else {
-    init();
-  }
-})(window, document);
-
