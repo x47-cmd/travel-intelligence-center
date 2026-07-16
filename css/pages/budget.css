@@ -1,0 +1,1115 @@
+/* =========================================================
+   Travel Intelligence Center
+   Simple Travel Budget Advisor Styles V4.0.0
+
+   File Path:
+   css/pages/budget.css
+
+   Required Load Order inside index.html:
+   1) css/style.css
+   2) css/pages/guide.css
+   3) css/pages/budget.css
+
+   Purpose:
+   - Dedicated styling for js/pages/budget.js V4.0.0.
+   - Keeps the global design system inside css/style.css untouched.
+   - Provides a calm, simple and iPhone-first Budget experience.
+   - Supports balance actions, smart travel advice, suggestions,
+     multi-trip plans, transactions and bottom-sheet dialogs.
+========================================================= */
+
+/* =========================================================
+   1. Page foundation
+========================================================= */
+
+.tic-budget-simple {
+  --budget-navy: #0d213d;
+  --budget-navy-soft: #17304f;
+  --budget-teal: #148f83;
+  --budget-teal-dark: #0d756d;
+  --budget-teal-soft: #e7f7f4;
+  --budget-green: #15966d;
+  --budget-green-soft: #e5f7ef;
+  --budget-blue-soft: #edf4ff;
+  --budget-gold: #b87918;
+  --budget-gold-soft: #fff5dc;
+  --budget-red: #c94b4b;
+  --budget-red-soft: #fff0f0;
+  --budget-ink: #0b1c36;
+  --budget-muted: #74839a;
+  --budget-line: #dce5ef;
+  --budget-surface: #ffffff;
+  --budget-surface-soft: #f6f9fc;
+  --budget-page: #f4f8fb;
+  --budget-shadow: 0 16px 40px rgba(15, 38, 67, 0.08);
+  --budget-shadow-soft: 0 8px 24px rgba(15, 38, 67, 0.06);
+  --budget-radius-xl: 30px;
+  --budget-radius-lg: 24px;
+  --budget-radius-md: 18px;
+  --budget-radius-sm: 14px;
+
+  width: 100%;
+  min-height: 100%;
+  padding:
+    18px
+    16px
+    calc(150px + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(
+      circle at 92% 0%,
+      rgba(20, 143, 131, 0.08),
+      transparent 24%
+    ),
+    linear-gradient(
+      180deg,
+      #f8fbfd 0%,
+      var(--budget-page) 100%
+    );
+  color: var(--budget-ink);
+  direction: rtl;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.tic-budget-simple *,
+.tic-budget-simple *::before,
+.tic-budget-simple *::after {
+  box-sizing: border-box;
+}
+
+.tic-budget-simple button,
+.tic-budget-simple input,
+.tic-budget-simple select,
+.tic-budget-simple textarea {
+  font: inherit;
+}
+
+.tic-budget-simple button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* =========================================================
+   2. Shared headings and sections
+========================================================= */
+
+.tic-budget-simple-section {
+  margin-top: 28px;
+}
+
+.tic-budget-simple-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.tic-budget-simple-heading > div {
+  min-width: 0;
+}
+
+.tic-budget-simple-heading small,
+.tic-budget-simple-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--budget-teal-dark);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tic-budget-simple-heading h2 {
+  margin: 0;
+  color: var(--budget-ink);
+  font-size: clamp(1.48rem, 6.5vw, 2rem);
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.tic-budget-simple-heading p {
+  margin: 7px 0 0;
+  color: var(--budget-muted);
+  font-size: 0.95rem;
+  line-height: 1.75;
+}
+
+.tic-budget-heading-row {
+  align-items: center;
+}
+
+/* =========================================================
+   3. Hero
+========================================================= */
+
+.tic-budget-simple-hero {
+  display: grid;
+  gap: 18px;
+}
+
+.tic-budget-simple-hero-copy {
+  padding: 4px 4px 0;
+}
+
+.tic-budget-simple-hero-copy h1 {
+  margin: 0;
+  color: var(--budget-ink);
+  font-size: clamp(2rem, 9vw, 2.8rem);
+  line-height: 1.12;
+  font-weight: 950;
+  letter-spacing: -0.04em;
+}
+
+.tic-budget-simple-hero-copy p {
+  max-width: 620px;
+  margin: 10px 0 0;
+  color: var(--budget-muted);
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.tic-budget-balance-card {
+  position: relative;
+  overflow: hidden;
+  padding: 24px 20px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--budget-radius-xl);
+  background:
+    radial-gradient(
+      circle at 8% 0%,
+      rgba(46, 204, 181, 0.35),
+      transparent 28%
+    ),
+    linear-gradient(
+      135deg,
+      #159889 0%,
+      #0e796f 42%,
+      #102846 100%
+    );
+  color: #ffffff;
+  box-shadow: 0 22px 52px rgba(10, 48, 73, 0.18);
+}
+
+.tic-budget-balance-card::before {
+  content: "";
+  position: absolute;
+  top: -85px;
+  left: -75px;
+  width: 180px;
+  height: 180px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+}
+
+.tic-budget-balance-card::after {
+  content: "";
+  position: absolute;
+  right: -80px;
+  bottom: -115px;
+  width: 220px;
+  height: 220px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+}
+
+.tic-budget-balance-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.tic-budget-balance-card > small {
+  display: block;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.tic-budget-balance-card > strong {
+  display: block;
+  margin-top: 7px;
+  color: #ffffff;
+  font-size: clamp(2.25rem, 12vw, 4rem);
+  line-height: 1.05;
+  font-weight: 950;
+  letter-spacing: -0.045em;
+}
+
+.tic-budget-primary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 11px;
+  margin-top: 22px;
+}
+
+.tic-budget-balance-card .tic-btn {
+  min-height: 54px;
+}
+
+.tic-budget-balance-card .tic-btn-primary {
+  color: var(--budget-ink);
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+.tic-budget-balance-card .tic-btn-secondary {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.tic-budget-withdraw-link {
+  display: block;
+  width: fit-content;
+  margin: 14px auto 0;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.88rem;
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+/* =========================================================
+   4. Buttons
+========================================================= */
+
+.tic-budget-simple .tic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 12px 17px;
+  border: 1px solid var(--budget-line);
+  border-radius: 16px;
+  background: #ffffff;
+  color: var(--budget-ink);
+  font-size: 0.94rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.tic-budget-simple .tic-btn:active {
+  transform: scale(0.985);
+}
+
+.tic-budget-simple .tic-btn-primary {
+  border-color: var(--budget-teal);
+  background:
+    linear-gradient(
+      135deg,
+      #1ca899,
+      var(--budget-teal)
+    );
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(20, 143, 131, 0.18);
+}
+
+.tic-budget-simple .tic-btn-secondary {
+  border-color: var(--budget-line);
+  background: #ffffff;
+  color: var(--budget-ink);
+}
+
+.tic-budget-simple .tic-btn-danger {
+  border-color: rgba(201, 75, 75, 0.24);
+  background: var(--budget-red-soft);
+  color: var(--budget-red);
+}
+
+.tic-budget-simple .tic-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--budget-muted);
+}
+
+.tic-budget-simple .tic-btn-block {
+  width: 100%;
+}
+
+.tic-budget-simple .tic-btn-small {
+  min-height: 40px;
+  padding: 9px 13px;
+  border-radius: 13px;
+  font-size: 0.86rem;
+}
+
+/* =========================================================
+   5. Main smart advice
+========================================================= */
+
+.tic-budget-main-advice {
+  position: relative;
+  overflow: hidden;
+  padding: 24px 20px;
+  border: 1px solid var(--budget-line);
+  border-radius: var(--budget-radius-xl);
+  background: var(--budget-surface);
+  box-shadow: var(--budget-shadow);
+}
+
+.tic-budget-main-advice::after {
+  content: "";
+  position: absolute;
+  left: -58px;
+  bottom: -70px;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: rgba(20, 143, 131, 0.06);
+}
+
+.tic-budget-main-advice > * {
+  position: relative;
+  z-index: 1;
+}
+
+.tic-budget-main-advice-empty {
+  background:
+    linear-gradient(
+      145deg,
+      #ffffff,
+      #f7fbff
+    );
+}
+
+.tic-budget-main-advice-building {
+  border-color: #e8d8ad;
+  background:
+    linear-gradient(
+      145deg,
+      #ffffff,
+      var(--budget-gold-soft)
+    );
+}
+
+.tic-budget-main-advice-ready {
+  border-color: #cdebe4;
+  background:
+    linear-gradient(
+      145deg,
+      #ffffff,
+      #effbf8
+    );
+}
+
+.tic-budget-main-advice-multi {
+  border-color: #c9d9ee;
+  background:
+    linear-gradient(
+      145deg,
+      #ffffff,
+      var(--budget-blue-soft)
+    );
+}
+
+.tic-budget-main-advice-premium {
+  border-color: rgba(13, 33, 61, 0.16);
+  background:
+    linear-gradient(
+      145deg,
+      #ffffff,
+      #edf2f8
+    );
+}
+
+.tic-budget-advice-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--budget-teal-soft);
+  color: var(--budget-teal-dark);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.tic-budget-main-advice h3 {
+  margin: 14px 0 0;
+  color: var(--budget-ink);
+  font-size: clamp(1.45rem, 7vw, 2.15rem);
+  line-height: 1.38;
+  font-weight: 950;
+  letter-spacing: -0.025em;
+}
+
+.tic-budget-main-advice p {
+  margin: 11px 0 0;
+  color: var(--budget-muted);
+  font-size: 1rem;
+  line-height: 1.85;
+}
+
+.tic-budget-advice-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 11px;
+  margin-top: 20px;
+}
+
+/* =========================================================
+   6. Destination suggestions
+========================================================= */
+
+.tic-budget-destination-list {
+  display: grid;
+  gap: 14px;
+}
+
+.tic-budget-destination-card {
+  padding: 20px;
+  border: 1px solid var(--budget-line);
+  border-radius: var(--budget-radius-lg);
+  background: #ffffff;
+  box-shadow: var(--budget-shadow-soft);
+}
+
+.tic-budget-destination-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.tic-budget-destination-head > div {
+  min-width: 0;
+}
+
+.tic-budget-destination-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--budget-green-soft);
+  color: var(--budget-green);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.tic-budget-destination-head h3 {
+  margin: 11px 0 0;
+  color: var(--budget-ink);
+  font-size: 1.35rem;
+  line-height: 1.32;
+  font-weight: 950;
+}
+
+.tic-budget-destination-head p {
+  margin: 5px 0 0;
+  color: var(--budget-muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.tic-budget-destination-head > strong {
+  flex: 0 0 auto;
+  color: var(--budget-ink);
+  font-size: 1rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.tic-budget-destination-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 15px;
+}
+
+.tic-budget-destination-tags span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 31px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #eef3f8;
+  color: #44546b;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.tic-budget-destination-actions {
+  display: grid;
+  grid-template-columns: 1.25fr 0.9fr;
+  gap: 10px;
+  margin-top: 17px;
+}
+
+/* =========================================================
+   7. Multi-trip card
+========================================================= */
+
+.tic-budget-multi-card {
+  overflow: hidden;
+  padding: 20px;
+  border-radius: var(--budget-radius-xl);
+  background:
+    radial-gradient(
+      circle at 10% 5%,
+      rgba(57, 194, 176, 0.28),
+      transparent 24%
+    ),
+    linear-gradient(
+      145deg,
+      #102846,
+      #0d213d
+    );
+  color: #ffffff;
+  box-shadow: 0 20px 46px rgba(13, 33, 61, 0.18);
+}
+
+.tic-budget-multi-trips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 11px;
+}
+
+.tic-budget-multi-trips > div {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tic-budget-multi-trips small {
+  display: block;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.tic-budget-multi-trips strong {
+  display: block;
+  margin-top: 6px;
+  color: #ffffff;
+  font-size: 1.04rem;
+  line-height: 1.35;
+  font-weight: 950;
+}
+
+.tic-budget-multi-trips span {
+  display: block;
+  margin-top: 8px;
+  color: #9cf0e5;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.tic-budget-multi-summary {
+  margin-top: 15px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tic-budget-multi-summary span,
+.tic-budget-multi-summary small {
+  display: block;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.tic-budget-multi-summary strong {
+  display: block;
+  margin: 4px 0;
+  color: #ffffff;
+  font-size: 1.65rem;
+  font-weight: 950;
+}
+
+.tic-budget-multi-actions {
+  margin-top: 14px;
+}
+
+.tic-budget-multi-card .tic-btn-primary {
+  width: 100%;
+  border-color: #ffffff;
+  background: #ffffff;
+  color: var(--budget-ink);
+  box-shadow: none;
+}
+
+/* =========================================================
+   8. Transactions
+========================================================= */
+
+.tic-budget-transactions,
+.tic-budget-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tic-budget-transaction {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 76px;
+  padding: 14px;
+  border: 1px solid var(--budget-line);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(15, 38, 67, 0.04);
+}
+
+.tic-budget-transaction-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  font-size: 1.1rem;
+  font-weight: 950;
+}
+
+.tic-budget-transaction-positive {
+  background: var(--budget-green-soft);
+  color: var(--budget-green);
+}
+
+.tic-budget-transaction-neutral {
+  background: var(--budget-gold-soft);
+  color: var(--budget-gold);
+}
+
+.tic-budget-transaction-expense {
+  background: var(--budget-red-soft);
+  color: var(--budget-red);
+}
+
+.tic-budget-transaction > div {
+  min-width: 0;
+}
+
+.tic-budget-transaction strong {
+  display: block;
+  overflow: hidden;
+  color: var(--budget-ink);
+  font-size: 0.96rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-budget-transaction small {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  color: var(--budget-muted);
+  font-size: 0.79rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tic-budget-transaction b {
+  color: var(--budget-ink);
+  font-size: 0.92rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   9. Empty state and mini summary
+========================================================= */
+
+.tic-budget-empty-card {
+  padding: 24px 20px;
+  border: 1px dashed #cdd9e6;
+  border-radius: var(--budget-radius-lg);
+  background: rgba(255, 255, 255, 0.68);
+  text-align: center;
+}
+
+.tic-budget-empty-card h3 {
+  margin: 0;
+  color: var(--budget-ink);
+  font-size: 1.15rem;
+  font-weight: 950;
+}
+
+.tic-budget-empty-card p {
+  margin: 8px 0 0;
+  color: var(--budget-muted);
+  font-size: 0.91rem;
+  line-height: 1.7;
+}
+
+.tic-budget-mini-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.tic-budget-mini-summary article {
+  min-width: 0;
+  padding: 15px 11px;
+  border: 1px solid var(--budget-line);
+  border-radius: 18px;
+  background: #ffffff;
+  text-align: center;
+  box-shadow: var(--budget-shadow-soft);
+}
+
+.tic-budget-mini-summary small {
+  display: block;
+  color: var(--budget-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  font-weight: 750;
+}
+
+.tic-budget-mini-summary strong {
+  display: block;
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--budget-ink);
+  font-size: 0.9rem;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   10. Dialog / bottom sheet
+========================================================= */
+
+body.tic-budget-dialog-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.tic-budget-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding:
+    12px
+    12px
+    calc(12px + env(safe-area-inset-bottom));
+  background: rgba(7, 19, 35, 0.46);
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+  animation: tic-budget-fade-in 180ms ease both;
+}
+
+.tic-budget-dialog {
+  width: min(100%, 620px);
+  max-height: min(88dvh, 760px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 30px 30px 24px 24px;
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(5, 21, 39, 0.26);
+  animation: tic-budget-sheet-up 220ms ease both;
+}
+
+.tic-budget-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 20px 20px 14px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.tic-budget-dialog-head h2 {
+  margin: 0;
+  color: var(--budget-ink);
+  font-size: 1.35rem;
+  line-height: 1.3;
+  font-weight: 950;
+}
+
+.tic-budget-dialog-head p {
+  margin: 6px 0 0;
+  color: var(--budget-muted);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.tic-budget-dialog-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: #eef3f7;
+  color: var(--budget-ink);
+  font-size: 1.55rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tic-budget-dialog-body {
+  max-height: calc(88dvh - 170px);
+  overflow-y: auto;
+  padding: 18px 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tic-budget-dialog-footer {
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  gap: 10px;
+  padding:
+    14px
+    20px
+    calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid #edf1f5;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.tic-budget-form {
+  display: grid;
+  gap: 14px;
+}
+
+.tic-budget-field {
+  display: grid;
+  gap: 8px;
+}
+
+.tic-budget-field > span {
+  color: var(--budget-ink);
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.tic-budget-field input,
+.tic-budget-field select,
+.tic-budget-field textarea {
+  width: 100%;
+  min-height: 52px;
+  padding: 13px 14px;
+  border: 1px solid #d7e1eb;
+  border-radius: 15px;
+  outline: none;
+  background: #f9fbfd;
+  color: var(--budget-ink);
+  font-size: 16px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.tic-budget-field textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.tic-budget-field input:focus,
+.tic-budget-field select:focus,
+.tic-budget-field textarea:focus {
+  border-color: var(--budget-teal);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(20, 143, 131, 0.1);
+}
+
+.tic-budget-destination-detail {
+  text-align: center;
+}
+
+.tic-budget-destination-detail > span {
+  display: inline-flex;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--budget-teal-soft);
+  color: var(--budget-teal-dark);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.tic-budget-destination-detail h3 {
+  margin: 16px 0 0;
+  color: var(--budget-ink);
+  font-size: 2rem;
+  font-weight: 950;
+}
+
+.tic-budget-destination-detail p {
+  margin: 10px 0 0;
+  color: var(--budget-muted);
+  font-size: 0.96rem;
+  line-height: 1.8;
+}
+
+.tic-budget-destination-detail .tic-budget-destination-tags {
+  justify-content: center;
+}
+
+.tic-budget-difference-box,
+.tic-budget-ready-box {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 18px;
+}
+
+.tic-budget-difference-box {
+  background: var(--budget-gold-soft);
+  color: var(--budget-gold);
+}
+
+.tic-budget-difference-box small,
+.tic-budget-difference-box strong {
+  display: block;
+}
+
+.tic-budget-difference-box strong {
+  margin-top: 4px;
+  font-size: 1.3rem;
+  font-weight: 950;
+}
+
+.tic-budget-ready-box {
+  background: var(--budget-green-soft);
+  color: var(--budget-green);
+  font-weight: 900;
+}
+
+/* =========================================================
+   11. Responsive refinements
+========================================================= */
+
+@media (min-width: 680px) {
+  .tic-budget-simple {
+    padding-inline: 24px;
+  }
+
+  .tic-budget-simple-hero {
+    grid-template-columns: minmax(0, 0.85fr) minmax(320px, 1.15fr);
+    align-items: center;
+  }
+
+  .tic-budget-destination-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tic-budget-destination-card:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 430px) {
+  .tic-budget-simple {
+    padding-inline: 12px;
+  }
+
+  .tic-budget-balance-card {
+    padding-inline: 17px;
+  }
+
+  .tic-budget-primary-actions,
+  .tic-budget-advice-actions,
+  .tic-budget-destination-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .tic-budget-destination-head {
+    gap: 10px;
+  }
+
+  .tic-budget-destination-head > strong {
+    font-size: 0.9rem;
+  }
+
+  .tic-budget-mini-summary {
+    gap: 7px;
+  }
+
+  .tic-budget-mini-summary article {
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .tic-budget-primary-actions,
+  .tic-budget-advice-actions,
+  .tic-budget-destination-actions,
+  .tic-budget-dialog-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .tic-budget-multi-trips {
+    grid-template-columns: 1fr;
+  }
+
+  .tic-budget-mini-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .tic-budget-transaction {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .tic-budget-transaction b {
+    grid-column: 2;
+  }
+}
+
+/* =========================================================
+   12. Accessibility and reduced motion
+========================================================= */
+
+.tic-budget-simple .tic-btn:focus-visible,
+.tic-budget-withdraw-link:focus-visible,
+.tic-budget-dialog-close:focus-visible {
+  outline: 3px solid rgba(20, 143, 131, 0.32);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tic-budget-simple *,
+  .tic-budget-simple *::before,
+  .tic-budget-simple *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* =========================================================
+   13. Animations
+========================================================= */
+
+@keyframes tic-budget-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tic-budget-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
