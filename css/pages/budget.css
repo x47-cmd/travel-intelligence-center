@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Simple Travel Budget Advisor Styles V4.0.0
+   Simple Travel Budget Advisor Styles V4.1.0
 
    File Path:
    css/pages/budget.css
@@ -13,9 +13,11 @@
    Purpose:
    - Dedicated styling for js/pages/budget.js V4.0.0.
    - Keeps the global design system inside css/style.css untouched.
-   - Provides a calm, simple and iPhone-first Budget experience.
-   - Supports balance actions, smart travel advice, suggestions,
-     multi-trip plans, transactions and bottom-sheet dialogs.
+   - Refines the Budget page into a lighter, more compact iPhone-first UI.
+   - Makes destination suggestions horizontally swipeable.
+   - Keeps one clear balance action with withdrawal as a secondary link.
+   - Supports smart travel advice, suggestions, multi-trip plans,
+     transactions and bottom-sheet dialogs.
 ========================================================= */
 
 /* =========================================================
@@ -41,24 +43,24 @@
   --budget-surface: #ffffff;
   --budget-surface-soft: #f6f9fc;
   --budget-page: #f4f8fb;
-  --budget-shadow: 0 16px 40px rgba(15, 38, 67, 0.08);
-  --budget-shadow-soft: 0 8px 24px rgba(15, 38, 67, 0.06);
-  --budget-radius-xl: 30px;
-  --budget-radius-lg: 24px;
-  --budget-radius-md: 18px;
-  --budget-radius-sm: 14px;
+  --budget-shadow: 0 12px 30px rgba(15, 38, 67, 0.07);
+  --budget-shadow-soft: 0 6px 18px rgba(15, 38, 67, 0.05);
+  --budget-radius-xl: 26px;
+  --budget-radius-lg: 22px;
+  --budget-radius-md: 17px;
+  --budget-radius-sm: 13px;
 
   width: 100%;
   min-height: 100%;
   padding:
-    18px
-    16px
-    calc(150px + env(safe-area-inset-bottom));
+    14px
+    14px
+    calc(138px + env(safe-area-inset-bottom));
   background:
     radial-gradient(
       circle at 92% 0%,
-      rgba(20, 143, 131, 0.08),
-      transparent 24%
+      rgba(20, 143, 131, 0.065),
+      transparent 23%
     ),
     linear-gradient(
       180deg,
@@ -93,15 +95,16 @@
 ========================================================= */
 
 .tic-budget-simple-section {
-  margin-top: 28px;
+  margin-top: 22px;
 }
 
 .tic-budget-simple-heading {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 11px;
+  padding-inline: 2px;
 }
 
 .tic-budget-simple-heading > div {
@@ -111,9 +114,9 @@
 .tic-budget-simple-heading small,
 .tic-budget-simple-eyebrow {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
   color: var(--budget-teal-dark);
-  font-size: 0.74rem;
+  font-size: 0.7rem;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -122,16 +125,16 @@
 .tic-budget-simple-heading h2 {
   margin: 0;
   color: var(--budget-ink);
-  font-size: clamp(1.48rem, 6.5vw, 2rem);
-  line-height: 1.25;
+  font-size: clamp(1.38rem, 6vw, 1.85rem);
+  line-height: 1.22;
   font-weight: 900;
 }
 
 .tic-budget-simple-heading p {
-  margin: 7px 0 0;
+  margin: 5px 0 0;
   color: var(--budget-muted);
-  font-size: 0.95rem;
-  line-height: 1.75;
+  font-size: 0.88rem;
+  line-height: 1.62;
 }
 
 .tic-budget-heading-row {
@@ -144,71 +147,72 @@
 
 .tic-budget-simple-hero {
   display: grid;
-  gap: 18px;
+  gap: 13px;
 }
 
 .tic-budget-simple-hero-copy {
-  padding: 4px 4px 0;
+  padding: 2px 3px 0;
 }
 
 .tic-budget-simple-hero-copy h1 {
   margin: 0;
   color: var(--budget-ink);
-  font-size: clamp(2rem, 9vw, 2.8rem);
-  line-height: 1.12;
+  font-size: clamp(1.88rem, 8.3vw, 2.55rem);
+  line-height: 1.1;
   font-weight: 950;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.035em;
 }
 
 .tic-budget-simple-hero-copy p {
   max-width: 620px;
-  margin: 10px 0 0;
+  margin: 7px 0 0;
   color: var(--budget-muted);
-  font-size: 1rem;
-  line-height: 1.8;
+  font-size: 0.93rem;
+  line-height: 1.7;
 }
 
 .tic-budget-balance-card {
   position: relative;
   overflow: hidden;
-  padding: 24px 20px 18px;
+  min-height: 0;
+  padding: 18px 18px 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--budget-radius-xl);
+  border-radius: 25px;
   background:
     radial-gradient(
       circle at 8% 0%,
-      rgba(46, 204, 181, 0.35),
-      transparent 28%
+      rgba(46, 204, 181, 0.28),
+      transparent 27%
     ),
     linear-gradient(
       135deg,
       #159889 0%,
-      #0e796f 42%,
+      #0e796f 45%,
       #102846 100%
     );
   color: #ffffff;
-  box-shadow: 0 22px 52px rgba(10, 48, 73, 0.18);
+  box-shadow: 0 15px 34px rgba(10, 48, 73, 0.15);
 }
 
 .tic-budget-balance-card::before {
   content: "";
   position: absolute;
-  top: -85px;
-  left: -75px;
-  width: 180px;
-  height: 180px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  top: -78px;
+  left: -72px;
+  width: 155px;
+  height: 155px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 50%;
 }
 
 .tic-budget-balance-card::after {
   content: "";
   position: absolute;
-  right: -80px;
-  bottom: -115px;
-  width: 220px;
-  height: 220px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  right: -74px;
+  bottom: -108px;
+  width: 190px;
+  height: 190px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 50%;
 }
 
@@ -219,36 +223,47 @@
 
 .tic-budget-balance-card > small {
   display: block;
-  color: rgba(255, 255, 255, 0.74);
-  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.82rem;
   font-weight: 750;
 }
 
 .tic-budget-balance-card > strong {
   display: block;
-  margin-top: 7px;
+  margin-top: 3px;
   color: #ffffff;
-  font-size: clamp(2.25rem, 12vw, 4rem);
-  line-height: 1.05;
+  font-size: clamp(2rem, 10vw, 3.2rem);
+  line-height: 1.02;
   font-weight: 950;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.04em;
 }
 
 .tic-budget-primary-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 11px;
-  margin-top: 22px;
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin-top: 15px;
+}
+
+.tic-budget-primary-actions .tic-btn {
+  width: 100%;
+}
+
+/* Hide the old "Add Expense" button from the balance card.
+   Withdrawal remains available through the dedicated link below. */
+.tic-budget-primary-actions .tic-btn-secondary {
+  display: none;
 }
 
 .tic-budget-balance-card .tic-btn {
-  min-height: 54px;
+  min-height: 47px;
 }
 
 .tic-budget-balance-card .tic-btn-primary {
   color: var(--budget-ink);
   background: #ffffff;
   border-color: #ffffff;
+  box-shadow: 0 8px 18px rgba(4, 29, 48, 0.12);
 }
 
 .tic-budget-balance-card .tic-btn-secondary {
@@ -260,13 +275,13 @@
 .tic-budget-withdraw-link {
   display: block;
   width: fit-content;
-  margin: 14px auto 0;
-  padding: 7px 13px;
+  margin: 9px auto 0;
+  padding: 5px 10px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: rgba(255, 255, 255, 0.82);
-  font-size: 0.88rem;
+  font-size: 0.81rem;
   font-weight: 850;
   text-decoration: underline;
   text-underline-offset: 4px;
@@ -281,14 +296,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 48px;
-  padding: 12px 17px;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 15px;
   border: 1px solid var(--budget-line);
-  border-radius: 16px;
+  border-radius: 14px;
   background: #ffffff;
   color: var(--budget-ink);
-  font-size: 0.94rem;
+  font-size: 0.89rem;
   font-weight: 900;
   line-height: 1.2;
   text-align: center;
@@ -313,7 +328,7 @@
       var(--budget-teal)
     );
   color: #ffffff;
-  box-shadow: 0 10px 22px rgba(20, 143, 131, 0.18);
+  box-shadow: 0 8px 18px rgba(20, 143, 131, 0.16);
 }
 
 .tic-budget-simple .tic-btn-secondary {
@@ -339,10 +354,10 @@
 }
 
 .tic-budget-simple .tic-btn-small {
-  min-height: 40px;
-  padding: 9px 13px;
-  border-radius: 13px;
-  font-size: 0.86rem;
+  min-height: 37px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 0.82rem;
 }
 
 /* =========================================================
@@ -352,9 +367,9 @@
 .tic-budget-main-advice {
   position: relative;
   overflow: hidden;
-  padding: 24px 20px;
+  padding: 19px 17px;
   border: 1px solid var(--budget-line);
-  border-radius: var(--budget-radius-xl);
+  border-radius: 24px;
   background: var(--budget-surface);
   box-shadow: var(--budget-shadow);
 }
@@ -362,12 +377,12 @@
 .tic-budget-main-advice::after {
   content: "";
   position: absolute;
-  left: -58px;
-  bottom: -70px;
-  width: 160px;
-  height: 160px;
+  left: -62px;
+  bottom: -78px;
+  width: 145px;
+  height: 145px;
   border-radius: 50%;
-  background: rgba(20, 143, 131, 0.06);
+  background: rgba(20, 143, 131, 0.05);
 }
 
 .tic-budget-main-advice > * {
@@ -380,7 +395,7 @@
     linear-gradient(
       145deg,
       #ffffff,
-      #f7fbff
+      #f8fbfd
     );
 }
 
@@ -427,36 +442,36 @@
 .tic-budget-advice-eyebrow {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
-  padding: 7px 12px;
+  min-height: 29px;
+  padding: 6px 10px;
   border-radius: 999px;
   background: var(--budget-teal-soft);
   color: var(--budget-teal-dark);
-  font-size: 0.78rem;
+  font-size: 0.73rem;
   font-weight: 900;
 }
 
 .tic-budget-main-advice h3 {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   color: var(--budget-ink);
-  font-size: clamp(1.45rem, 7vw, 2.15rem);
-  line-height: 1.38;
+  font-size: clamp(1.32rem, 6.2vw, 1.85rem);
+  line-height: 1.34;
   font-weight: 950;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
 }
 
 .tic-budget-main-advice p {
-  margin: 11px 0 0;
+  margin: 8px 0 0;
   color: var(--budget-muted);
-  font-size: 1rem;
-  line-height: 1.85;
+  font-size: 0.91rem;
+  line-height: 1.7;
 }
 
 .tic-budget-advice-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 11px;
-  margin-top: 20px;
+  gap: 9px;
+  margin-top: 15px;
 }
 
 /* =========================================================
@@ -464,23 +479,42 @@
 ========================================================= */
 
 .tic-budget-destination-list {
-  display: grid;
-  gap: 14px;
+  display: flex;
+  gap: 11px;
+  margin-inline: -14px;
+  padding:
+    2px
+    14px
+    8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 14px;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.tic-budget-destination-list::-webkit-scrollbar {
+  display: none;
 }
 
 .tic-budget-destination-card {
-  padding: 20px;
+  flex: 0 0 min(84vw, 330px);
+  width: min(84vw, 330px);
+  padding: 16px;
   border: 1px solid var(--budget-line);
-  border-radius: var(--budget-radius-lg);
+  border-radius: 22px;
   background: #ffffff;
   box-shadow: var(--budget-shadow-soft);
+  scroll-snap-align: start;
 }
 
 .tic-budget-destination-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 15px;
+  gap: 11px;
 }
 
 .tic-budget-destination-head > div {
@@ -490,62 +524,69 @@
 .tic-budget-destination-label {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 6px 11px;
+  min-height: 27px;
+  padding: 5px 9px;
   border-radius: 999px;
   background: var(--budget-green-soft);
   color: var(--budget-green);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 900;
 }
 
 .tic-budget-destination-head h3 {
-  margin: 11px 0 0;
+  margin: 8px 0 0;
   color: var(--budget-ink);
-  font-size: 1.35rem;
-  line-height: 1.32;
+  font-size: 1.18rem;
+  line-height: 1.28;
   font-weight: 950;
 }
 
 .tic-budget-destination-head p {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   color: var(--budget-muted);
-  font-size: 0.92rem;
-  line-height: 1.6;
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .tic-budget-destination-head > strong {
   flex: 0 0 auto;
   color: var(--budget-ink);
-  font-size: 1rem;
+  font-size: 0.91rem;
   font-weight: 950;
   white-space: nowrap;
 }
 
 .tic-budget-destination-tags {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 15px;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-top: 11px;
+  overflow: hidden;
 }
 
 .tic-budget-destination-tags span {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  min-height: 31px;
-  padding: 6px 11px;
+  min-height: 28px;
+  padding: 5px 9px;
   border-radius: 999px;
   background: #eef3f8;
   color: #44546b;
-  font-size: 0.8rem;
+  font-size: 0.73rem;
   font-weight: 800;
 }
 
 .tic-budget-destination-actions {
   display: grid;
-  grid-template-columns: 1.25fr 0.9fr;
-  gap: 10px;
-  margin-top: 17px;
+  grid-template-columns: 1.18fr 0.82fr;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.tic-budget-destination-actions .tic-btn {
+  min-height: 42px;
+  padding-inline: 11px;
 }
 
 /* =========================================================
@@ -554,12 +595,12 @@
 
 .tic-budget-multi-card {
   overflow: hidden;
-  padding: 20px;
-  border-radius: var(--budget-radius-xl);
+  padding: 17px;
+  border-radius: 24px;
   background:
     radial-gradient(
       circle at 10% 5%,
-      rgba(57, 194, 176, 0.28),
+      rgba(57, 194, 176, 0.24),
       transparent 24%
     ),
     linear-gradient(
@@ -568,52 +609,52 @@
       #0d213d
     );
   color: #ffffff;
-  box-shadow: 0 20px 46px rgba(13, 33, 61, 0.18);
+  box-shadow: 0 15px 34px rgba(13, 33, 61, 0.16);
 }
 
 .tic-budget-multi-trips {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 11px;
+  gap: 9px;
 }
 
 .tic-budget-multi-trips > div {
   min-width: 0;
-  padding: 16px;
+  padding: 13px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.075);
 }
 
 .tic-budget-multi-trips small {
   display: block;
   color: rgba(255, 255, 255, 0.65);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 800;
 }
 
 .tic-budget-multi-trips strong {
   display: block;
-  margin-top: 6px;
+  margin-top: 5px;
   color: #ffffff;
-  font-size: 1.04rem;
-  line-height: 1.35;
+  font-size: 0.95rem;
+  line-height: 1.32;
   font-weight: 950;
 }
 
 .tic-budget-multi-trips span {
   display: block;
-  margin-top: 8px;
+  margin-top: 6px;
   color: #9cf0e5;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 900;
 }
 
 .tic-budget-multi-summary {
-  margin-top: 15px;
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08);
+  margin-top: 11px;
+  padding: 13px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.075);
 }
 
 .tic-budget-multi-summary span,
@@ -624,14 +665,14 @@
 
 .tic-budget-multi-summary strong {
   display: block;
-  margin: 4px 0;
+  margin: 3px 0;
   color: #ffffff;
-  font-size: 1.65rem;
+  font-size: 1.42rem;
   font-weight: 950;
 }
 
 .tic-budget-multi-actions {
-  margin-top: 14px;
+  margin-top: 11px;
 }
 
 .tic-budget-multi-card .tic-btn-primary {
@@ -649,29 +690,29 @@
 .tic-budget-transactions,
 .tic-budget-history-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .tic-budget-transaction {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  min-height: 76px;
-  padding: 14px;
+  gap: 10px;
+  min-height: 66px;
+  padding: 11px 12px;
   border: 1px solid var(--budget-line);
-  border-radius: 18px;
+  border-radius: 16px;
   background: #ffffff;
-  box-shadow: 0 6px 16px rgba(15, 38, 67, 0.04);
+  box-shadow: 0 4px 13px rgba(15, 38, 67, 0.035);
 }
 
 .tic-budget-transaction-icon {
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 15px;
-  font-size: 1.1rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  font-size: 1rem;
   font-weight: 950;
 }
 
@@ -698,7 +739,7 @@
   display: block;
   overflow: hidden;
   color: var(--budget-ink);
-  font-size: 0.96rem;
+  font-size: 0.9rem;
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -707,16 +748,16 @@
 .tic-budget-transaction small {
   display: block;
   overflow: hidden;
-  margin-top: 5px;
+  margin-top: 3px;
   color: var(--budget-muted);
-  font-size: 0.79rem;
+  font-size: 0.74rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tic-budget-transaction b {
   color: var(--budget-ink);
-  font-size: 0.92rem;
+  font-size: 0.85rem;
   font-weight: 950;
   white-space: nowrap;
 }
@@ -726,39 +767,39 @@
 ========================================================= */
 
 .tic-budget-empty-card {
-  padding: 24px 20px;
+  padding: 18px 16px;
   border: 1px dashed #cdd9e6;
-  border-radius: var(--budget-radius-lg);
-  background: rgba(255, 255, 255, 0.68);
+  border-radius: 21px;
+  background: rgba(255, 255, 255, 0.66);
   text-align: center;
 }
 
 .tic-budget-empty-card h3 {
   margin: 0;
   color: var(--budget-ink);
-  font-size: 1.15rem;
+  font-size: 1.02rem;
   font-weight: 950;
 }
 
 .tic-budget-empty-card p {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--budget-muted);
-  font-size: 0.91rem;
-  line-height: 1.7;
+  font-size: 0.84rem;
+  line-height: 1.6;
 }
 
 .tic-budget-mini-summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 28px;
+  gap: 7px;
+  margin-top: 14px;
 }
 
 .tic-budget-mini-summary article {
   min-width: 0;
-  padding: 15px 11px;
+  padding: 11px 7px;
   border: 1px solid var(--budget-line);
-  border-radius: 18px;
+  border-radius: 15px;
   background: #ffffff;
   text-align: center;
   box-shadow: var(--budget-shadow-soft);
@@ -767,17 +808,17 @@
 .tic-budget-mini-summary small {
   display: block;
   color: var(--budget-muted);
-  font-size: 0.72rem;
-  line-height: 1.45;
+  font-size: 0.65rem;
+  line-height: 1.35;
   font-weight: 750;
 }
 
 .tic-budget-mini-summary strong {
   display: block;
-  margin-top: 8px;
+  margin-top: 5px;
   overflow: hidden;
   color: var(--budget-ink);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 950;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -814,7 +855,7 @@ body.tic-budget-dialog-open {
   max-height: min(88dvh, 760px);
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 30px 30px 24px 24px;
+  border-radius: 28px 28px 22px 22px;
   background: #ffffff;
   box-shadow: 0 28px 80px rgba(5, 21, 39, 0.26);
   animation: tic-budget-sheet-up 220ms ease both;
@@ -824,73 +865,73 @@ body.tic-budget-dialog-open {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 14px;
-  padding: 20px 20px 14px;
+  gap: 13px;
+  padding: 18px 18px 13px;
   border-bottom: 1px solid #edf1f5;
 }
 
 .tic-budget-dialog-head h2 {
   margin: 0;
   color: var(--budget-ink);
-  font-size: 1.35rem;
+  font-size: 1.25rem;
   line-height: 1.3;
   font-weight: 950;
 }
 
 .tic-budget-dialog-head p {
-  margin: 6px 0 0;
+  margin: 5px 0 0;
   color: var(--budget-muted);
-  font-size: 0.88rem;
-  line-height: 1.65;
+  font-size: 0.83rem;
+  line-height: 1.58;
 }
 
 .tic-budget-dialog-close {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 39px;
+  height: 39px;
   border: 0;
   border-radius: 50%;
   background: #eef3f7;
   color: var(--budget-ink);
-  font-size: 1.55rem;
+  font-size: 1.45rem;
   line-height: 1;
   cursor: pointer;
 }
 
 .tic-budget-dialog-body {
-  max-height: calc(88dvh - 170px);
+  max-height: calc(88dvh - 164px);
   overflow-y: auto;
-  padding: 18px 20px;
+  padding: 16px 18px;
   -webkit-overflow-scrolling: touch;
 }
 
 .tic-budget-dialog-footer {
   display: grid;
   grid-template-columns: 0.85fr 1.15fr;
-  gap: 10px;
+  gap: 9px;
   padding:
-    14px
-    20px
-    calc(14px + env(safe-area-inset-bottom));
+    13px
+    18px
+    calc(13px + env(safe-area-inset-bottom));
   border-top: 1px solid #edf1f5;
   background: rgba(255, 255, 255, 0.96);
 }
 
 .tic-budget-form {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .tic-budget-field {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .tic-budget-field > span {
   color: var(--budget-ink);
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   font-weight: 900;
 }
 
@@ -898,10 +939,10 @@ body.tic-budget-dialog-open {
 .tic-budget-field select,
 .tic-budget-field textarea {
   width: 100%;
-  min-height: 52px;
-  padding: 13px 14px;
+  min-height: 49px;
+  padding: 12px 13px;
   border: 1px solid #d7e1eb;
-  border-radius: 15px;
+  border-radius: 14px;
   outline: none;
   background: #f9fbfd;
   color: var(--budget-ink);
@@ -913,7 +954,7 @@ body.tic-budget-dialog-open {
 }
 
 .tic-budget-field textarea {
-  min-height: 110px;
+  min-height: 100px;
   resize: vertical;
 }
 
@@ -931,37 +972,39 @@ body.tic-budget-dialog-open {
 
 .tic-budget-destination-detail > span {
   display: inline-flex;
-  padding: 7px 12px;
+  padding: 6px 11px;
   border-radius: 999px;
   background: var(--budget-teal-soft);
   color: var(--budget-teal-dark);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 900;
 }
 
 .tic-budget-destination-detail h3 {
-  margin: 16px 0 0;
+  margin: 13px 0 0;
   color: var(--budget-ink);
-  font-size: 2rem;
+  font-size: 1.75rem;
   font-weight: 950;
 }
 
 .tic-budget-destination-detail p {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--budget-muted);
-  font-size: 0.96rem;
-  line-height: 1.8;
+  font-size: 0.9rem;
+  line-height: 1.7;
 }
 
 .tic-budget-destination-detail .tic-budget-destination-tags {
   justify-content: center;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 .tic-budget-difference-box,
 .tic-budget-ready-box {
-  margin-top: 18px;
-  padding: 16px;
-  border-radius: 18px;
+  margin-top: 15px;
+  padding: 14px;
+  border-radius: 16px;
 }
 
 .tic-budget-difference-box {
@@ -975,8 +1018,8 @@ body.tic-budget-dialog-open {
 }
 
 .tic-budget-difference-box strong {
-  margin-top: 4px;
-  font-size: 1.3rem;
+  margin-top: 3px;
+  font-size: 1.18rem;
   font-weight: 950;
 }
 
@@ -996,16 +1039,19 @@ body.tic-budget-dialog-open {
   }
 
   .tic-budget-simple-hero {
-    grid-template-columns: minmax(0, 0.85fr) minmax(320px, 1.15fr);
+    grid-template-columns: minmax(0, 0.9fr) minmax(300px, 1.1fr);
     align-items: center;
   }
 
   .tic-budget-destination-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-inline: -24px;
+    padding-inline: 24px;
+    scroll-padding-inline: 24px;
   }
 
-  .tic-budget-destination-card:first-child {
-    grid-column: 1 / -1;
+  .tic-budget-destination-card {
+    flex-basis: 330px;
+    width: 330px;
   }
 }
 
@@ -1015,34 +1061,38 @@ body.tic-budget-dialog-open {
   }
 
   .tic-budget-balance-card {
-    padding-inline: 17px;
+    padding-inline: 16px;
   }
 
-  .tic-budget-primary-actions,
+  .tic-budget-destination-list {
+    margin-inline: -12px;
+    padding-inline: 12px;
+    scroll-padding-inline: 12px;
+  }
+
   .tic-budget-advice-actions,
   .tic-budget-destination-actions {
     grid-template-columns: 1fr 1fr;
   }
 
   .tic-budget-destination-head {
-    gap: 10px;
+    gap: 8px;
   }
 
   .tic-budget-destination-head > strong {
-    font-size: 0.9rem;
+    font-size: 0.86rem;
   }
 
   .tic-budget-mini-summary {
-    gap: 7px;
+    gap: 6px;
   }
 
   .tic-budget-mini-summary article {
-    padding-inline: 8px;
+    padding-inline: 6px;
   }
 }
 
 @media (max-width: 360px) {
-  .tic-budget-primary-actions,
   .tic-budget-advice-actions,
   .tic-budget-destination-actions,
   .tic-budget-dialog-footer {
@@ -1058,11 +1108,16 @@ body.tic-budget-dialog-open {
   }
 
   .tic-budget-transaction {
-    grid-template-columns: 42px minmax(0, 1fr);
+    grid-template-columns: 38px minmax(0, 1fr);
   }
 
   .tic-budget-transaction b {
     grid-column: 2;
+  }
+
+  .tic-budget-destination-card {
+    flex-basis: 88vw;
+    width: 88vw;
   }
 }
 
