@@ -1,0 +1,1729 @@
+/* =========================================================
+   Travel Intelligence Center
+   Guide Intelligence Platform UI V4.4.0
+
+   File Path:
+   css/pages/guide.css
+
+   Installation:
+   - Create the folder: css/pages
+   - Save this file as: css/pages/guide.css
+   - Link it AFTER css/style.css inside index.html:
+
+     <link rel="stylesheet" href="css/style.css">
+     <link rel="stylesheet" href="css/pages/guide.css">
+
+   Purpose:
+   - Dedicated styling for js/pages/guide.js V4.4.0.
+   - Keeps Guide-specific styling out of the large global stylesheet.
+   - Replaces the long vertical recommendation list with a compact horizontal rail.
+   - Improves iPhone scrolling, touch handling, card density and page length.
+   - Preserves the country picker bottom sheet, country details, wishlist,
+     annual plans, profile, itinerary and all Guide interactions.
+   - Fully scoped to .guide-page and Guide sheet portal selectors.
+========================================================= */
+
+/* =========================================================
+   1. Guide Page Foundation
+========================================================= */
+
+.guide-page {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+  max-width: 920px;
+  margin-inline: auto;
+  padding-bottom: 8px;
+  direction: rtl;
+  contain: layout style;
+}
+
+.guide-page,
+.guide-page *,
+.guide-page *::before,
+.guide-page *::after {
+  min-width: 0;
+}
+
+.guide-page button,
+.guide-page [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.guide-page input,
+.guide-page select,
+.guide-page textarea {
+  font-size: 16px;
+}
+
+.guide-page .tic-card {
+  border-radius: 20px;
+  box-shadow: var(--tic-shadow-xs);
+}
+
+.guide-page .tic-card-body {
+  padding: 14px;
+}
+
+.guide-page .tic-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--tic-border-strong);
+  border-radius: 14px;
+  background: #ffffff;
+  color: var(--tic-text);
+  font-size: 0.8rem;
+  line-height: 1.2;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    transform var(--tic-transition-fast),
+    border-color var(--tic-transition-fast),
+    box-shadow var(--tic-transition-fast),
+    background var(--tic-transition-fast);
+}
+
+.guide-page .tic-button.is-primary {
+  border-color: var(--tic-primary);
+  background:
+    linear-gradient(
+      135deg,
+      var(--tic-primary-light),
+      var(--tic-primary)
+    );
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.2);
+  color: #ffffff;
+}
+
+.guide-page .tic-button.is-block {
+  width: 100%;
+}
+
+.guide-page .tic-button:active {
+  transform: scale(0.98);
+}
+
+.guide-page .guide-button-compact {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 13px;
+  font-size: 0.75rem;
+}
+
+/* =========================================================
+   2. Hero
+========================================================= */
+
+.guide-page .guide-hero,
+.guide-page .guide-country-hero {
+  min-height: 0;
+  padding: 19px;
+  border-radius: 24px;
+  box-shadow: 0 18px 40px rgba(15, 118, 110, 0.16);
+}
+
+.guide-page .guide-hero .tic-chip,
+.guide-page .guide-country-hero .tic-chip {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.guide-page .guide-hero h1,
+.guide-page .guide-country-hero h1 {
+  margin-top: 13px;
+  font-size: clamp(1.65rem, 8vw, 2.3rem);
+  line-height: 1.08;
+  letter-spacing: -0.04em;
+}
+
+.guide-page .guide-hero p,
+.guide-page .guide-country-hero p {
+  margin-top: 8px;
+  max-width: 620px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.8rem;
+  line-height: 1.62;
+}
+
+.guide-hero-actions,
+.guide-country-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr);
+  gap: 9px;
+  margin-top: 15px;
+}
+
+.guide-back-wrap {
+  margin-top: 9px;
+}
+
+/* =========================================================
+   3. Section Layout
+========================================================= */
+
+.guide-section {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+}
+
+.guide-section + .guide-section {
+  margin-top: 1px;
+}
+
+.guide-section-head {
+  margin: 0;
+  padding-inline: 2px;
+}
+
+.guide-section-head .tic-eyebrow {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--tic-primary);
+  font-size: 0.61rem;
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.guide-section-head h2 {
+  color: var(--tic-navy);
+  font-size: clamp(1.18rem, 5.2vw, 1.48rem);
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+}
+
+.guide-section-head p {
+  margin-top: 4px;
+  color: var(--tic-muted);
+  font-size: 0.72rem;
+  line-height: 1.48;
+}
+
+.guide-planning-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.guide-secondary-sections {
+  display: grid;
+  gap: 16px;
+}
+
+/* =========================================================
+   4. Overview Strip
+========================================================= */
+
+.guide-overview-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--tic-border);
+  border-radius: 19px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+}
+
+.guide-overview-item {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 90px;
+  padding: 10px 4px;
+  text-align: center;
+}
+
+.guide-overview-item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-block: 15px;
+  inset-inline-end: 0;
+  width: 1px;
+  background: var(--tic-border);
+}
+
+.guide-overview-icon {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 10px;
+  background: var(--tic-primary-soft);
+  font-size: 0.8rem;
+}
+
+.guide-overview-item strong {
+  margin-top: 7px;
+  color: var(--tic-text);
+  font-size: 1.03rem;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.guide-overview-item small {
+  margin-top: 4px;
+  color: var(--tic-muted);
+  font-size: 0.58rem;
+  line-height: 1.2;
+  font-weight: 800;
+}
+
+/* =========================================================
+   5. Planner Controls
+========================================================= */
+
+.guide-planner-card {
+  overflow: visible;
+  border-radius: 19px;
+}
+
+.guide-planner-card .tic-card-body {
+  padding: 12px;
+}
+
+.guide-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.guide-quick-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--tic-border);
+  border-radius: 14px;
+  background: var(--tic-surface-soft);
+}
+
+.guide-quick-field > span {
+  color: var(--tic-muted);
+  font-size: 0.62rem;
+  line-height: 1.25;
+  font-weight: 850;
+}
+
+.guide-quick-field input,
+.guide-quick-field select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--tic-text);
+  font-size: 0.82rem;
+  line-height: 1.2;
+  font-weight: 900;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.guide-quick-field:focus-within {
+  border-color: var(--tic-primary);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.08);
+}
+
+/* =========================================================
+   6. Country Picker Card
+========================================================= */
+
+.guide-country-card {
+  overflow: hidden;
+  border-radius: 19px;
+}
+
+.guide-country-card .tic-card-body {
+  padding: 12px;
+}
+
+.guide-picker-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 13px;
+}
+
+.guide-picker-summary > div {
+  min-width: 0;
+}
+
+.guide-picker-summary span,
+.guide-picker-summary strong,
+.guide-picker-summary small {
+  display: block;
+}
+
+.guide-picker-summary > div > span {
+  color: var(--tic-primary);
+  font-size: 0.63rem;
+  line-height: 1.25;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.guide-picker-summary strong {
+  margin-top: 3px;
+  color: var(--tic-text);
+  font-size: 0.91rem;
+  line-height: 1.32;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.guide-picker-summary small {
+  margin-top: 3px;
+  color: var(--tic-muted);
+  font-size: 0.66rem;
+  line-height: 1.42;
+}
+
+.guide-picker-summary-icon {
+  flex: 0 0 auto;
+  display: grid !important;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: var(--tic-primary-soft);
+  font-size: 1.12rem;
+}
+
+.guide-country-open-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 47px;
+  margin-top: 11px;
+  padding: 9px 12px;
+  border: 1px solid var(--tic-border-strong);
+  border-radius: 14px;
+  background: var(--tic-surface-soft);
+  color: var(--tic-text);
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--tic-transition-fast),
+    background var(--tic-transition-fast),
+    box-shadow var(--tic-transition-fast),
+    transform var(--tic-transition-fast);
+}
+
+.guide-country-open-button > span:first-child,
+.guide-country-open-button > span:last-child {
+  color: var(--tic-primary);
+  font-size: 0.94rem;
+}
+
+.guide-country-open-button > span:nth-child(2) {
+  font-size: 0.77rem;
+  line-height: 1.3;
+  font-weight: 900;
+}
+
+.guide-country-open-button:active {
+  transform: scale(0.985);
+  background: var(--tic-primary-soft);
+}
+
+/* =========================================================
+   7. Recommendation Horizontal Rail
+========================================================= */
+
+.guide-recommendations-section {
+  overflow: visible;
+}
+
+.guide-recommendation-shell {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.guide-recommendation-rail {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding:
+    2px
+    2px
+    8px;
+  scroll-snap-type: inline mandatory;
+  scroll-padding-inline: 2px;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: pan-x pan-y;
+}
+
+.guide-recommendation-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.guide-recommendation-card {
+  flex: 0 0 min(78vw, 310px);
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 19px;
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 250px;
+}
+
+.guide-recommendation-card .tic-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+}
+
+.guide-recommendation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.guide-recommendation-rank {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--tic-primary-soft);
+  color: var(--tic-primary-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.guide-wishlist-button,
+.guide-page .tic-icon-button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  border: 1px solid var(--tic-border);
+  border-radius: 13px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+  color: var(--tic-primary);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.guide-recommendation-main {
+  display: grid;
+  justify-items: start;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  color: var(--tic-text);
+  text-align: start;
+  cursor: pointer;
+}
+
+.guide-recommendation-flag {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  background: var(--tic-surface-soft);
+  font-size: 1.28rem;
+}
+
+.guide-recommendation-main strong {
+  margin-top: 8px;
+  color: var(--tic-text);
+  font-size: 0.98rem;
+  line-height: 1.32;
+  font-weight: 900;
+}
+
+.guide-recommendation-main small {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--tic-muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.guide-recommendation-score {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.guide-recommendation-score strong {
+  color: var(--tic-primary-dark);
+  font-size: 1.45rem;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.guide-recommendation-score span {
+  color: var(--tic-muted);
+  font-size: 0.64rem;
+  font-weight: 850;
+}
+
+.guide-recommendation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.guide-recommendation-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 27px;
+  max-width: 100%;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--tic-surface-soft);
+  color: var(--tic-text-soft);
+  font-size: 0.61rem;
+  line-height: 1.25;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.guide-rail-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-inline: 2px;
+}
+
+.guide-rail-footer > span {
+  color: var(--tic-muted);
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
+.guide-rail-controls {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.guide-rail-controls button {
+  display: grid;
+  place-items: center;
+  width: 33px;
+  height: 33px;
+  border: 1px solid var(--tic-border);
+  border-radius: 11px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+  color: var(--tic-primary);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* =========================================================
+   8. Wishlist
+========================================================= */
+
+.guide-mini-rail {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scroll-snap-type: inline proximity;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.guide-mini-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.guide-mini-card {
+  flex: 0 0 128px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 96px;
+  padding: 11px 8px;
+  border: 1px solid var(--tic-border);
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+  color: var(--tic-text);
+  text-align: center;
+  cursor: pointer;
+  scroll-snap-align: start;
+  content-visibility: auto;
+  contain-intrinsic-size: 128px 96px;
+}
+
+.guide-mini-card > span {
+  font-size: 1.28rem;
+}
+
+.guide-mini-card strong {
+  margin-top: 6px;
+  font-size: 0.73rem;
+  line-height: 1.3;
+  font-weight: 900;
+}
+
+.guide-mini-card small {
+  margin-top: 4px;
+  color: var(--tic-primary);
+  font-size: 0.59rem;
+  font-weight: 850;
+}
+
+/* =========================================================
+   9. Annual Plans
+========================================================= */
+
+.guide-plan-list {
+  display: grid;
+  gap: 8px;
+}
+
+.guide-plan-card {
+  border-radius: 18px;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 82px;
+}
+
+.guide-plan-card .tic-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 11px;
+  padding: 12px;
+}
+
+.guide-plan-card .tic-card-body > div {
+  min-width: 0;
+}
+
+.guide-plan-card strong,
+.guide-plan-card small {
+  display: block;
+}
+
+.guide-plan-card strong {
+  color: var(--tic-text);
+  font-size: 0.77rem;
+  line-height: 1.35;
+  font-weight: 900;
+}
+
+.guide-plan-card small {
+  margin-top: 4px;
+  color: var(--tic-muted);
+  font-size: 0.63rem;
+  line-height: 1.35;
+}
+
+/* =========================================================
+   10. Collapsible Travel Profile
+========================================================= */
+
+.guide-profile-details {
+  overflow: hidden;
+  border: 1px solid var(--tic-border);
+  border-radius: 19px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+}
+
+.guide-profile-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 68px;
+  padding: 13px 15px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.guide-profile-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.guide-profile-details > summary > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.guide-profile-details > summary small {
+  color: var(--tic-primary);
+  font-size: 0.59rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.guide-profile-details > summary strong {
+  color: var(--tic-text);
+  font-size: 0.93rem;
+  line-height: 1.3;
+  font-weight: 900;
+}
+
+.guide-profile-details > summary > span:last-child {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 33px;
+  height: 33px;
+  border-radius: 11px;
+  background: var(--tic-primary-soft);
+  color: var(--tic-primary);
+  transition: transform var(--tic-transition);
+}
+
+.guide-profile-details[open] > summary {
+  border-bottom: 1px solid var(--tic-border);
+}
+
+.guide-profile-details[open] > summary > span:last-child {
+  transform: rotate(180deg);
+}
+
+.guide-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.guide-profile-item {
+  min-height: 76px;
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--tic-border);
+}
+
+.guide-profile-item:nth-child(odd) {
+  border-inline-end: 1px solid var(--tic-border);
+}
+
+.guide-profile-item:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.guide-profile-item small,
+.guide-profile-item strong {
+  display: block;
+}
+
+.guide-profile-item small {
+  color: var(--tic-muted);
+  font-size: 0.61rem;
+  line-height: 1.3;
+}
+
+.guide-profile-item strong {
+  margin-top: 5px;
+  color: var(--tic-text);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================
+   11. Empty States
+========================================================= */
+
+.guide-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--tic-border);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+  text-align: start;
+}
+
+.guide-empty > span {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: var(--tic-primary-soft);
+  font-size: 1.12rem;
+}
+
+.guide-empty > div {
+  min-width: 0;
+}
+
+.guide-empty h3 {
+  color: var(--tic-text);
+  font-size: 0.86rem;
+  line-height: 1.35;
+  font-weight: 900;
+}
+
+.guide-empty p {
+  margin-top: 3px;
+  color: var(--tic-muted);
+  font-size: 0.68rem;
+  line-height: 1.48;
+}
+
+.guide-empty.is-compact {
+  padding: 14px;
+}
+
+/* =========================================================
+   12. Country Page Hero and Tabs
+========================================================= */
+
+.guide-country-hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.guide-country-hero .tic-icon-button {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.guide-country-score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 13px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  background: rgba(5, 20, 35, 0.24);
+}
+
+.guide-country-score span {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.guide-country-score strong {
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.guide-country-tabs {
+  position: sticky;
+  top: calc(var(--tic-topbar-height) + env(safe-area-inset-top));
+  z-index: 45;
+  display: flex;
+  gap: 7px;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 7px 1px;
+  background: rgba(245, 247, 251, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.guide-country-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.guide-country-tabs button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 37px;
+  padding: 8px 12px;
+  border: 1px solid var(--tic-border);
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: var(--tic-shadow-xs);
+  color: var(--tic-text-soft);
+  font-size: 0.69rem;
+  line-height: 1;
+  font-weight: 850;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.guide-country-tabs button.is-active {
+  border-color: var(--tic-navy);
+  background: var(--tic-navy);
+  color: #ffffff;
+}
+
+/* =========================================================
+   13. Country Content Cards
+========================================================= */
+
+.guide-country-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+}
+
+.guide-info-card,
+.guide-itinerary-day {
+  border-radius: 19px;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 180px;
+}
+
+.guide-info-card .tic-card-body,
+.guide-itinerary-day .tic-card-body {
+  padding: 13px;
+}
+
+.guide-info-card h3,
+.guide-itinerary-day h3 {
+  color: var(--tic-text);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  font-weight: 900;
+}
+
+.guide-info-card .tic-chip + h3 {
+  margin-top: 8px;
+}
+
+.guide-info-list,
+.guide-list {
+  display: grid;
+  gap: 0;
+  margin-top: 9px;
+}
+
+.guide-info-list > div,
+.guide-list > div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 11px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--tic-border);
+}
+
+.guide-info-list > div:first-child,
+.guide-list > div:first-child {
+  padding-top: 0;
+}
+
+.guide-info-list > div:last-child,
+.guide-list > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.guide-info-list span {
+  color: var(--tic-muted);
+  font-size: 0.66rem;
+  line-height: 1.43;
+}
+
+.guide-info-list strong {
+  max-width: 58%;
+  color: var(--tic-text);
+  font-size: 0.71rem;
+  line-height: 1.43;
+  font-weight: 900;
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
+.guide-list > div {
+  display: block;
+}
+
+.guide-list strong,
+.guide-list small {
+  display: block;
+}
+
+.guide-list strong {
+  color: var(--tic-text);
+  font-size: 0.73rem;
+  line-height: 1.43;
+  font-weight: 900;
+}
+
+.guide-list small {
+  margin-top: 3px;
+  color: var(--tic-muted);
+  font-size: 0.64rem;
+  line-height: 1.43;
+}
+
+.guide-itinerary-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 9px;
+}
+
+.guide-itinerary-day h3 {
+  margin-top: 8px;
+}
+
+/* =========================================================
+   14. Country Picker Bottom Sheet
+========================================================= */
+
+body.guide-country-sheet-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+.guide-country-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: grid;
+  align-items: end;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    8px
+    max(8px, env(safe-area-inset-bottom));
+  background: rgba(8, 23, 43, 0.58);
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+  overscroll-behavior: contain;
+  animation: guide-sheet-backdrop-in 160ms ease both;
+}
+
+.guide-country-sheet {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  width: min(100%, 720px);
+  height: min(84dvh, 760px);
+  max-height: calc(100dvh - env(safe-area-inset-top) - 18px);
+  margin-inline: auto;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  border-radius: 28px 28px 18px 18px;
+  background: #ffffff;
+  box-shadow: 0 -20px 60px rgba(8, 23, 43, 0.24);
+  animation:
+    guide-sheet-up
+    220ms
+    cubic-bezier(0.22, 1, 0.36, 1)
+    both;
+  touch-action: pan-y;
+}
+
+.guide-country-sheet-handle {
+  width: 46px;
+  height: 5px;
+  margin: 9px auto 3px;
+  border-radius: 999px;
+  background: #d6dee8;
+}
+
+.guide-country-sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 17px 13px;
+  border-bottom: 1px solid var(--tic-border);
+}
+
+.guide-country-sheet-header > div {
+  min-width: 0;
+}
+
+.guide-country-sheet-header span {
+  display: block;
+  color: var(--tic-primary);
+  font-size: 0.6rem;
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.guide-country-sheet-header h2 {
+  margin-top: 3px;
+  color: var(--tic-navy);
+  font-size: 1.18rem;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.guide-country-sheet-header p {
+  margin-top: 4px;
+  color: var(--tic-muted);
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.guide-country-sheet-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--tic-border);
+  border-radius: 13px;
+  background: var(--tic-surface-soft);
+  color: var(--tic-text);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.guide-country-sheet-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 50px;
+  margin: 12px 14px 8px;
+  padding: 0 13px;
+  border: 1px solid var(--tic-border-strong);
+  border-radius: 15px;
+  background: var(--tic-surface-soft);
+  transition:
+    border-color var(--tic-transition-fast),
+    box-shadow var(--tic-transition-fast),
+    background var(--tic-transition-fast);
+}
+
+.guide-country-sheet-search:focus-within {
+  border-color: var(--tic-primary);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.09);
+}
+
+.guide-country-sheet-search > span {
+  color: var(--tic-primary);
+  font-size: 1rem;
+}
+
+.guide-country-sheet-search input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--tic-text);
+  font-size: 16px;
+  text-align: start;
+}
+
+.guide-country-sheet-search input::placeholder {
+  color: var(--tic-muted-light);
+}
+
+.guide-country-sheet-search button {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border-radius: 10px;
+  background: #e9eef4;
+  color: var(--tic-text-soft);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.guide-country-sheet-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px 9px;
+  color: var(--tic-muted);
+}
+
+.guide-country-sheet-count span {
+  color: var(--tic-text-soft);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.guide-country-sheet-count small {
+  font-size: 0.61rem;
+  line-height: 1.3;
+}
+
+.guide-country-sheet-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
+  padding:
+    0
+    12px
+    calc(16px + env(safe-area-inset-bottom));
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  touch-action: pan-y;
+}
+
+.guide-country-sheet-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.guide-country-sheet-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.guide-country-sheet-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.guide-country-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 58px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-bottom-color: var(--tic-border);
+  background: #ffffff;
+  color: var(--tic-text);
+  text-align: start;
+  cursor: pointer;
+}
+
+.guide-country-option:last-child {
+  border-bottom: 0;
+}
+
+.guide-country-option:active {
+  border-color: #cce8e2;
+  background: var(--tic-primary-soft);
+}
+
+.guide-country-flag {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--tic-surface-soft);
+  font-size: 1.06rem;
+}
+
+.guide-country-option-copy {
+  min-width: 0;
+}
+
+.guide-country-option-copy strong,
+.guide-country-option-copy small {
+  display: block;
+}
+
+.guide-country-option-copy strong {
+  overflow: hidden;
+  color: var(--tic-text);
+  font-size: 0.81rem;
+  line-height: 1.35;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-country-option-copy small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--tic-muted);
+  font-size: 0.66rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-country-option > span:last-child {
+  color: var(--tic-primary);
+  font-size: 1rem;
+}
+
+/* =========================================================
+   15. Performance and Stability
+========================================================= */
+
+.guide-recommendation-card,
+.guide-mini-card,
+.guide-plan-card,
+.guide-info-card,
+.guide-itinerary-day {
+  transform: translateZ(0);
+}
+
+.guide-page .tic-card {
+  backface-visibility: hidden;
+}
+
+.guide-recommendation-rail,
+.guide-mini-rail,
+.guide-country-tabs,
+.guide-country-sheet-list {
+  scroll-behavior: auto;
+}
+
+.guide-page [data-guide-recommendation-rail] {
+  will-change: scroll-position;
+}
+
+/* =========================================================
+   16. Animations
+========================================================= */
+
+@keyframes guide-sheet-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes guide-sheet-up {
+  from {
+    opacity: 0.7;
+    transform: translateY(34px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =========================================================
+   17. Responsive
+========================================================= */
+
+@media (min-width: 560px) {
+  .guide-page {
+    gap: 19px;
+  }
+
+  .guide-quick-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .guide-recommendation-card {
+    flex-basis: 300px;
+  }
+
+  .guide-secondary-sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .guide-country-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 760px) {
+  .guide-page .guide-hero,
+  .guide-page .guide-country-hero {
+    padding: 24px;
+  }
+
+  .guide-page .guide-hero h1,
+  .guide-page .guide-country-hero h1 {
+    font-size: 2.4rem;
+  }
+
+  .guide-country-sheet-backdrop {
+    align-items: center;
+    padding: 20px;
+  }
+
+  .guide-country-sheet {
+    height: min(78dvh, 720px);
+    border-radius: 26px;
+  }
+
+  .guide-country-sheet-handle {
+    display: none;
+  }
+
+  .guide-country-sheet-header {
+    padding-top: 17px;
+  }
+}
+
+@media (max-width: 520px) {
+  .guide-page {
+    gap: 14px;
+  }
+
+  .guide-page .guide-hero,
+  .guide-page .guide-country-hero {
+    padding: 16px;
+    border-radius: 22px;
+  }
+
+  .guide-page .guide-hero h1,
+  .guide-page .guide-country-hero h1 {
+    font-size: clamp(1.5rem, 8vw, 1.9rem);
+  }
+
+  .guide-page .guide-hero p,
+  .guide-page .guide-country-hero p {
+    font-size: 0.76rem;
+  }
+
+  .guide-hero-actions,
+  .guide-country-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .guide-overview-item {
+    min-height: 84px;
+    padding-inline: 3px;
+  }
+
+  .guide-overview-icon {
+    width: 27px;
+    height: 27px;
+  }
+
+  .guide-overview-item strong {
+    font-size: 0.96rem;
+  }
+
+  .guide-recommendation-card {
+    flex-basis: min(82vw, 296px);
+  }
+
+  .guide-plan-card .tic-card-body {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guide-plan-card .tic-button {
+    width: 100%;
+  }
+
+  .guide-country-tabs {
+    top:
+      calc(
+        var(--tic-topbar-height)
+        - 3px
+        + env(safe-area-inset-top)
+      );
+  }
+
+  .guide-country-sheet-backdrop {
+    padding:
+      max(8px, env(safe-area-inset-top))
+      0
+      0;
+  }
+
+  .guide-country-sheet {
+    width: 100%;
+    height: min(88dvh, 760px);
+    max-height:
+      calc(
+        100dvh
+        - env(safe-area-inset-top)
+        - 8px
+      );
+    border-inline: 0;
+    border-bottom: 0;
+    border-radius: 26px 26px 0 0;
+  }
+
+  .guide-country-sheet-header {
+    padding-inline: 15px;
+  }
+
+  .guide-country-sheet-search {
+    margin-inline: 12px;
+  }
+
+  .guide-country-sheet-count {
+    padding-inline: 14px;
+  }
+
+  .guide-country-sheet-list {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 390px) {
+  .guide-page {
+    gap: 13px;
+  }
+
+  .guide-page .guide-hero,
+  .guide-page .guide-country-hero {
+    padding: 15px;
+  }
+
+  .guide-hero-actions,
+  .guide-country-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-overview-strip {
+    border-radius: 17px;
+  }
+
+  .guide-overview-item {
+    min-height: 79px;
+  }
+
+  .guide-overview-icon {
+    width: 25px;
+    height: 25px;
+    font-size: 0.71rem;
+  }
+
+  .guide-overview-item strong {
+    font-size: 0.9rem;
+  }
+
+  .guide-overview-item small {
+    font-size: 0.53rem;
+  }
+
+  .guide-quick-grid {
+    gap: 7px;
+  }
+
+  .guide-quick-field {
+    padding: 8px;
+    border-radius: 13px;
+  }
+
+  .guide-recommendation-card {
+    flex-basis: 84vw;
+  }
+
+  .guide-recommendation-card .tic-card-body,
+  .guide-info-card .tic-card-body,
+  .guide-itinerary-day .tic-card-body {
+    padding: 12px;
+  }
+
+  .guide-country-sheet {
+    height: 90dvh;
+  }
+
+  .guide-country-sheet-header h2 {
+    font-size: 1.08rem;
+  }
+
+  .guide-country-sheet-header p {
+    max-width: 230px;
+    font-size: 0.63rem;
+  }
+
+  .guide-country-sheet-search {
+    min-height: 47px;
+  }
+
+  .guide-country-sheet-search input {
+    height: 45px;
+  }
+
+  .guide-country-option {
+    min-height: 56px;
+    padding-inline: 9px;
+  }
+}
+
+/* =========================================================
+   18. Hover and Reduced Motion
+========================================================= */
+
+@media (hover: hover) and (pointer: fine) {
+  .guide-country-open-button:hover {
+    border-color: var(--tic-primary);
+    background: #ffffff;
+    box-shadow:
+      0
+      8px
+      20px
+      rgba(15, 118, 110, 0.08);
+  }
+
+  .guide-country-option:hover,
+  .guide-mini-card:hover {
+    background: var(--tic-primary-soft);
+  }
+
+  .guide-page .tic-button:hover {
+    border-color: var(--tic-primary);
+  }
+
+  .guide-page .tic-button.is-primary:hover {
+    box-shadow:
+      0
+      14px
+      28px
+      rgba(15, 118, 110, 0.25);
+  }
+
+  .guide-rail-controls button:hover {
+    background: var(--tic-primary-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-page *,
+  .guide-page *::before,
+  .guide-page *::after,
+  .guide-country-sheet-backdrop,
+  .guide-country-sheet {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
