@@ -1,19 +1,18 @@
 /* =========================================================
    Travel Intelligence Center
-   Guide Intelligence Platform Page V4.0.0
+   Guide Intelligence Platform Page V4.1.0
 
    File Path:
    js/pages/guide.js
 
    Purpose:
-   - Rebuilt practical Guide Intelligence experience.
-   - Uses WorldGuideData, GuideEngine, TravelAI and PlannerEngine.
-   - Reads visited countries directly from Trips and Passport.
-   - Provides country search, recommendations, country details,
-     budget fit, best months, hotel intelligence, itinerary creation,
-     wishlist actions and annual-plan creation.
-   - Preserves Router, UI actions, Store subscriptions and iPhone-first UX.
-   - Removes empty placeholder actions and replaces them with useful flows.
+   - Complete redesign of the Guide page for a compact iPhone-first UX.
+   - Removes oversized empty cards and long recommendation layouts.
+   - Replaces the broken native country selector with a reliable custom picker.
+   - Limits initial recommendation rendering to improve page performance.
+   - Uses cached snapshots and debounced updates to avoid unnecessary full renders.
+   - Preserves GuideEngine, TravelAI, PlannerEngine, Store, Router and UI integration.
+   - Keeps country details, wishlist, annual planning and trip creation flows.
 
    Dependencies:
    - js/config.js
@@ -34,7 +33,10 @@
   "use strict";
 
   const PAGE_ID = "guide";
-  const PAGE_VERSION = "4.0.0";
+  const PAGE_VERSION = "4.1.0";
+  const INITIAL_RECOMMENDATION_LIMIT = 6;
+  const SEARCH_RESULT_LIMIT = 14;
+  const STORE_REFRESH_DELAY = 180;
 
   const MONTHS_AR = Object.freeze([
     "",
@@ -65,20 +67,36 @@
     initialized: false,
     mounted: false,
     container: null,
+
     activeView: "discover",
     activeSection: "overview",
+
     selectedCountryCode: "",
     search: "",
+    countryPickerOpen: false,
+
     selectedDays: 7,
     selectedTravelers: 2,
     selectedMonth: new Date().getMonth() + 1,
     selectedBudget: 0,
+
+    recommendationLimit: INITIAL_RECOMMENDATION_LIMIT,
+
     snapshot: null,
+    cacheKey: "",
+    cacheSnapshot: null,
+
     unsubscribeStore: null,
     actionUnsubscribers: [],
     subscribers: new Set(),
+
     pendingFocusSelector: null,
-    rendering: false
+    rendering: false,
+    refreshQueued: false,
+    storeRefreshTimer: null,
+    searchTimer: null,
+    scrollTimer: null,
+    isUserScrolling: false
   };
 
   /* =========================================================
@@ -102,11 +120,6 @@
   const safeArray = (value) =>
     Array.isArray(value) ? clone(value) : [];
 
-  const safeObject = (value) =>
-    value && typeof value === "object" && !Array.isArray(value)
-      ? value
-      : {};
-
   const text = (value, fallback = "") =>
     String(value === undefined || value === null ? fallback : value).trim();
 
@@ -126,11 +139,27 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
 
+  const normalizeSearch = (value) =>
+    text(value)
+      .toLocaleLowerCase("ar")
+      .normalize("NFKD")
+      .replace(/[\u064B-\u065F\u0670]/g, "")
+      .replace(/\s+/g, " ");
+
   const formatAED = (value) =>
     `${Math.round(number(value, 0)).toLocaleString("ar-AE")} د.إ`;
 
   const monthLabel = (month) =>
     MONTHS_AR[clamp(number(month, 1), 1, 12)] || "";
+
+  const debounce = (callback, delay = 120) => {
+    let timer = null;
+
+    return (...args) => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => callback(...args), delay);
+    };
+  };
 
   const getStore = () =>
     window.TIC?.Store ||
@@ -221,7 +250,7 @@
         })
       );
     } catch (_) {
-      // Ignore in older test environments.
+      // Ignore older test environments.
     }
 
     return payload;
@@ -233,11 +262,12 @@
     params = {},
     primary = false,
     block = false,
-    icon = ""
+    icon = "",
+    compact = false
   }) => {
     const ui = getUI();
 
-    if (typeof ui?.button === "function") {
+    if (typeof ui?.button === "function" && !compact) {
       return ui.button({
         label,
         action,
@@ -260,21 +290,82 @@
         type="button"
         class="tic-button ${primary ? "is-primary" : ""} ${
           block ? "is-block" : ""
-        }"
+        } ${compact ? "guide-button-compact" : ""}"
         data-action="${escapeHTML(action)}"
         ${attributes}
       >
-        ${icon ? `<span>${escapeHTML(icon)}</span>` : ""}
+        ${icon ? `<span aria-hidden="true">${escapeHTML(icon)}</span>` : ""}
         ${escapeHTML(label)}
       </button>
     `;
+  };
+
+  const cacheSignature = () =>
+    [
+      state.activeView,
+      state.activeSection,
+      state.selectedCountryCode,
+      state.selectedDays,
+      state.selectedTravelers,
+      state.selectedMonth,
+      state.selectedBudget,
+      state.recommendationLimit
+    ].join("|");
+
+  const invalidateSnapshotCache = () => {
+    state.cacheKey = "";
+    state.cacheSnapshot = null;
   };
 
   /* =========================================================
      Snapshot
   ========================================================= */
 
-  const buildSnapshot = async () => {
+  const getAllCountries = (guide) => {
+    try {
+      return safeArray(guide.getCountries?.({ query: "" }));
+    } catch (_) {
+      return [];
+    }
+  };
+
+  const filterCountries = (countries, query) => {
+    const normalizedQuery = normalizeSearch(query);
+
+    if (!normalizedQuery) {
+      return countries.slice(0, SEARCH_RESULT_LIMIT);
+    }
+
+    return countries
+      .filter((country) => {
+        const haystack = normalizeSearch(
+          [
+            country.nameAr,
+            country.nameEn,
+            country.code,
+            country.capital,
+            safeArray(country.cities)
+              .map((city) => city?.nameAr || city?.name || city)
+              .join(" ")
+          ].join(" ")
+        );
+
+        return haystack.includes(normalizedQuery);
+      })
+      .slice(0, SEARCH_RESULT_LIMIT);
+  };
+
+  const buildSnapshot = async ({ force = false } = {}) => {
+    const signature = cacheSignature();
+
+    if (
+      !force &&
+      state.cacheSnapshot &&
+      state.cacheKey === signature
+    ) {
+      return clone(state.cacheSnapshot);
+    }
+
     const guide = getGuideEngine();
     const ai = getTravelAI();
     const planner = getPlannerEngine();
@@ -289,9 +380,7 @@
     await guide.init?.();
 
     const summary = guide.getSummary?.() || {};
-    const countries = guide.getCountries?.({
-      query: state.search
-    }) || [];
+    const allCountries = getAllCountries(guide);
 
     const selectedCountry = state.selectedCountryCode
       ? guide.getCountry?.(state.selectedCountryCode)
@@ -314,10 +403,13 @@
     try {
       recommendations =
         await guide.getRecommendations?.({
-          limit: 8,
+          limit: state.recommendationLimit,
           budget: state.selectedBudget || undefined,
           days: state.selectedDays,
-          month: state.selectedMonth
+          month: state.selectedMonth,
+          excludeLowRated: true,
+          useRatings: true,
+          useTravelDNA: true
         }) || [];
     } catch (error) {
       console.error("TIC Guide recommendations error:", error);
@@ -325,27 +417,22 @@
 
     let itinerary = null;
 
-    if (
-      selectedCountry &&
-      state.activeSection === "planner"
-    ) {
+    if (selectedCountry && state.activeSection === "planner") {
       try {
-        itinerary = ai?.generateItinerary?.(
-          selectedCountry,
-          {
-            days: state.selectedDays,
-            travelers: state.selectedTravelers,
-            month: state.selectedMonth,
-            budget: state.selectedBudget
-          }
-        ) || null;
+        itinerary =
+          ai?.generateItinerary?.(
+            selectedCountry,
+            {
+              days: state.selectedDays,
+              travelers: state.selectedTravelers,
+              month: state.selectedMonth,
+              budget: state.selectedBudget
+            }
+          ) || null;
       } catch (error) {
         console.error("TIC Guide itinerary error:", error);
       }
     }
-
-    const planningSummary =
-      planner?.getPlanningSummary?.() || {};
 
     const wishlist =
       planner?.getWishlist?.() ||
@@ -356,101 +443,89 @@
       planner?.getAnnualPlans?.() ||
       [];
 
-    return {
+    const snapshot = {
       ready: true,
       summary,
-      countries,
+      allCountries,
+      countries: filterCountries(allCountries, state.search),
       selectedCountry,
       countryGuide,
-      recommendations,
+      recommendations: safeArray(recommendations),
       itinerary,
-      planningSummary,
-      wishlist,
-      annualPlans
+      wishlist: safeArray(wishlist),
+      annualPlans: safeArray(annualPlans)
     };
+
+    state.cacheKey = signature;
+    state.cacheSnapshot = clone(snapshot);
+
+    return snapshot;
   };
 
   /* =========================================================
-     Common renderers
+     Shared renderers
   ========================================================= */
 
   const renderSection = ({
     eyebrow,
     title,
     subtitle,
-    content
-  }) => {
-    const ui = getUI();
-
-    if (typeof ui?.section === "function") {
-      return ui.section({
-        eyebrow,
-        title,
-        subtitle,
-        content
-      });
-    }
-
-    return `
-      <section class="tic-section">
-        <div class="tic-section-head">
-          <div>
-            ${eyebrow ? `<span class="tic-eyebrow">${escapeHTML(eyebrow)}</span>` : ""}
-            <h2>${escapeHTML(title)}</h2>
-            ${subtitle ? `<p>${escapeHTML(subtitle)}</p>` : ""}
-          </div>
+    content,
+    compact = false
+  }) => `
+    <section class="tic-section guide-section ${compact ? "is-compact" : ""}">
+      <div class="tic-section-head guide-section-head">
+        <div>
+          ${eyebrow ? `<span class="tic-eyebrow">${escapeHTML(eyebrow)}</span>` : ""}
+          <h2>${escapeHTML(title)}</h2>
+          ${subtitle ? `<p>${escapeHTML(subtitle)}</p>` : ""}
         </div>
-        ${content}
-      </section>
-    `;
-  };
+      </div>
+      ${content}
+    </section>
+  `;
 
-  const renderEmpty = (title, message, icon = "⌕") => `
-    <div class="tic-empty">
+  const renderEmpty = (title, message, icon = "⌕", compact = false) => `
+    <div class="tic-empty guide-empty ${compact ? "is-compact" : ""}">
       <span>${escapeHTML(icon)}</span>
       <h3>${escapeHTML(title)}</h3>
       <p>${escapeHTML(message)}</p>
     </div>
   `;
 
-  const renderStatGrid = (snapshot) => {
+  const renderCompactOverview = (snapshot) => {
     const stats = [
       {
         icon: "🌍",
-        value: snapshot.summary.totalCountries || snapshot.countries.length,
-        label: "دولة",
-        subtitle: "في الدليل"
+        value: snapshot.summary.totalCountries || snapshot.allCountries.length,
+        label: "دولة"
       },
       {
         icon: "✓",
         value: snapshot.summary.visitedCountries || 0,
-        label: "زرتها",
-        subtitle: "من رحلاتك وجوازك"
+        label: "زرتها"
       },
       {
         icon: "☆",
         value: snapshot.summary.wishlistCountries || snapshot.wishlist.length,
-        label: "أمنيات",
-        subtitle: "وجهات محفوظة"
+        label: "أمنية"
       },
       {
         icon: "🗓️",
         value: snapshot.summary.annualPlans || snapshot.annualPlans.length,
-        label: "خطط",
-        subtitle: "في خطتك السنوية"
+        label: "خطة"
       }
     ];
 
     return `
-      <div class="tic-stats-grid">
+      <div class="guide-overview-strip" aria-label="ملخص الدليل">
         ${stats
           .map(
             (item) => `
-              <article class="tic-card">
-                <div class="tic-stat-icon">${escapeHTML(item.icon)}</div>
+              <article class="guide-overview-item">
+                <span class="guide-overview-icon">${escapeHTML(item.icon)}</span>
                 <strong>${escapeHTML(item.value)}</strong>
-                <span>${escapeHTML(item.label)}</span>
-                <small>${escapeHTML(item.subtitle)}</small>
+                <small>${escapeHTML(item.label)}</small>
               </article>
             `
           )
@@ -459,37 +534,37 @@
     `;
   };
 
-  const renderPlannerControls = () => `
-    <div class="tic-card">
+  const renderPlannerControls = ({ compact = true } = {}) => `
+    <div class="tic-card guide-planner-card ${compact ? "is-compact" : ""}">
       <div class="tic-card-body">
-        <div class="tic-form-grid">
-          <label class="tic-field">
-            <span class="tic-field-label">عدد الأيام</span>
+        <div class="guide-quick-grid">
+          <label class="guide-quick-field">
+            <span>الأيام</span>
             <input
-              class="tic-input"
               type="number"
               min="1"
               max="30"
               value="${escapeHTML(state.selectedDays)}"
               data-guide-days
+              inputmode="numeric"
             >
           </label>
 
-          <label class="tic-field">
-            <span class="tic-field-label">عدد المسافرين</span>
+          <label class="guide-quick-field">
+            <span>المسافرون</span>
             <input
-              class="tic-input"
               type="number"
               min="1"
               max="20"
               value="${escapeHTML(state.selectedTravelers)}"
               data-guide-travelers
+              inputmode="numeric"
             >
           </label>
 
-          <label class="tic-field">
-            <span class="tic-field-label">شهر السفر</span>
-            <select class="tic-input" data-guide-month>
+          <label class="guide-quick-field">
+            <span>الشهر</span>
+            <select data-guide-month>
               ${MONTHS_AR.slice(1)
                 .map(
                   (label, index) => `
@@ -505,16 +580,16 @@
             </select>
           </label>
 
-          <label class="tic-field">
-            <span class="tic-field-label">الميزانية</span>
+          <label class="guide-quick-field">
+            <span>الميزانية</span>
             <input
-              class="tic-input"
               type="number"
               min="0"
               step="500"
               value="${escapeHTML(state.selectedBudget || "")}"
-              placeholder="مثال: 15000"
+              placeholder="15000"
               data-guide-budget
+              inputmode="numeric"
             >
           </label>
         </div>
@@ -527,20 +602,15 @@
   ========================================================= */
 
   const renderHero = () => `
-    <section class="tic-hero">
+    <section class="tic-hero guide-hero">
       <span class="tic-chip">Travel Intelligence Guide</span>
-
       <h1>دليل السفر الذكي</h1>
-
       <p>
-        اختر الدولة والمدة والشهر والميزانية، وخذ معلومات عملية
-        وجدولاً سياحياً واقتراحات تناسب رحلاتك السابقة.
+        اختر وجهتك وخذ دليلاً عملياً يناسب ميزانيتك ومدة رحلتك
+        وتفضيلاتك الحقيقية.
       </p>
 
-      <div
-        class="tic-action-row"
-        style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px"
-      >
+      <div class="guide-hero-actions">
         ${renderButton({
           label: "ابدأ التخطيط",
           action: "guide-focus-country-search",
@@ -550,7 +620,7 @@
         })}
 
         ${renderButton({
-          label: "عرض خططي",
+          label: "خططي",
           action: "guide-scroll-annual-plans",
           block: true,
           icon: "🗓️"
@@ -559,80 +629,80 @@
     </section>
   `;
 
-  const renderCountrySearch = (snapshot) => {
-    const results = snapshot.countries.slice(0, 20);
+  const renderCountryPicker = (snapshot) => {
+    const selected =
+      snapshot.allCountries.find(
+        (country) => country.code === state.selectedCountryCode
+      ) || null;
 
     return `
-      <div class="tic-card" data-guide-search-card>
+      <div class="tic-card guide-country-card" data-guide-search-card>
         <div class="tic-card-body">
-          <label class="tic-field">
-            <span class="tic-field-label">ابحث عن دولة</span>
-            <input
-              type="search"
-              class="tic-input"
-              data-guide-search
-              value="${escapeHTML(state.search)}"
-              placeholder="مثال: اليابان، سويسرا، إسبانيا..."
-              autocomplete="off"
-            >
+          <label class="guide-search-field">
+            <span>ابحث عن دولة</span>
+            <div class="guide-search-input-wrap">
+              <span aria-hidden="true">⌕</span>
+              <input
+                type="search"
+                data-guide-search
+                value="${escapeHTML(state.search)}"
+                placeholder="اكتب اسم الدولة..."
+                autocomplete="off"
+                enterkeyhint="search"
+              >
+            </div>
           </label>
 
-          <label class="tic-field" style="margin-top:14px">
-            <span class="tic-field-label">اختر الدولة</span>
-            <select class="tic-input" data-guide-country-select>
-              <option value="">اختر دولة</option>
-              ${snapshot.countries
-                .map(
-                  (country) => `
-                    <option value="${escapeHTML(country.code)}">
-                      ${escapeHTML(`${country.flag || "🌍"} ${country.nameAr}`)}
-                    </option>
-                  `
-                )
-                .join("")}
-            </select>
-          </label>
+          <button
+            type="button"
+            class="guide-country-trigger"
+            data-guide-country-trigger
+            aria-expanded="${state.countryPickerOpen ? "true" : "false"}"
+          >
+            <span>
+              ${
+                selected
+                  ? `${escapeHTML(selected.flag || "🌍")} ${escapeHTML(selected.nameAr)}`
+                  : "اختر الدولة"
+              }
+            </span>
+            <span aria-hidden="true">${state.countryPickerOpen ? "⌃" : "⌄"}</span>
+          </button>
 
-          ${
-            state.search
-              ? `
-                <div class="tic-settings-list" style="margin-top:14px">
-                  ${
-                    results.length
-                      ? results
-                          .map(
-                            (country) => `
-                              <button
-                                type="button"
-                                class="tic-settings-item"
-                                style="width:100%;text-align:right"
-                                data-action="guide-open-country"
-                                data-param-country-code="${escapeHTML(country.code)}"
-                              >
-                                <div class="tic-settings-item-main">
-                                  <div class="tic-settings-icon">
-                                    ${escapeHTML(country.flag || "🌍")}
-                                  </div>
-                                  <div class="tic-settings-copy">
-                                    <strong>${escapeHTML(country.nameAr)}</strong>
-                                    <small>${escapeHTML(country.nameEn || country.code)}</small>
-                                  </div>
-                                </div>
-                                <span>‹</span>
-                              </button>
-                            `
-                          )
-                          .join("")
-                      : renderEmpty(
-                          "لا توجد نتيجة",
-                          "جرب كتابة الاسم بالعربي أو الإنجليزي.",
-                          "⌕"
-                        )
-                  }
-                </div>
-              `
-              : ""
-          }
+          <div
+            class="guide-country-panel ${state.countryPickerOpen || state.search ? "is-open" : ""}"
+            data-guide-country-panel
+          >
+            ${
+              snapshot.countries.length
+                ? snapshot.countries
+                    .map(
+                      (country) => `
+                        <button
+                          type="button"
+                          class="guide-country-option"
+                          data-guide-country-option="${escapeHTML(country.code)}"
+                        >
+                          <span class="guide-country-flag">
+                            ${escapeHTML(country.flag || "🌍")}
+                          </span>
+                          <span>
+                            <strong>${escapeHTML(country.nameAr)}</strong>
+                            <small>${escapeHTML(country.nameEn || country.code)}</small>
+                          </span>
+                          <span aria-hidden="true">‹</span>
+                        </button>
+                      `
+                    )
+                    .join("")
+                : renderEmpty(
+                    "لا توجد نتيجة",
+                    "جرب كتابة الاسم بالعربي أو الإنجليزي.",
+                    "⌕",
+                    true
+                  )
+            }
+          </div>
         </div>
       </div>
     `;
@@ -640,32 +710,36 @@
 
   const renderRecommendationCard = (item) => {
     const country = item.country || item;
-    const score = number(item.score || country.recommendationScore, 0);
-    const reasons = safeArray(item.reasons);
-    const warnings = safeArray(item.warnings);
+    const score = Math.round(
+      number(item.score || country.recommendationScore, 0)
+    );
+    const reasons = safeArray(item.reasons).filter(Boolean);
+    const warnings = safeArray(item.warnings).filter(Boolean);
     const estimate =
       item.estimate ||
       country.estimatedIdealTrip ||
       item.budgetFit?.estimate ||
       {};
 
+    const bestMonths =
+      safeArray(item.bestMonths || country.bestMonths)
+        .slice(0, 3)
+        .map(monthLabel)
+        .filter(Boolean)
+        .join("، ");
+
     return `
-      <article class="tic-card tic-destination-card">
+      <article class="tic-card guide-recommendation-card">
         <div class="tic-card-body">
-          <div class="tic-feature-row">
-            <div>
-              <span class="tic-chip">
-                ${escapeHTML(country.flag || "🌍")}
-                ${escapeHTML(country.nameAr || country.countryName || country.code)}
-              </span>
-              <h3 class="tic-card-title" style="margin-top:10px">
-                تطابق ${escapeHTML(score)}%
-              </h3>
-            </div>
+          <div class="guide-recommendation-head">
+            <span class="tic-chip">
+              ${escapeHTML(country.flag || "🌍")}
+              ${escapeHTML(country.nameAr || country.countryName || country.code)}
+            </span>
 
             <button
               type="button"
-              class="tic-icon-button"
+              class="tic-icon-button guide-wishlist-button"
               data-action="guide-toggle-wishlist"
               data-param-country-code="${escapeHTML(country.code)}"
               aria-label="إضافة أو إزالة من الأمنيات"
@@ -674,59 +748,59 @@
             </button>
           </div>
 
+          <div class="guide-match-row">
+            <strong>${escapeHTML(score)}%</strong>
+            <span>نسبة التطابق</span>
+          </div>
+
+          <div class="guide-recommendation-meta">
+            ${
+              bestMonths
+                ? `<span>أفضل وقت: ${escapeHTML(bestMonths)}</span>`
+                : ""
+            }
+            ${
+              estimate.totalAED
+                ? `<span>تقريباً ${escapeHTML(formatAED(estimate.totalAED))}</span>`
+                : ""
+            }
+          </div>
+
           ${
             reasons.length
               ? `
-                <ul class="tic-list" style="margin-top:12px">
+                <ul class="guide-reasons">
                   ${reasons
-                    .slice(0, 4)
+                    .slice(0, 2)
                     .map((reason) => `<li>${escapeHTML(reason)}</li>`)
                     .join("")}
                 </ul>
               `
               : `
                 <p class="tic-subtitle">
-                  وجهة قريبة من أسلوب سفرك الحالي.
+                  وجهة قريبة من إعدادات رحلتك الحالية.
                 </p>
               `
           }
 
           ${
-            estimate.totalAED
-              ? `
-                <div class="tic-settings-list" style="margin-top:12px">
-                  <div class="tic-settings-item">
-                    <div class="tic-settings-item-main">
-                      <div class="tic-settings-copy">
-                        <strong>التكلفة التقريبية</strong>
-                        <small>${escapeHTML(formatAED(estimate.totalAED))}</small>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              `
-              : ""
-          }
-
-          ${
             warnings.length
               ? `
-                <p class="tic-subtitle" style="margin-top:10px">
+                <p class="guide-warning">
                   ${escapeHTML(warnings[0])}
                 </p>
               `
               : ""
           }
 
-          <div style="margin-top:14px">
-            ${renderButton({
-              label: "استكشف الدليل",
-              action: "guide-open-country",
-              params: { countryCode: country.code },
-              primary: true,
-              block: true
-            })}
-          </div>
+          ${renderButton({
+            label: "استكشف الدليل",
+            action: "guide-open-country",
+            params: { countryCode: country.code },
+            primary: true,
+            block: true,
+            compact: true
+          })}
         </div>
       </article>
     `;
@@ -735,68 +809,35 @@
   const renderRecommendations = (snapshot) => {
     if (!snapshot.recommendations.length) {
       return renderEmpty(
-        "ما عندنا اقتراحات كافية للحين",
-        "أضف رحلاتك السابقة أو حدّد ميزانيتك وشهرك المفضل.",
-        "✦"
+        "ما عندنا اقتراحات دقيقة للحين",
+        "حدد الميزانية والشهر أو أضف تقييمات لرحلاتك السابقة.",
+        "✦",
+        true
       );
     }
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-recommendation-grid">
         ${snapshot.recommendations
+          .slice(0, state.recommendationLimit)
           .map(renderRecommendationCard)
           .join("")}
       </div>
-    `;
-  };
 
-  const renderTravelDNA = (snapshot) => {
-    const dna = snapshot.summary.profile || {};
-    const budget = snapshot.summary.budget || {};
-
-    const rows = [
-      ["أسلوب السفر", dna.travelStyle || "غير محدد"],
-      ["المطار الأساسي", dna.homeAirport || "أبوظبي"],
-      ["الميزانية السنوية", formatAED(budget.annualTravelBudget || 0)],
-      ["المتاح حالياً", formatAED(
-        budget.availableTravelBudget ||
-        budget.savedAmount ||
-        0
-      )],
-      ["متوسط الادخار الشهري", formatAED(budget.monthlySaving || 0)]
-    ];
-
-    return `
-      <section class="tic-card">
-        <div class="tic-card-body">
-          <span class="tic-chip">Travel Profile</span>
-          <h3 class="tic-card-title" style="margin-top:10px">
-            ملف سفرك الحالي
-          </h3>
-
-          <p class="tic-subtitle">
-            هذه البيانات هي التي يعتمد عليها الدليل في اختيار
-            الوجهات المناسبة لك.
-          </p>
-
-          <div class="tic-settings-list" style="margin-top:14px">
-            ${rows
-              .map(
-                ([label, value]) => `
-                  <div class="tic-settings-item">
-                    <div class="tic-settings-item-main">
-                      <div class="tic-settings-copy">
-                        <strong>${escapeHTML(label)}</strong>
-                        <small>${escapeHTML(value)}</small>
-                      </div>
-                    </div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-      </section>
+      ${
+        snapshot.recommendations.length >= state.recommendationLimit
+          ? `
+            <div class="guide-more-wrap">
+              ${renderButton({
+                label: "عرض اقتراحات أكثر",
+                action: "guide-show-more-recommendations",
+                block: true,
+                compact: true
+              })}
+            </div>
+          `
+          : ""
+      }
     `;
   };
 
@@ -804,51 +845,38 @@
     if (!snapshot.wishlist.length) {
       return renderEmpty(
         "قائمة الأمنيات فاضية",
-        "اضغط النجمة على أي دولة لحفظها هنا.",
-        "☆"
+        "احفظ أي دولة بالنجمة وستظهر هنا.",
+        "☆",
+        true
       );
     }
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-mini-grid">
         ${snapshot.wishlist
-          .slice(0, 6)
+          .slice(0, 4)
           .map((item) => {
-            const country = item.country || getGuideEngine()?.getCountry?.(
-              item.countryCode
-            );
+            const country =
+              item.country ||
+              snapshot.allCountries.find(
+                (entry) => entry.code === item.countryCode
+              );
 
             return `
-              <article class="tic-card">
-                <div class="tic-card-body">
-                  <span class="tic-chip">
-                    ${escapeHTML(country?.flag || "🌍")}
-                    ${escapeHTML(
-                      country?.nameAr ||
-                      item.countryName ||
-                      item.countryCode
-                    )}
-                  </span>
-
-                  <p class="tic-subtitle" style="margin-top:10px">
-                    محفوظة منذ ${escapeHTML(
-                      item.addedAt
-                        ? new Date(item.addedAt).toLocaleDateString("ar-AE")
-                        : "الآن"
-                    )}
-                  </p>
-
-                  <div style="margin-top:12px">
-                    ${renderButton({
-                      label: "فتح الدليل",
-                      action: "guide-open-country",
-                      params: { countryCode: item.countryCode },
-                      primary: true,
-                      block: true
-                    })}
-                  </div>
-                </div>
-              </article>
+              <button
+                type="button"
+                class="guide-mini-card"
+                data-action="guide-open-country"
+                data-param-country-code="${escapeHTML(item.countryCode)}"
+              >
+                <span>${escapeHTML(country?.flag || "🌍")}</span>
+                <strong>${escapeHTML(
+                  country?.nameAr ||
+                  item.countryName ||
+                  item.countryCode
+                )}</strong>
+                <small>فتح الدليل</small>
+              </button>
             `;
           })
           .join("")}
@@ -860,75 +888,84 @@
     if (!snapshot.annualPlans.length) {
       return renderEmpty(
         "ما عندك خطط سنوية",
-        "افتح أي دولة واضغط أضف إلى الخطة السنوية.",
-        "🗓️"
+        "افتح أي دولة وأضفها إلى خطتك السنوية.",
+        "🗓️",
+        true
       );
     }
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-plan-list">
         ${snapshot.annualPlans
-          .slice(0, 8)
+          .slice(0, 5)
           .map(
             (plan) => `
-              <article class="tic-card">
+              <article class="tic-card guide-plan-card">
                 <div class="tic-card-body">
-                  <span class="tic-chip">
-                    ${escapeHTML(plan.country?.flag || "🌍")}
-                    ${escapeHTML(
-                      plan.country?.nameAr ||
-                      plan.countryName ||
-                      plan.countryCode
-                    )}
-                  </span>
-
-                  <div class="tic-settings-list" style="margin-top:12px">
-                    <div class="tic-settings-item">
-                      <div class="tic-settings-item-main">
-                        <div class="tic-settings-copy">
-                          <strong>موعد السفر</strong>
-                          <small>
-                            ${escapeHTML(
-                              `${plan.month ? monthLabel(plan.month) : "غير محدد"} ${plan.year}`
-                            )}
-                          </small>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="tic-settings-item">
-                      <div class="tic-settings-item-main">
-                        <div class="tic-settings-copy">
-                          <strong>المدة والميزانية</strong>
-                          <small>
-                            ${escapeHTML(`${plan.days} أيام · ${formatAED(plan.budgetAED)}`)}
-                          </small>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="tic-settings-item">
-                      <div class="tic-settings-item-main">
-                        <div class="tic-settings-copy">
-                          <strong>الجاهزية</strong>
-                          <small>
-                            ${escapeHTML(plan.readiness?.percent || 0)}%
-                          </small>
-                        </div>
-                      </div>
-                    </div>
+                  <div>
+                    <strong>
+                      ${escapeHTML(plan.country?.flag || "🌍")}
+                      ${escapeHTML(
+                        plan.country?.nameAr ||
+                        plan.countryName ||
+                        plan.countryCode
+                      )}
+                    </strong>
+                    <small>
+                      ${escapeHTML(
+                        `${plan.month ? monthLabel(plan.month) : "غير محدد"} ${plan.year || ""}`
+                      )}
+                      · ${escapeHTML(plan.days || 0)} أيام
+                    </small>
                   </div>
 
-                  <div style="margin-top:12px">
-                    ${renderButton({
-                      label: "تحويل إلى رحلة",
-                      action: "guide-convert-plan-to-trip",
-                      params: { planId: plan.id },
-                      primary: true,
-                      block: true
-                    })}
-                  </div>
+                  ${renderButton({
+                    label: "تحويل إلى رحلة",
+                    action: "guide-convert-plan-to-trip",
+                    params: { planId: plan.id },
+                    primary: true,
+                    compact: true
+                  })}
                 </div>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+  };
+
+  const renderTravelProfile = (snapshot) => {
+    const profile = snapshot.summary.profile || {};
+    const budget = snapshot.summary.budget || {};
+
+    const items = [
+      {
+        label: "أسلوب السفر",
+        value: profile.travelStyle || "غير محدد"
+      },
+      {
+        label: "المطار الأساسي",
+        value: profile.homeAirport || "أبوظبي"
+      },
+      {
+        label: "الميزانية السنوية",
+        value: formatAED(budget.annualTravelBudget || 0)
+      },
+      {
+        label: "الادخار الشهري",
+        value: formatAED(budget.monthlySaving || 0)
+      }
+    ];
+
+    return `
+      <div class="guide-profile-grid">
+        ${items
+          .map(
+            (item) => `
+              <article class="guide-profile-item">
+                <small>${escapeHTML(item.label)}</small>
+                <strong>${escapeHTML(item.value)}</strong>
               </article>
             `
           )
@@ -942,51 +979,59 @@
 
     ${renderSection({
       eyebrow: "OVERVIEW",
-      title: "العالم بين يديك",
-      subtitle: "كل الأرقام مربوطة مباشرة برحلاتك وجواز سفرك.",
-      content: renderStatGrid(snapshot)
+      title: "ملخص سفرك",
+      subtitle: "",
+      compact: true,
+      content: renderCompactOverview(snapshot)
     })}
 
     ${renderSection({
       eyebrow: "PLAN YOUR TRIP",
-      title: "اختر الدولة وخطط صح",
-      subtitle: "اكتب اسم الدولة وحدد الأيام والشهر والميزانية.",
+      title: "خطط رحلتك",
+      subtitle: "حدد المدة والميزانية ثم اختر الدولة.",
+      compact: true,
       content: `
-        ${renderPlannerControls()}
-        <div style="margin-top:12px">
-          ${renderCountrySearch(snapshot)}
+        ${renderPlannerControls({ compact: true })}
+        <div class="guide-section-gap">
+          ${renderCountryPicker(snapshot)}
         </div>
       `
     })}
 
     ${renderSection({
       eyebrow: "RECOMMENDED FOR YOU",
-      title: "اقتراحات تناسبك",
-      subtitle: "مبنية على رحلاتك السابقة وميزانيتك وتفضيلاتك.",
+      title: "أفضل اقتراحاتك",
+      subtitle: "نعرض الأقرب لتفضيلاتك فقط، وليس كل الدول.",
+      compact: true,
       content: renderRecommendations(snapshot)
     })}
 
-    ${renderSection({
-      eyebrow: "WISHLIST",
-      title: "قائمة الأمنيات",
-      subtitle: "كل دولة تحفظها تظهر هنا ويمكن تحويلها لاحقاً إلى خطة.",
-      content: renderWishlist(snapshot)
-    })}
-
-    <div data-guide-annual-plans>
+    <div class="guide-two-column-sections">
       ${renderSection({
-        eyebrow: "ANNUAL PLANNER",
-        title: "خطتك السنوية",
-        subtitle: "خطط فعلية تقدر تتابعها وتحولها إلى رحلة.",
-        content: renderAnnualPlans(snapshot)
+        eyebrow: "WISHLIST",
+        title: "قائمة الأمنيات",
+        subtitle: "",
+        compact: true,
+        content: renderWishlist(snapshot)
       })}
+
+      <div data-guide-annual-plans>
+        ${renderSection({
+          eyebrow: "ANNUAL PLANNER",
+          title: "خطتك السنوية",
+          subtitle: "",
+          compact: true,
+          content: renderAnnualPlans(snapshot)
+        })}
+      </div>
     </div>
 
     ${renderSection({
       eyebrow: "YOUR PROFILE",
       title: "ملف سفرك",
-      subtitle: "بدل شرح كيف يفهمك النظام، نعرض البيانات التي يعتمد عليها فعلياً.",
-      content: renderTravelDNA(snapshot)
+      subtitle: "البيانات الفعلية التي يعتمد عليها الدليل.",
+      compact: true,
+      content: renderTravelProfile(snapshot)
     })}
   `;
 
@@ -995,21 +1040,16 @@
   ========================================================= */
 
   const renderCountryTabs = () => `
-    <div
-      class="tic-filter-row"
-      style="position:sticky;top:0;z-index:5;padding:10px 0;background:rgba(248,250,252,.94);backdrop-filter:blur(14px)"
-    >
+    <div class="guide-country-tabs">
       ${VIEW_SECTIONS.map(
         (section) => `
           <button
             type="button"
-            class="tic-filter-chip ${
-              state.activeSection === section.id ? "is-active" : ""
-            }"
+            class="${state.activeSection === section.id ? "is-active" : ""}"
             data-action="guide-set-section"
             data-param-section="${escapeHTML(section.id)}"
           >
-            ${escapeHTML(section.icon)}
+            <span>${escapeHTML(section.icon)}</span>
             ${escapeHTML(section.label)}
           </button>
         `
@@ -1026,8 +1066,8 @@
       0;
 
     return `
-      <section class="tic-hero">
-        <div class="tic-feature-row">
+      <section class="tic-hero guide-country-hero">
+        <div class="guide-country-hero-head">
           <div>
             <span class="tic-chip">
               ${escapeHTML(country.flag || "🌍")}
@@ -1050,34 +1090,14 @@
           </button>
         </div>
 
-        <div class="tic-card" style="margin-top:16px">
-          <div class="tic-card-body">
-            <div class="tic-feature-row">
-              <strong>تطابق الوجهة معك</strong>
-              <span class="tic-chip">${escapeHTML(Math.round(number(score)))}%</span>
-            </div>
-
-            ${
-              safeArray(guide?.aiInsights?.reasons).length
-                ? `
-                  <ul class="tic-list" style="margin-top:10px">
-                    ${safeArray(guide.aiInsights.reasons)
-                      .slice(0, 4)
-                      .map((reason) => `<li>${escapeHTML(reason)}</li>`)
-                      .join("")}
-                  </ul>
-                `
-                : ""
-            }
-          </div>
+        <div class="guide-country-score">
+          <span>التطابق معك</span>
+          <strong>${escapeHTML(Math.round(number(score)))}%</strong>
         </div>
 
-        <div
-          class="tic-action-row"
-          style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px"
-        >
+        <div class="guide-country-actions">
           ${renderButton({
-            label: "إضافة إلى الخطة",
+            label: "إضافة للخطة",
             action: "guide-add-annual-plan",
             params: { countryCode: country.code },
             primary: true,
@@ -1094,11 +1114,12 @@
           })}
         </div>
 
-        <div style="margin-top:10px">
+        <div class="guide-back-wrap">
           ${renderButton({
             label: "العودة للدليل",
             action: "guide-show-discover",
-            block: true
+            block: true,
+            compact: true
           })}
         </div>
       </section>
@@ -1111,20 +1132,17 @@
     if (!visible.length) return "";
 
     return `
-      <section class="tic-card">
+      <section class="tic-card guide-info-card">
         <div class="tic-card-body">
-          <h3 class="tic-card-title">${escapeHTML(title)}</h3>
-          <div class="tic-settings-list">
+          <h3>${escapeHTML(title)}</h3>
+
+          <div class="guide-info-list">
             ${visible
               .map(
                 (row) => `
-                  <div class="tic-settings-item">
-                    <div class="tic-settings-item-main">
-                      <div class="tic-settings-copy">
-                        <strong>${escapeHTML(row.label)}</strong>
-                        <small>${escapeHTML(row.value)}</small>
-                      </div>
-                    </div>
+                  <div>
+                    <span>${escapeHTML(row.label)}</span>
+                    <strong>${escapeHTML(row.value)}</strong>
                   </div>
                 `
               )
@@ -1141,9 +1159,9 @@
     if (!normalized.length) {
       return emptyText
         ? `
-          <section class="tic-card">
+          <section class="tic-card guide-info-card">
             <div class="tic-card-body">
-              <h3 class="tic-card-title">${escapeHTML(title)}</h3>
+              <h3>${escapeHTML(title)}</h3>
               <p class="tic-subtitle">${escapeHTML(emptyText)}</p>
             </div>
           </section>
@@ -1152,10 +1170,11 @@
     }
 
     return `
-      <section class="tic-card">
+      <section class="tic-card guide-info-card">
         <div class="tic-card-body">
-          <h3 class="tic-card-title">${escapeHTML(title)}</h3>
-          <div class="tic-settings-list">
+          <h3>${escapeHTML(title)}</h3>
+
+          <div class="guide-list">
             ${normalized
               .map((item) => {
                 const value =
@@ -1176,13 +1195,9 @@
                     : "";
 
                 return `
-                  <div class="tic-settings-item">
-                    <div class="tic-settings-item-main">
-                      <div class="tic-settings-copy">
-                        <strong>${escapeHTML(value)}</strong>
-                        ${secondary ? `<small>${escapeHTML(secondary)}</small>` : ""}
-                      </div>
-                    </div>
+                  <div>
+                    <strong>${escapeHTML(value)}</strong>
+                    ${secondary ? `<small>${escapeHTML(secondary)}</small>` : ""}
                   </div>
                 `;
               })
@@ -1197,9 +1212,12 @@
     const country = snapshot.selectedCountry;
     const guide = snapshot.countryGuide;
     const estimate = guide?.cost || {};
+    const idealDays =
+      country.recommendedDays?.ideal ||
+      state.selectedDays;
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-country-grid">
         ${renderInfoRows("نظرة سريعة", [
           { label: "العاصمة", value: country.capital },
           { label: "القارة", value: country.continent },
@@ -1212,15 +1230,15 @@
           },
           {
             label: "المدة المثالية",
-            value: `${country.recommendedDays.ideal} أيام`
+            value: `${idealDays} أيام`
           }
         ])}
 
-        ${renderInfoRows("تكلفة الرحلة التقريبية", [
-          { label: "الطيران", value: formatAED(estimate.flightAED) },
-          { label: "الفندق", value: formatAED(estimate.hotelAED) },
-          { label: "المصروف اليومي", value: formatAED(estimate.dailyExpensesAED) },
-          { label: "الإجمالي", value: formatAED(estimate.totalAED) }
+        ${renderInfoRows("التكلفة التقريبية", [
+          { label: "الطيران", value: estimate.flightAED ? formatAED(estimate.flightAED) : "" },
+          { label: "الفندق", value: estimate.hotelAED ? formatAED(estimate.hotelAED) : "" },
+          { label: "المصروف اليومي", value: estimate.dailyExpensesAED ? formatAED(estimate.dailyExpensesAED) : "" },
+          { label: "الإجمالي", value: estimate.totalAED ? formatAED(estimate.totalAED) : "" }
         ])}
 
         ${renderSimpleList("أفضل المدن", country.cities)}
@@ -1234,20 +1252,24 @@
     const guide = snapshot.countryGuide;
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-country-grid">
         ${renderInfoRows("طقس الشهر المختار", [
           { label: "الشهر", value: monthLabel(state.selectedMonth) },
           {
             label: "أقل درجة",
-            value: guide?.weather?.min !== null && guide?.weather?.min !== undefined
-              ? `${guide.weather.min}°`
-              : ""
+            value:
+              guide?.weather?.min !== null &&
+              guide?.weather?.min !== undefined
+                ? `${guide.weather.min}°`
+                : ""
           },
           {
             label: "أعلى درجة",
-            value: guide?.weather?.max !== null && guide?.weather?.max !== undefined
-              ? `${guide.weather.max}°`
-              : ""
+            value:
+              guide?.weather?.max !== null &&
+              guide?.weather?.max !== undefined
+                ? `${guide.weather.max}°`
+                : ""
           },
           {
             label: "التقييم",
@@ -1264,15 +1286,12 @@
           safeArray(guide?.bestMonths).map(monthLabel)
         )}
 
-        ${renderSimpleList(
-          "المواسم المناسبة",
-          country.seasons
-        )}
+        ${renderSimpleList("المواسم المناسبة", country.seasons)}
 
         ${renderSimpleList(
           "أشهر يفضل تجنبها",
           safeArray(country.monthsToAvoid).map(monthLabel),
-          "لا توجد أشهر محددة في قاعدة البيانات حالياً."
+          "لا توجد أشهر محددة لتجنبها حالياً."
         )}
       </div>
     `;
@@ -1285,82 +1304,52 @@
       [];
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-country-grid">
         ${
           recommendations.length
             ? recommendations
                 .map(
                   (item) => `
-                    <article class="tic-card">
+                    <article class="tic-card guide-info-card">
                       <div class="tic-card-body">
                         <span class="tic-chip">
                           ${escapeHTML(item.hotel.city || country.nameAr)}
                         </span>
 
-                        <h3 class="tic-card-title" style="margin-top:10px">
-                          ${escapeHTML(item.hotel.nameAr || item.hotel.name)}
-                        </h3>
+                        <h3>${escapeHTML(item.hotel.nameAr || item.hotel.name)}</h3>
 
-                        <div class="tic-settings-list" style="margin-top:12px">
-                          <div class="tic-settings-item">
-                            <div class="tic-settings-item-main">
-                              <div class="tic-settings-copy">
-                                <strong>التقييم الذكي</strong>
-                                <small>${escapeHTML(item.score)}%</small>
-                              </div>
-                            </div>
+                        <div class="guide-info-list">
+                          <div>
+                            <span>التقييم الذكي</span>
+                            <strong>${escapeHTML(item.score)}%</strong>
                           </div>
-
-                          <div class="tic-settings-item">
-                            <div class="tic-settings-item-main">
-                              <div class="tic-settings-copy">
-                                <strong>الشطاف</strong>
-                                <small>${item.hotel.hasShattaf ? "متوفر" : "يحتاج تأكيد"}</small>
-                              </div>
-                            </div>
+                          <div>
+                            <span>الشطاف</span>
+                            <strong>${item.hotel.hasShattaf ? "متوفر" : "يحتاج تأكيد"}</strong>
                           </div>
-
-                          <div class="tic-settings-item">
-                            <div class="tic-settings-item-main">
-                              <div class="tic-settings-copy">
-                                <strong>السعر التقريبي لليلة</strong>
-                                <small>${escapeHTML(formatAED(item.hotel.estimatedNightlyAED))}</small>
-                              </div>
-                            </div>
+                          <div>
+                            <span>السعر لليلة</span>
+                            <strong>${escapeHTML(formatAED(item.hotel.estimatedNightlyAED))}</strong>
                           </div>
                         </div>
-
-                        ${
-                          item.reasons.length
-                            ? `
-                              <ul class="tic-list" style="margin-top:10px">
-                                ${item.reasons
-                                  .map((reason) => `<li>${escapeHTML(reason)}</li>`)
-                                  .join("")}
-                              </ul>
-                            `
-                            : ""
-                        }
                       </div>
                     </article>
                   `
                 )
                 .join("")
             : renderEmpty(
-                "لا توجد فنادق مفصلة لهذه الدولة حالياً",
-                "المحرك سيعرض بيانات الفنادق فور إضافتها إلى قاعدة البيانات.",
-                "⌂"
+                "لا توجد فنادق مفصلة حالياً",
+                "ستظهر الفنادق عند توفر بياناتها في قاعدة الدليل.",
+                "⌂",
+                true
               )
         }
 
-        ${renderSimpleList(
-          "معلومات عامة عن الإقامة",
-          [
-            `توفر الشطاف: ${country.shattafAvailability || "غير معروف"}`,
-            country.familyFriendly ? "مناسبة للعائلات" : "راجع ملاءمتها للعائلة",
-            country.halal?.friendly ? "خيارات الحلال متوفرة" : "ابحث مسبقاً عن خيارات الحلال"
-          ]
-        )}
+        ${renderSimpleList("معلومات الإقامة", [
+          `توفر الشطاف: ${country.shattafAvailability || "غير معروف"}`,
+          country.familyFriendly ? "مناسبة للعائلات" : "راجع ملاءمتها للعائلة",
+          country.halal?.friendly ? "خيارات الحلال متوفرة" : "ابحث مسبقاً عن خيارات الحلال"
+        ])}
       </div>
     `;
   };
@@ -1369,27 +1358,27 @@
     const country = snapshot.selectedCountry;
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-country-grid">
         ${renderSimpleList("أفضل المدن", country.cities)}
         ${renderSimpleList(
           "الأماكن السياحية",
           country.attractions,
-          "سيتم عرض الأماكن المفصلة عند توفر بيانات الدولة."
+          "لا توجد أماكن مفصلة لهذه الوجهة حالياً."
         )}
         ${renderSimpleList(
           "الشواطئ",
           country.beaches,
-          "لا توجد شواطئ مضافة لهذه الوجهة حالياً."
+          "لا توجد شواطئ مضافة لهذه الوجهة."
         )}
         ${renderSimpleList(
           "الأنشطة والتجارب",
           country.experiences,
-          "لا توجد تجارب مضافة لهذه الوجهة حالياً."
+          "لا توجد تجارب مضافة لهذه الوجهة."
         )}
         ${renderSimpleList(
           "المطاعم الحلال",
           country.halalRestaurants,
-          "راجع المطاعم الحلال في المدينة المختارة قبل السفر."
+          "راجع المطاعم الحلال قبل السفر."
         )}
       </div>
     `;
@@ -1399,7 +1388,7 @@
     const country = snapshot.selectedCountry;
 
     return `
-      <div class="tic-destination-grid">
+      <div class="guide-country-grid">
         ${renderInfoRows("التأشيرة والدخول", [
           { label: "الحالة", value: country.visa?.status },
           { label: "ملاحظة", value: country.visa?.note }
@@ -1456,46 +1445,45 @@
       return renderEmpty(
         "تعذر إنشاء الجدول",
         "تأكد من اختيار الدولة والأيام ثم أعد المحاولة.",
-        "▣"
+        "▣",
+        true
       );
     }
 
     return `
-      ${renderPlannerControls()}
+      ${renderPlannerControls({ compact: true })}
 
-      <div class="tic-destination-grid" style="margin-top:14px">
+      <div class="guide-itinerary-list">
         ${itinerary.itinerary
           .map(
             (day) => `
-              <article class="tic-card">
+              <article class="tic-card guide-itinerary-day">
                 <div class="tic-card-body">
                   <span class="tic-chip">
                     اليوم ${escapeHTML(day.day)}
                     ${day.city ? ` · ${escapeHTML(day.city)}` : ""}
                   </span>
 
-                  <h3 class="tic-card-title" style="margin-top:10px">
-                    ${escapeHTML(day.theme)}
-                  </h3>
+                  <h3>${escapeHTML(day.theme)}</h3>
 
-                  <div class="tic-settings-list" style="margin-top:12px">
+                  <div class="guide-list">
                     ${safeArray(day.activities)
                       .map(
                         (activity) => `
-                          <div class="tic-settings-item">
-                            <div class="tic-settings-item-main">
-                              <div class="tic-settings-copy">
-                                <strong>${escapeHTML(activity.name)}</strong>
-                                <small>${escapeHTML(activity.period || activity.type || "")}</small>
-                              </div>
-                            </div>
+                          <div>
+                            <strong>${escapeHTML(activity.name)}</strong>
+                            <small>${escapeHTML(activity.period || activity.type || "")}</small>
                           </div>
                         `
                       )
                       .join("")}
                   </div>
 
-                  ${day.notes ? `<p class="tic-subtitle" style="margin-top:10px">${escapeHTML(day.notes)}</p>` : ""}
+                  ${
+                    day.notes
+                      ? `<p class="tic-subtitle">${escapeHTML(day.notes)}</p>`
+                      : ""
+                  }
                 </div>
               </article>
             `
@@ -1543,16 +1531,18 @@
       ${renderSection({
         eyebrow: "TRIP SETTINGS",
         title: "إعدادات رحلتك",
-        subtitle: "غيّر الأيام والشهر والميزانية وسيتم تحديث الدليل مباشرة.",
-        content: renderPlannerControls()
+        subtitle: "غيّر الأيام والشهر والميزانية.",
+        compact: true,
+        content: renderPlannerControls({ compact: true })
       })}
 
       ${renderCountryTabs()}
 
       ${renderSection({
         eyebrow: "COUNTRY INTELLIGENCE",
-        title: "دليل ${snapshot.selectedCountry.nameAr}",
-        subtitle: "معلومات عملية مرتبطة بميزانيتك وتفضيلاتك.",
+        title: `دليل ${snapshot.selectedCountry.nameAr}`,
+        subtitle: "",
+        compact: true,
         content: renderCountrySection(snapshot)
       })}
     `;
@@ -1562,13 +1552,13 @@
     if (!snapshot.ready) {
       return `
         <div
-          class="tic-module"
+          class="tic-module guide-page"
           data-page="${PAGE_ID}"
           data-page-version="${PAGE_VERSION}"
         >
           ${renderEmpty(
             "الدليل غير جاهز",
-            snapshot.error || "تأكد من تحميل ملفات الدليل الجديدة.",
+            snapshot.error || "تأكد من تحميل ملفات الدليل.",
             "⚠️"
           )}
         </div>
@@ -1577,7 +1567,7 @@
 
     return `
       <div
-        class="tic-module"
+        class="tic-module guide-page"
         data-page="${PAGE_ID}"
         data-page-version="${PAGE_VERSION}"
         data-guide-view="${escapeHTML(state.activeView)}"
@@ -1595,31 +1585,124 @@
      Events and refresh
   ========================================================= */
 
+  const updateSearchResultsOnly = () => {
+    if (!state.container || !state.snapshot) return;
+
+    const guide = getGuideEngine();
+    const allCountries =
+      state.snapshot.allCountries?.length
+        ? state.snapshot.allCountries
+        : getAllCountries(guide);
+
+    const countries = filterCountries(allCountries, state.search);
+    const panel = state.container.querySelector(
+      "[data-guide-country-panel]"
+    );
+
+    if (!panel) return;
+
+    panel.classList.toggle(
+      "is-open",
+      Boolean(state.countryPickerOpen || state.search)
+    );
+
+    panel.innerHTML = countries.length
+      ? countries
+          .map(
+            (country) => `
+              <button
+                type="button"
+                class="guide-country-option"
+                data-guide-country-option="${escapeHTML(country.code)}"
+              >
+                <span class="guide-country-flag">
+                  ${escapeHTML(country.flag || "🌍")}
+                </span>
+                <span>
+                  <strong>${escapeHTML(country.nameAr)}</strong>
+                  <small>${escapeHTML(country.nameEn || country.code)}</small>
+                </span>
+                <span aria-hidden="true">‹</span>
+              </button>
+            `
+          )
+          .join("")
+      : renderEmpty(
+          "لا توجد نتيجة",
+          "جرب كتابة الاسم بالعربي أو الإنجليزي.",
+          "⌕",
+          true
+        );
+
+    bindCountryOptionListeners(panel);
+  };
+
+  const bindCountryOptionListeners = (scope) => {
+    scope
+      ?.querySelectorAll?.("[data-guide-country-option]")
+      .forEach((button) => {
+        button.addEventListener("click", () => {
+          const code = text(
+            button.getAttribute("data-guide-country-option")
+          ).toUpperCase();
+
+          if (code) openCountry(code);
+        });
+      });
+  };
+
   const applyListeners = () => {
     if (!state.container) return;
 
     const searchInput =
       state.container.querySelector("[data-guide-search]");
 
+    searchInput?.addEventListener("focus", () => {
+      state.countryPickerOpen = true;
+      state.container
+        ?.querySelector("[data-guide-country-panel]")
+        ?.classList.add("is-open");
+    });
+
     searchInput?.addEventListener("input", (event) => {
       state.search = event.target.value;
-      refresh({ preserveSearchFocus: true });
+      state.countryPickerOpen = true;
+
+      window.clearTimeout(state.searchTimer);
+      state.searchTimer = window.setTimeout(
+        updateSearchResultsOnly,
+        90
+      );
     });
 
-    const select =
-      state.container.querySelector("[data-guide-country-select]");
+    const trigger =
+      state.container.querySelector("[data-guide-country-trigger]");
 
-    select?.addEventListener("change", (event) => {
-      const code = text(event.target.value).toUpperCase();
+    trigger?.addEventListener("click", () => {
+      state.countryPickerOpen = !state.countryPickerOpen;
 
-      if (code) openCountry(code);
+      trigger.setAttribute(
+        "aria-expanded",
+        state.countryPickerOpen ? "true" : "false"
+      );
+
+      state.container
+        ?.querySelector("[data-guide-country-panel]")
+        ?.classList.toggle("is-open", state.countryPickerOpen);
     });
+
+    bindCountryOptionListeners(state.container);
 
     const days =
       state.container.querySelector("[data-guide-days]");
 
     days?.addEventListener("change", (event) => {
-      state.selectedDays = clamp(number(event.target.value, 7), 1, 30);
+      state.selectedDays = clamp(
+        number(event.target.value, 7),
+        1,
+        30
+      );
+      invalidateSnapshotCache();
       refresh();
     });
 
@@ -1627,7 +1710,12 @@
       state.container.querySelector("[data-guide-travelers]");
 
     travelers?.addEventListener("change", (event) => {
-      state.selectedTravelers = clamp(number(event.target.value, 2), 1, 20);
+      state.selectedTravelers = clamp(
+        number(event.target.value, 2),
+        1,
+        20
+      );
+      invalidateSnapshotCache();
       refresh();
     });
 
@@ -1635,7 +1723,12 @@
       state.container.querySelector("[data-guide-month]");
 
     month?.addEventListener("change", (event) => {
-      state.selectedMonth = clamp(number(event.target.value, 1), 1, 12);
+      state.selectedMonth = clamp(
+        number(event.target.value, 1),
+        1,
+        12
+      );
+      invalidateSnapshotCache();
       refresh();
     });
 
@@ -1643,7 +1736,11 @@
       state.container.querySelector("[data-guide-budget]");
 
     budget?.addEventListener("change", (event) => {
-      state.selectedBudget = Math.max(0, number(event.target.value, 0));
+      state.selectedBudget = Math.max(
+        0,
+        number(event.target.value, 0)
+      );
+      invalidateSnapshotCache();
       refresh();
     });
 
@@ -1657,11 +1754,20 @@
   };
 
   const refresh = async (options = {}) => {
+    if (!state.container || !state.mounted) {
+      return false;
+    }
+
+    if (state.rendering) {
+      state.refreshQueued = true;
+      return false;
+    }
+
     if (
-      !state.container ||
-      !state.mounted ||
-      state.rendering
+      state.isUserScrolling &&
+      options.allowDuringScroll !== true
     ) {
+      state.refreshQueued = true;
       return false;
     }
 
@@ -1678,8 +1784,16 @@
         ? activeElement.selectionStart
         : null;
 
+    const scrollTop =
+      state.container.scrollTop ||
+      window.scrollY ||
+      0;
+
     try {
-      const snapshot = await buildSnapshot();
+      const snapshot = await buildSnapshot({
+        force: options.force === true
+      });
+
       state.snapshot = snapshot;
       state.container.innerHTML = renderPage(snapshot);
       applyListeners();
@@ -1693,6 +1807,14 @@
         if (input && cursor !== null) {
           input.setSelectionRange(cursor, cursor);
         }
+      } else if (options.preserveScroll !== false) {
+        window.requestAnimationFrame(() => {
+          try {
+            state.container.scrollTop = scrollTop;
+          } catch (_) {
+            // Ignore.
+          }
+        });
       }
 
       emit("refreshed", {
@@ -1704,6 +1826,17 @@
       return true;
     } finally {
       state.rendering = false;
+
+      if (state.refreshQueued) {
+        state.refreshQueued = false;
+
+        window.setTimeout(() => {
+          refresh({
+            preserveScroll: true,
+            allowDuringScroll: false
+          });
+        }, 40);
+      }
     }
   };
 
@@ -1730,10 +1863,16 @@
     state.activeView = "country";
     state.activeSection = "overview";
     state.search = "";
+    state.countryPickerOpen = false;
 
+    invalidateSnapshotCache();
     getStore()?.setSelectedGuideCountry?.(code);
 
-    await refresh();
+    await refresh({
+      force: true,
+      preserveScroll: false,
+      allowDuringScroll: true
+    });
 
     try {
       state.container?.scrollTo?.({
@@ -1741,7 +1880,7 @@
         behavior: "smooth"
       });
     } catch (_) {
-      // Scrolling is optional.
+      // Optional.
     }
 
     emit("country-opened", { countryCode: code });
@@ -1775,15 +1914,29 @@
       state.activeSection = "overview";
       state.selectedCountryCode = "";
       state.search = "";
+      state.countryPickerOpen = false;
+      state.recommendationLimit = INITIAL_RECOMMENDATION_LIMIT;
+
+      invalidateSnapshotCache();
       getGuideEngine()?.clearSelection?.();
-      await refresh();
+
+      await refresh({
+        force: true,
+        preserveScroll: false,
+        allowDuringScroll: true
+      });
+
       return true;
     });
 
     register("guide-focus-country-search", async () => {
       state.activeView = "discover";
       state.pendingFocusSelector = "[data-guide-search]";
-      await refresh();
+
+      await refresh({
+        preserveScroll: false,
+        allowDuringScroll: true
+      });
 
       window.setTimeout(() => {
         state.container
@@ -1799,7 +1952,11 @@
 
     register("guide-scroll-annual-plans", async () => {
       state.activeView = "discover";
-      await refresh();
+
+      await refresh({
+        preserveScroll: false,
+        allowDuringScroll: true
+      });
 
       window.setTimeout(() => {
         state.container
@@ -1809,6 +1966,19 @@
             block: "start"
           });
       }, 50);
+
+      return true;
+    });
+
+    register("guide-show-more-recommendations", async () => {
+      state.recommendationLimit += 4;
+      invalidateSnapshotCache();
+
+      await refresh({
+        force: true,
+        preserveScroll: true,
+        allowDuringScroll: true
+      });
 
       return true;
     });
@@ -1829,7 +1999,13 @@
       }
 
       state.activeSection = section;
-      await refresh();
+      invalidateSnapshotCache();
+
+      await refresh({
+        force: section === "planner",
+        preserveScroll: true,
+        allowDuringScroll: true
+      });
 
       return true;
     });
@@ -1850,7 +2026,14 @@
           "success"
         );
 
-        await refresh();
+        invalidateSnapshotCache();
+
+        await refresh({
+          force: true,
+          preserveScroll: true,
+          allowDuringScroll: true
+        });
+
         return result || true;
       } catch (error) {
         console.error("TIC Guide wishlist error:", error);
@@ -1889,7 +2072,14 @@
           "success"
         );
 
-        await refresh();
+        invalidateSnapshotCache();
+
+        await refresh({
+          force: true,
+          preserveScroll: true,
+          allowDuringScroll: true
+        });
+
         return plan || true;
       } catch (error) {
         console.error("TIC Guide annual plan error:", error);
@@ -1908,9 +2098,12 @@
       if (!code) return false;
 
       try {
+        const country =
+          getGuideEngine()?.getCountry?.(code);
+
         const itinerary =
           getTravelAI()?.generateItinerary?.(
-            getGuideEngine()?.getCountry?.(code),
+            country,
             {
               days: state.selectedDays,
               travelers: state.selectedTravelers,
@@ -1955,9 +2148,7 @@
 
       try {
         const result =
-          await getPlannerEngine()?.convertPlanToTrip?.(
-            planId
-          );
+          await getPlannerEngine()?.convertPlanToTrip?.(planId);
 
         safeToast(
           result?.duplicate
@@ -1966,7 +2157,14 @@
           "success"
         );
 
-        await refresh();
+        invalidateSnapshotCache();
+
+        await refresh({
+          force: true,
+          preserveScroll: true,
+          allowDuringScroll: true
+        });
+
         return result || true;
       } catch (error) {
         console.error("TIC Guide plan conversion error:", error);
@@ -1988,10 +2186,45 @@
     }
 
     state.unsubscribeStore = store.subscribe(() => {
-      if (state.mounted && !state.rendering) {
-        refresh();
-      }
+      if (!state.mounted || state.rendering) return;
+
+      window.clearTimeout(state.storeRefreshTimer);
+
+      state.storeRefreshTimer = window.setTimeout(() => {
+        invalidateSnapshotCache();
+
+        refresh({
+          force: true,
+          preserveScroll: true,
+          allowDuringScroll: false
+        });
+      }, STORE_REFRESH_DELAY);
     });
+  };
+
+  const registerScrollState = () => {
+    const target = state.container || window;
+
+    target?.addEventListener?.(
+      "scroll",
+      () => {
+        state.isUserScrolling = true;
+        window.clearTimeout(state.scrollTimer);
+
+        state.scrollTimer = window.setTimeout(() => {
+          state.isUserScrolling = false;
+
+          if (state.refreshQueued && !state.rendering) {
+            state.refreshQueued = false;
+            refresh({
+              preserveScroll: true,
+              allowDuringScroll: true
+            });
+          }
+        }, 160);
+      },
+      { passive: true }
+    );
   };
 
   /* =========================================================
@@ -2036,6 +2269,7 @@
       if (routeCode) {
         state.selectedCountryCode = routeCode;
         state.activeView = "country";
+        invalidateSnapshotCache();
       }
 
       const snapshot = await buildSnapshot();
@@ -2068,6 +2302,7 @@
       if (routeCode) {
         state.selectedCountryCode = routeCode;
         state.activeView = "country";
+        invalidateSnapshotCache();
       }
 
       const snapshot = await buildSnapshot();
@@ -2075,6 +2310,7 @@
 
       container.innerHTML = renderPage(snapshot);
       applyListeners();
+      registerScrollState();
 
       emit("mounted", {
         totalCountries: snapshot.summary?.totalCountries || 0,
@@ -2099,6 +2335,11 @@
     unmount() {
       state.mounted = false;
       state.container = null;
+
+      window.clearTimeout(state.searchTimer);
+      window.clearTimeout(state.storeRefreshTimer);
+      window.clearTimeout(state.scrollTimer);
+
       emit("unmounted");
       return true;
     },
@@ -2141,6 +2382,8 @@
       state.actionUnsubscribers = [];
       state.subscribers.clear();
       state.snapshot = null;
+      state.cacheSnapshot = null;
+      state.cacheKey = "";
       state.initialized = false;
 
       return true;
@@ -2156,6 +2399,7 @@
         activeSection: state.activeSection,
         selectedCountryCode: state.selectedCountryCode,
         search: state.search,
+        recommendationLimit: state.recommendationLimit,
         storeAvailable: Boolean(getStore()),
         routerAvailable: Boolean(getRouter()),
         uiAvailable: Boolean(getUI()),
