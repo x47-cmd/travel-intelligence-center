@@ -1,7 +1,7 @@
 /* =========================================================
    Travel Intelligence Center
-   Application Bootstrap V4.0.0
-   Unified Guide + Trips + Budget Runtime
+   Application Bootstrap V4.1.0
+   Unified Guide + Trips + Planned Trips + Budget Runtime
 
    File Path:
    js/app.js
@@ -9,9 +9,13 @@
    Purpose:
    - Bootstraps the complete application safely.
    - Connects Config, Data, Store, Router, UI, Features and Pages.
-   - Initializes the new compact Guide Intelligence architecture:
+   - Initializes the compact Guide Intelligence architecture:
      WorldGuideData, GuideEngine, TravelAI and PlannerEngine.
    - Preserves all existing Budget Intelligence engines.
+   - Initializes Budget Travel Intelligence when available.
+   - Connects budget travel suggestions with plannedTrips persistence.
+   - Connects plannedTrips with the Trips page checklist workflow.
+   - Synchronizes planned-trip lifecycle and automatic promotion.
    - Registers all available page modules.
    - Restores the requested route when possible.
    - Falls back to the Home page when needed.
@@ -34,6 +38,7 @@
    - js/features/planner-engine.js
    - js/features/trip-form.js
    - Budget Intelligence engine files
+   - Budget Travel Intelligence engine file
    - js/pages/home.js
    - js/pages/trips.js
    - js/pages/guide.js
@@ -52,12 +57,13 @@
   window.TIC = window.TIC || {};
 
   const TIC = window.TIC;
-  const APP_VERSION = "4.0.0";
+  const APP_VERSION = "4.1.0";
 
   const FEATURE_GROUP = Object.freeze({
     CORE: "core",
     GUIDE: "guide",
     BUDGET: "budget",
+    PLANNING: "planning",
     LEGACY_GUIDE: "legacy-guide",
     OTHER: "other"
   });
@@ -80,7 +86,9 @@
     storeUnsubscribe: null,
     eventBindings: [],
     startupPromise: null,
-    routerStarted: false
+    routerStarted: false,
+    lastPlannedTripSyncAt: null,
+    plannedTripSyncRunning: false
   };
 
   /* =========================================================
@@ -90,14 +98,18 @@
   const clone = (value) => {
     if (value === undefined) return undefined;
 
-    try {
-      return structuredClone(value);
-    } catch (_) {
+    if (typeof structuredClone === "function") {
       try {
-        return JSON.parse(JSON.stringify(value));
+        return structuredClone(value);
       } catch (_) {
-        return value;
+        // Continue to JSON fallback.
       }
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+      return value;
     }
   };
 
@@ -124,8 +136,10 @@
     document.querySelector("#app");
 
   const isPromiseLike = (value) =>
-    value &&
-    typeof value.then === "function";
+    Boolean(
+      value &&
+      typeof value.then === "function"
+    );
 
   const settle = async (value) =>
     isPromiseLike(value)
@@ -264,6 +278,40 @@
     return feature[method](options);
   };
 
+  const getPlannedTrips = () => {
+    try {
+      if (
+        typeof TIC.Store?.getPlannedTrips === "function"
+      ) {
+        return TIC.Store.getPlannedTrips({
+          includeArchived: false,
+          includeConverted: false
+        });
+      }
+
+      if (
+        typeof TIC.Store?.get === "function"
+      ) {
+        const plannedTrips =
+          TIC.Store.get("plannedTrips", []);
+
+        return Array.isArray(plannedTrips)
+          ? clone(plannedTrips)
+          : [];
+      }
+    } catch (error) {
+      recordWarning(
+        "read-planned-trips",
+        "Planned trips could not be read.",
+        {
+          error: error.message
+        }
+      );
+    }
+
+    return [];
+  };
+
   /* =========================================================
      Runtime resolution
   ========================================================= */
@@ -323,6 +371,19 @@
       TIC.Features.PlannerEngine ||
       window.PlannerEngine ||
       window.TravelPlannerEngine ||
+      null;
+
+    TIC.Features.budgetTravelIntelligence =
+      TIC.Features.budgetTravelIntelligence ||
+      TIC.Features.BudgetTravelIntelligence ||
+      window.TICBudgetTravelIntelligence ||
+      window.TICBudgetTravelEngine ||
+      window.BudgetTravelIntelligence ||
+      null;
+
+    TIC.Features.plannedTripsPageIntegration =
+      TIC.Features.plannedTripsPageIntegration ||
+      window.TICPlannedTripsPageIntegration ||
       null;
 
     return {
@@ -535,6 +596,27 @@
       feature:
         TIC.Features?.budgetIntegrationEngine ||
         window.TICBudgetIntegrationEngine
+    },
+
+    {
+      id: "budget-travel-intelligence",
+      group: FEATURE_GROUP.PLANNING,
+      required: false,
+      feature:
+        TIC.Features?.budgetTravelIntelligence ||
+        TIC.Features?.BudgetTravelIntelligence ||
+        window.TICBudgetTravelIntelligence ||
+        window.TICBudgetTravelEngine ||
+        window.BudgetTravelIntelligence
+    },
+
+    {
+      id: "planned-trips-page-integration",
+      group: FEATURE_GROUP.PLANNING,
+      required: false,
+      feature:
+        TIC.Features?.plannedTripsPageIntegration ||
+        window.TICPlannedTripsPageIntegration
     }
   ];
 
@@ -609,8 +691,26 @@
           TIC.Features?.PlannerEngine ||
           window.PlannerEngine ||
           null,
+        budgetEngine:
+          TIC.Features?.budgetEngine ||
+          window.TICBudgetEngine ||
+          null,
+        budgetAnalytics:
+          TIC.Features?.budgetAnalytics ||
+          window.TICBudgetAnalytics ||
+          null,
+        budgetAI:
+          TIC.Features?.budgetAI ||
+          window.TICBudgetAI ||
+          null,
+        budgetTravelIntelligence:
+          TIC.Features?.budgetTravelIntelligence ||
+          window.TICBudgetTravelIntelligence ||
+          window.TICBudgetTravelEngine ||
+          null,
         app: App,
         autoSync: true,
+        autoPromotePlannedTrips: true,
         strictMode: false
       };
 
@@ -937,7 +1037,7 @@
   };
 
   /* =========================================================
-     Store and runtime events
+     Trip and planned-trip lifecycle synchronization
   ========================================================= */
 
   const syncTripLifecycle = () => {
@@ -955,6 +1055,114 @@
       );
     }
   };
+
+  const syncPlannedTripLifecycle = async (
+    options = {}
+  ) => {
+    if (
+      state.plannedTripSyncRunning
+    ) {
+      return false;
+    }
+
+    state.plannedTripSyncRunning = true;
+
+    try {
+      let result = null;
+
+      if (
+        typeof TIC.Store
+          ?.syncPlannedTripStatuses === "function"
+      ) {
+        result =
+          await settle(
+            TIC.Store.syncPlannedTripStatuses({
+              autoPromote:
+                options.autoPromote !== false,
+              forcePersist:
+                options.forcePersist === true,
+              source:
+                options.source ||
+                "app-bootstrap"
+            })
+          );
+      } else if (
+        typeof TIC.Store
+          ?.autoPromoteReadyPlannedTrips === "function"
+      ) {
+        result =
+          await settle(
+            TIC.Store.autoPromoteReadyPlannedTrips({
+              source:
+                options.source ||
+                "app-bootstrap"
+            })
+          );
+      }
+
+      state.lastPlannedTripSyncAt =
+        nowISO();
+
+      dispatch(
+        "tic:app:planned-trips-synced",
+        {
+          result: clone(result),
+          plannedTripCount:
+            getPlannedTrips().length,
+          timestamp:
+            state.lastPlannedTripSyncAt,
+          source:
+            options.source ||
+            "app-bootstrap"
+        }
+      );
+
+      return result;
+    } catch (error) {
+      recordWarning(
+        "planned-trip-lifecycle-sync",
+        "Planned-trip lifecycle synchronization failed.",
+        {
+          error: error.message,
+          source:
+            options.source ||
+            "app-bootstrap"
+        }
+      );
+
+      return false;
+    } finally {
+      state.plannedTripSyncRunning = false;
+    }
+  };
+
+  const refreshTripsPage = () => {
+    const tripsPage =
+      TIC.Pages?.trips ||
+      window.TICTripsPage;
+
+    try {
+      if (
+        typeof tripsPage?.refresh === "function" &&
+        tripsPage?.diagnostics?.()
+          ?.mounted === true
+      ) {
+        tripsPage.refresh();
+      }
+    } catch (error) {
+      recordWarning(
+        "refresh-trips-page",
+        "Trips page refresh was deferred.",
+        {
+          error: error.message
+        }
+      );
+    }
+  };
+
+  /* =========================================================
+     Store and runtime events
+  ========================================================= */
 
   const subscribeToStore = () => {
     if (
@@ -980,7 +1188,13 @@
                 updatedAt:
                   snapshot?.meta
                     ?.updatedAt ||
-                  nowISO()
+                  nowISO(),
+                plannedTripCount:
+                  Array.isArray(
+                    snapshot?.plannedTrips
+                  )
+                    ? snapshot.plannedTrips.length
+                    : getPlannedTrips().length
               }
             );
           }
@@ -1001,6 +1215,18 @@
     if (state.eventBindings.length) {
       return;
     }
+
+    const plannedTripRefreshHandler =
+      async (event) => {
+        await syncPlannedTripLifecycle({
+          autoPromote: true,
+          source:
+            event?.type ||
+            "planned-trip-event"
+        });
+
+        refreshTripsPage();
+      };
 
     const bindings = [
       {
@@ -1060,6 +1286,69 @@
 
       {
         name:
+          "tic:planned-trips-changed",
+        handler:
+          plannedTripRefreshHandler
+      },
+
+      {
+        name:
+          "tic:budget-travel-planned-trip-created",
+        handler:
+          plannedTripRefreshHandler
+      },
+
+      {
+        name:
+          "tic:planned-trip-created",
+        handler:
+          plannedTripRefreshHandler
+      },
+
+      {
+        name:
+          "tic:planned-trip-updated",
+        handler:
+          plannedTripRefreshHandler
+      },
+
+      {
+        name:
+          "tic:planned-trip-checklist-updated",
+        handler:
+          plannedTripRefreshHandler
+      },
+
+      {
+        name:
+          "tic:planned-trip-promoted",
+        handler:
+          (event) => {
+            refreshTripsPage();
+
+            dispatch(
+              "tic:guide:refresh-requested",
+              {
+                source:
+                  "planned-trip-promoted",
+                plannedTripId:
+                  event.detail
+                    ?.plannedTripId ||
+                  null
+              }
+            );
+          }
+      },
+
+      {
+        name:
+          "tic:planned-trip-deleted",
+        handler:
+          plannedTripRefreshHandler
+      },
+
+      {
+        name:
           "hashchange",
         handler:
           () => {
@@ -1082,6 +1371,12 @@
               "visible"
             ) {
               syncTripLifecycle();
+
+              syncPlannedTripLifecycle({
+                autoPromote: true,
+                source:
+                  "visibilitychange"
+              });
             }
           }
       }
@@ -1134,15 +1429,24 @@
     if (
       typeof TIC.Store.init === "function"
     ) {
-      await settle(TIC.Store.init());
+      await settle(
+        TIC.Store.init()
+      );
     }
 
     syncTripLifecycle();
 
+    await syncPlannedTripLifecycle({
+      autoPromote: true,
+      source: "startup"
+    });
+
     if (
       typeof TIC.UI.init === "function"
     ) {
-      await settle(TIC.UI.init());
+      await settle(
+        TIC.UI.init()
+      );
     }
 
     state.container =
@@ -1174,6 +1478,12 @@
 
     await initializeFeatures();
     await registerPages();
+
+    await syncPlannedTripLifecycle({
+      autoPromote: true,
+      source:
+        "features-initialized"
+    });
 
     return true;
   };
@@ -1404,6 +1714,101 @@
     };
   };
 
+  const getPlannedTripsHealth = () => {
+    const plannedTrips =
+      getPlannedTrips();
+
+    const readyForPromotion =
+      plannedTrips.filter(
+        (trip) =>
+          trip?.checklist
+            ?.flightBooked === true &&
+          trip?.checklist
+            ?.hotelBooked === true
+      ).length;
+
+    const budgetTravelFeature =
+      TIC.Features
+        ?.budgetTravelIntelligence ||
+      TIC.Features
+        ?.BudgetTravelIntelligence ||
+      window.TICBudgetTravelIntelligence ||
+      window.TICBudgetTravelEngine ||
+      null;
+
+    const pageIntegration =
+      TIC.Features
+        ?.plannedTripsPageIntegration ||
+      window.TICPlannedTripsPageIntegration ||
+      null;
+
+    const storeApis = {
+      getPlannedTrips:
+        typeof TIC.Store
+          ?.getPlannedTrips === "function",
+      createPlannedTrip:
+        typeof TIC.Store
+          ?.createPlannedTrip === "function" ||
+        typeof TIC.Store
+          ?.addPlannedTrip === "function",
+      updateChecklist:
+        typeof TIC.Store
+          ?.updatePlannedTripChecklist === "function",
+      promote:
+        typeof TIC.Store
+          ?.promotePlannedTripToReady === "function" ||
+        typeof TIC.Store
+          ?.convertPlannedTripToTrip === "function",
+      delete:
+        typeof TIC.Store
+          ?.deletePlannedTrip === "function" ||
+        typeof TIC.Store
+          ?.removePlannedTrip === "function"
+    };
+
+    const readyApiCount =
+      Object.values(storeApis)
+        .filter(Boolean)
+        .length;
+
+    const totalApiCount =
+      Object.keys(storeApis).length;
+
+    const score =
+      Math.round(
+        (
+          (
+            readyApiCount +
+            (budgetTravelFeature ? 1 : 0) +
+            (pageIntegration ? 1 : 0)
+          ) /
+          (totalApiCount + 2)
+        ) * 100
+      );
+
+    return {
+      status:
+        score === 100
+          ? "ready"
+          : score >= 50
+            ? "degraded"
+            : "disconnected",
+      score,
+      plannedTripCount:
+        plannedTrips.length,
+      readyForPromotion,
+      lastSyncAt:
+        state.lastPlannedTripSyncAt,
+      syncRunning:
+        state.plannedTripSyncRunning,
+      budgetTravelFeatureAvailable:
+        Boolean(budgetTravelFeature),
+      pageIntegrationAvailable:
+        Boolean(pageIntegration),
+      storeApis
+    };
+  };
+
   const runDiagnostics = () => {
     const featureDiagnostics =
       collectFeatureDiagnostics();
@@ -1477,6 +1882,11 @@
 
       budgetIntelligence:
         clone(getBudgetHealth()),
+
+      plannedTripsIntelligence:
+        clone(
+          getPlannedTripsHealth()
+        ),
 
       featureDiagnostics,
       pageDiagnostics,
@@ -1572,6 +1982,9 @@
                 budgetIntelligence:
                   diagnostics
                     .budgetIntelligence,
+                plannedTripsIntelligence:
+                  diagnostics
+                    .plannedTripsIntelligence,
                 timestamp:
                   nowISO()
               }
@@ -1655,6 +2068,8 @@
         state.warnings = [];
         state.startTime = null;
         state.endTime = null;
+        state.lastPlannedTripSyncAt = null;
+        state.plannedTripSyncRunning = false;
 
         return await this.init();
       } finally {
@@ -1684,6 +2099,26 @@
         required:
           options.required === true
       });
+    },
+
+    async syncPlannedTrips(
+      options = {}
+    ) {
+      return await syncPlannedTripLifecycle({
+        autoPromote:
+          options.autoPromote !== false,
+        forcePersist:
+          options.forcePersist === true,
+        source:
+          options.source ||
+          "app-public-api"
+      });
+    },
+
+    getPlannedTrips() {
+      return clone(
+        getPlannedTrips()
+      );
     },
 
     go(
@@ -1727,6 +2162,12 @@
     getBudgetHealth() {
       return clone(
         getBudgetHealth()
+      );
+    },
+
+    getPlannedTripsHealth() {
+      return clone(
+        getPlannedTripsHealth()
       );
     },
 
