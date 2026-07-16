@@ -2738,3 +2738,1366 @@
 
   BudgetPage.init();
 })(window, document);
+
+/* =========================================================
+   Travel Intelligence Center
+   Budget Travel Intelligence Additive Integration V1.0.0
+
+   Append this block AFTER the existing closing line:
+   })(window, document);
+
+   This extension preserves Budget Page V3.1.1 without replacing
+   or removing any existing code.
+========================================================= */
+
+(function budgetTravelIntelligencePageExtension(window, document) {
+  "use strict";
+
+  const EXTENSION_VERSION = "1.0.0";
+  const PAGE_SELECTOR = '.tic-budget-platform[data-page="budget"]';
+  const INJECTION_SELECTOR = "[data-budget-travel-intelligence]";
+  const MONTHS_AR = Object.freeze([
+    "",
+    "يناير",
+    "فبراير",
+    "مارس",
+    "أبريل",
+    "مايو",
+    "يونيو",
+    "يوليو",
+    "أغسطس",
+    "سبتمبر",
+    "أكتوبر",
+    "نوفمبر",
+    "ديسمبر"
+  ]);
+
+  const runtime = {
+    initialized: false,
+    observer: null,
+    rendering: false,
+    clickBound: false,
+    eventHandlers: [],
+    lastSignature: ""
+  };
+
+  const clone = (value) => {
+    if (value === undefined) return undefined;
+
+    if (typeof structuredClone === "function") {
+      try {
+        return structuredClone(value);
+      } catch (_) {}
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+      return value;
+    }
+  };
+
+  const text = (value, fallback = "") =>
+    String(value === undefined || value === null ? fallback : value).trim();
+
+  const number = (value, fallback = 0) => {
+    const result = Number(value);
+    return Number.isFinite(result) ? result : fallback;
+  };
+
+  const nonNegative = (value, fallback = 0) =>
+    Math.max(0, number(value, fallback));
+
+  const array = (value) =>
+    Array.isArray(value) ? clone(value) : [];
+
+  const object = (value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+
+  const escapeHTML = (value) =>
+    text(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  const getStore = () =>
+    window.TIC?.Store ||
+    window.TICStore ||
+    window.Store ||
+    window.TravelStore ||
+    null;
+
+  const getRouter = () =>
+    window.TIC?.Router ||
+    window.TICRouter ||
+    null;
+
+  const getUI = () =>
+    window.TIC?.UI ||
+    window.TICUI ||
+    null;
+
+  const notify = (message, tone = "info") => {
+    const ui = getUI();
+
+    if (typeof ui?.toast === "function") {
+      return ui.toast(message, { tone });
+    }
+
+    if (typeof ui?.showToast === "function") {
+      return ui.showToast(message, tone);
+    }
+
+    console.log(`[BudgetTravel:${tone}] ${message}`);
+    return null;
+  };
+
+  const formatCurrency = (value, currencyCode = "AED") => {
+    try {
+      return new Intl.NumberFormat("ar-AE", {
+        style: "currency",
+        currency: currencyCode || "AED",
+        maximumFractionDigits: 0
+      }).format(number(value));
+    } catch (_) {
+      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${
+        currencyCode || "AED"
+      }`;
+    }
+  };
+
+  const getStoreState = () => {
+    const store = getStore();
+    if (!store) return {};
+
+    try {
+      if (typeof store.getState === "function") {
+        return object(store.getState());
+      }
+
+      if (typeof store.get === "function") {
+        const fullState = store.get();
+
+        if (fullState && typeof fullState === "object") {
+          return object(fullState);
+        }
+
+        return {
+          profile: store.get("profile"),
+          trips: store.get("trips"),
+          plannedTrips: store.get("plannedTrips"),
+          budgets: store.get("budgets"),
+          savings: store.get("savings"),
+          guideIntelligence: store.get("guideIntelligence"),
+          budgetTravelIntelligence: store.get("budgetTravelIntelligence")
+        };
+      }
+    } catch (error) {
+      console.warn("Budget Travel Intelligence: Store read failed.", error);
+    }
+
+    return {};
+  };
+
+  const getTravelEngine = () =>
+    window.TravelBudgetIntelligence ||
+    window.BudgetTravelAI ||
+    window.TIC?.Features?.travelBudgetIntelligence ||
+    window.TIC?.Features?.budgetTravelAI ||
+    null;
+
+  const buildFallbackRecommendations = (context) => {
+    const balance = context.balance;
+    const monthlySaving = context.monthlySaving;
+    const travelers = context.travelers;
+    const currentMonth = new Date().getMonth() + 1;
+
+    const catalog = [
+      {
+        id: "budget_trip_baku",
+        country: "أذربيجان",
+        countryCode: "AZ",
+        city: "باكو",
+        durationDays: 5,
+        baseCost: 5000,
+        bestMonths: [4, 5, 6, 9, 10],
+        fit: ["family", "premium-family", "quiet", "mild"],
+        highlights: ["مدينة هادئة", "مطاعم حلال", "رحلة قصيرة", "طبيعة قريبة"]
+      },
+      {
+        id: "budget_trip_sarajevo",
+        country: "البوسنة والهرسك",
+        countryCode: "BA",
+        city: "سراييفو",
+        durationDays: 6,
+        baseCost: 6500,
+        bestMonths: [5, 6, 7, 8, 9, 10],
+        fit: ["family", "quiet", "nature", "halal"],
+        highlights: ["طبيعة", "أكل حلال", "هدوء", "تكلفة مناسبة"]
+      },
+      {
+        id: "budget_trip_budapest",
+        country: "المجر",
+        countryCode: "HU",
+        city: "بودابست",
+        durationDays: 7,
+        baseCost: 10000,
+        bestMonths: [4, 5, 6, 9, 10, 12],
+        fit: ["premium-family", "city", "mild"],
+        highlights: ["إطلالات نهرية", "فنادق راقية", "مدينة منظمة", "أنشطة متنوعة"]
+      },
+      {
+        id: "budget_trip_georgia",
+        country: "جورجيا",
+        countryCode: "GE",
+        city: "تبليسي",
+        durationDays: 6,
+        baseCost: 7500,
+        bestMonths: [4, 5, 6, 7, 8, 9, 10],
+        fit: ["family", "nature", "quiet"],
+        highlights: ["طبيعة", "أجواء معتدلة", "رحلات يومية", "ميزانية متوسطة"]
+      },
+      {
+        id: "budget_trip_switzerland",
+        country: "سويسرا",
+        countryCode: "CH",
+        city: "إنترلاكن",
+        durationDays: 7,
+        baseCost: 15000,
+        bestMonths: [5, 6, 7, 8, 9, 12],
+        fit: ["premium-family", "nature", "quiet"],
+        highlights: ["طبيعة فاخرة", "هدوء", "قطارات", "مناظر جبلية"]
+      },
+      {
+        id: "budget_trip_maldives",
+        country: "المالديف",
+        countryCode: "MV",
+        city: "منتجع جزيرة",
+        durationDays: 5,
+        baseCost: 18000,
+        bestMonths: [1, 2, 3, 4, 11, 12],
+        fit: ["premium-family", "sea", "privacy", "quiet"],
+        highlights: ["خصوصية", "بحر", "منتجع هادئ", "إقامة فاخرة"]
+      }
+    ];
+
+    const travelStyle = text(context.travelStyle).toLowerCase();
+    const preferredClimate = text(context.preferredClimate).toLowerCase();
+    const availableNow = balance;
+    const futureThreeMonths = balance + monthlySaving * 3;
+    const futureSixMonths = balance + monthlySaving * 6;
+
+    return catalog
+      .map((destination) => {
+        const familyMultiplier = Math.max(1, travelers) <= 2
+          ? 1
+          : 1 + (Math.max(1, travelers) - 2) * 0.28;
+
+        const estimatedCost = Math.round(
+          destination.baseCost * familyMultiplier / 100
+        ) * 100;
+
+        let availableBudget = availableNow;
+        let monthsToReady = 0;
+
+        if (availableNow < estimatedCost && futureThreeMonths >= estimatedCost) {
+          availableBudget = futureThreeMonths;
+          monthsToReady = 3;
+        } else if (
+          availableNow < estimatedCost &&
+          futureSixMonths >= estimatedCost
+        ) {
+          availableBudget = futureSixMonths;
+          monthsToReady = 6;
+        }
+
+        const affordable = availableBudget >= estimatedCost;
+        const missingAmount = Math.max(0, estimatedCost - availableNow);
+        const suggestedMonth =
+          destination.bestMonths.find((month) => month >= currentMonth) ||
+          destination.bestMonths[0];
+
+        let matchScore = 72;
+
+        if (
+          destination.fit.some((item) =>
+            travelStyle.includes(item)
+          )
+        ) {
+          matchScore += 10;
+        }
+
+        if (
+          preferredClimate &&
+          destination.fit.includes(preferredClimate)
+        ) {
+          matchScore += 5;
+        }
+
+        if (context.halalPreference && destination.fit.includes("halal")) {
+          matchScore += 8;
+        }
+
+        if (context.quietPreference && destination.fit.includes("quiet")) {
+          matchScore += 5;
+        }
+
+        return {
+          id: destination.id,
+          recommendationId: destination.id,
+          title: `رحلة ${destination.city}`,
+          country: destination.country,
+          countryCode: destination.countryCode,
+          city: destination.city,
+          durationDays: destination.durationDays,
+          travelers,
+          estimatedCost,
+          availableBudget,
+          missingAmount,
+          monthsToReady,
+          affordable,
+          suggestedMonth,
+          bestMonths: clone(destination.bestMonths),
+          matchScore: Math.min(99, matchScore),
+          confidence: Math.min(0.99, matchScore / 100),
+          highlights: clone(destination.highlights),
+          currency: context.currency,
+          source: "budget-page-fallback",
+          costBreakdown: {
+            flights: Math.round(estimatedCost * 0.28),
+            accommodation: Math.round(estimatedCost * 0.38),
+            food: Math.round(estimatedCost * 0.14),
+            transport: Math.round(estimatedCost * 0.08),
+            activities: Math.round(estimatedCost * 0.08),
+            reserve: Math.round(estimatedCost * 0.04)
+          }
+        };
+      })
+      .sort((a, b) => {
+        if (a.affordable !== b.affordable) return a.affordable ? -1 : 1;
+        if (a.monthsToReady !== b.monthsToReady) {
+          return a.monthsToReady - b.monthsToReady;
+        }
+        return b.matchScore - a.matchScore;
+      })
+      .slice(0, 5);
+  };
+
+  const buildFallbackAnalysis = (raw) => {
+    const profile = object(raw.profile);
+    const savings = object(raw.savings);
+    const budgets = object(raw.budgets);
+    const guideIntelligence = object(raw.guideIntelligence);
+
+    const balance = nonNegative(
+      savings.balance ??
+      savings.currentBalance ??
+      budgets.savingsBalance ??
+      0
+    );
+
+    const monthlySaving = nonNegative(
+      savings.monthlySaving ??
+      savings.monthlySavingTarget ??
+      budgets.monthlySavingTarget ??
+      profile.monthlySaving ??
+      profile.monthlyTravelSaving ??
+      1500
+    );
+
+    const travelers = Math.max(
+      1,
+      number(
+        profile.defaultTravelers ??
+        profile.travelers ??
+        2,
+        2
+      )
+    );
+
+    const context = {
+      balance,
+      monthlySaving,
+      travelers,
+      currency: text(profile.currency, "AED") || "AED",
+      travelStyle: text(
+        profile.travelStyle ||
+        guideIntelligence.travelDNA?.travelStyle,
+        "premium-family"
+      ),
+      preferredClimate: text(
+        profile.preferredClimate ||
+        guideIntelligence.travelDNA?.preferredClimate,
+        "mild"
+      ),
+      halalPreference:
+        profile.halalPreference !== false,
+      quietPreference:
+        profile.quietPreference !== false,
+      shattafRequired:
+        profile.shattafRequired !== false
+    };
+
+    const recommendations = buildFallbackRecommendations(context);
+    const topRecommendation = recommendations[0] || null;
+
+    let advice = "ابدأ بتقوية صندوق السفر، وكل زيادة تقرّبك من خيارات أجمل.";
+
+    if (topRecommendation) {
+      if (topRecommendation.affordable) {
+        advice =
+          `رصيدك الحالي يكفي لترتيب رحلة ${topRecommendation.city} لمدة ` +
+          `${topRecommendation.durationDays} أيام تقريباً.`;
+      } else if (topRecommendation.missingAmount > 0) {
+        advice =
+          `باقي لك تقريباً ${formatCurrency(
+            topRecommendation.missingAmount,
+            context.currency
+          )} للوصول إلى رحلة ${topRecommendation.city} المناسبة لذوقك.`;
+      }
+    }
+
+    const affordableRecommendations = recommendations.filter(
+      (item) => item.affordable
+    );
+
+    const multiTripPlan =
+      balance >= 19000 && affordableRecommendations.length >= 2
+        ? {
+            enabled: true,
+            totalBudget: balance,
+            trips: [
+              affordableRecommendations[0],
+              affordableRecommendations.find(
+                (item) =>
+                  item.id !== affordableRecommendations[0].id &&
+                  item.estimatedCost <=
+                    balance - affordableRecommendations[0].estimatedCost
+              )
+            ].filter(Boolean)
+          }
+        : null;
+
+    return {
+      id: `budget_analysis_${Date.now()}`,
+      generatedAt: new Date().toISOString(),
+      source: "budget-page-fallback",
+      context,
+      balance,
+      monthlySaving,
+      advice,
+      recommendations,
+      multiTripPlan,
+      timeline: recommendations.map((item) => ({
+        recommendationId: item.id,
+        month: item.suggestedMonth,
+        monthsToReady: item.monthsToReady,
+        estimatedCost: item.estimatedCost
+      }))
+    };
+  };
+
+  const generateAnalysis = () => {
+    const raw = getStoreState();
+    const engine = getTravelEngine();
+    let analysis = null;
+
+    if (engine) {
+      const methods = [
+        "analyze",
+        "generate",
+        "generateRecommendations",
+        "buildPlan",
+        "getRecommendations"
+      ];
+
+      for (const method of methods) {
+        if (typeof engine[method] !== "function") continue;
+
+        try {
+          analysis = engine[method]({
+            store: getStore(),
+            state: raw,
+            profile: raw.profile,
+            savings: raw.savings,
+            budgets: raw.budgets,
+            trips: raw.trips,
+            plannedTrips: raw.plannedTrips
+          });
+
+          if (analysis) break;
+        } catch (error) {
+          console.warn(
+            `Budget Travel Intelligence method failed: ${method}`,
+            error
+          );
+        }
+      }
+    }
+
+    if (!analysis || typeof analysis !== "object") {
+      analysis = buildFallbackAnalysis(raw);
+    }
+
+    if (Array.isArray(analysis)) {
+      analysis = {
+        id: `budget_analysis_${Date.now()}`,
+        generatedAt: new Date().toISOString(),
+        recommendations: analysis
+      };
+    }
+
+    analysis.recommendations = array(
+      analysis.recommendations ||
+      analysis.items ||
+      analysis.destinations
+    );
+
+    if (!analysis.recommendations.length) {
+      analysis = buildFallbackAnalysis(raw);
+    }
+
+    return analysis;
+  };
+
+  const saveAnalysis = (analysis) => {
+    const store = getStore();
+    if (!store || !analysis) return false;
+
+    try {
+      if (typeof store.setBudgetTravelAnalysis === "function") {
+        store.setBudgetTravelAnalysis(analysis);
+        return true;
+      }
+
+      if (typeof store.saveBudgetTravelAnalysis === "function") {
+        store.saveBudgetTravelAnalysis(analysis);
+        return true;
+      }
+
+      if (typeof store.set === "function") {
+        store.set("budgetTravelIntelligence", {
+          currentAnalysis: clone(analysis),
+          recommendations: array(analysis.recommendations),
+          timeline: array(analysis.timeline),
+          multiTripPlan: analysis.multiTripPlan
+            ? clone(analysis.multiTripPlan)
+            : null,
+          lastGeneratedAt:
+            analysis.generatedAt ||
+            new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }, { immediate: true });
+
+        return true;
+      }
+    } catch (error) {
+      console.warn("Budget Travel Intelligence save failed.", error);
+    }
+
+    return false;
+  };
+
+  const getAnalysis = () => {
+    const raw = getStoreState();
+    const saved = object(raw.budgetTravelIntelligence);
+    const current = object(saved.currentAnalysis);
+
+    if (current && array(current.recommendations).length) {
+      return current;
+    }
+
+    if (array(saved.recommendations).length) {
+      return {
+        id: `stored_budget_analysis`,
+        generatedAt: saved.lastGeneratedAt,
+        recommendations: array(saved.recommendations),
+        timeline: array(saved.timeline),
+        multiTripPlan: saved.multiTripPlan
+          ? clone(saved.multiTripPlan)
+          : null,
+        context: {
+          balance: nonNegative(
+            raw.savings?.balance ??
+            raw.savings?.currentBalance ??
+            raw.budgets?.savingsBalance
+          ),
+          monthlySaving: nonNegative(
+            raw.savings?.monthlySaving ??
+            raw.budgets?.monthlySavingTarget
+          ),
+          currency: text(raw.profile?.currency, "AED")
+        }
+      };
+    }
+
+    const analysis = generateAnalysis();
+    saveAnalysis(analysis);
+    return analysis;
+  };
+
+  const isRecommendationAdded = (recommendation) => {
+    const raw = getStoreState();
+    const recommendationId =
+      recommendation.recommendationId ||
+      recommendation.id;
+
+    return array(raw.plannedTrips).some(
+      (trip) =>
+        String(trip.sourceRecommendationId || "") ===
+          String(recommendationId) &&
+        !["archived", "cancelled"].includes(trip.status)
+    );
+  };
+
+  const buildRecommendationCard = (
+    recommendation,
+    analysis,
+    currencyCode
+  ) => {
+    const id =
+      recommendation.recommendationId ||
+      recommendation.id;
+
+    const alreadyAdded =
+      isRecommendationAdded(recommendation);
+
+    const month =
+      MONTHS_AR[number(recommendation.suggestedMonth)] ||
+      "موعد مناسب";
+
+    const cost = nonNegative(
+      recommendation.estimatedCost ??
+      recommendation.totalCost ??
+      recommendation.budget
+    );
+
+    const missing = nonNegative(
+      recommendation.missingAmount ??
+      Math.max(
+        0,
+        cost - nonNegative(
+          analysis.balance ??
+          analysis.context?.balance
+        )
+      )
+    );
+
+    const affordable =
+      recommendation.affordable === true ||
+      missing <= 0;
+
+    return `
+      <article
+        class="tic-card tic-card-body tic-budget-travel-card"
+        data-budget-travel-recommendation="${escapeHTML(id)}"
+      >
+        <div class="tic-feature-row">
+          <div>
+            <span class="tic-chip">
+              ${escapeHTML(month)}
+            </span>
+            <h3 class="tic-card-title">
+              ${escapeHTML(
+                recommendation.title ||
+                `رحلة ${recommendation.city || recommendation.country || ""}`
+              )}
+            </h3>
+            <p class="tic-card-text">
+              ${escapeHTML(
+                [
+                  recommendation.country,
+                  recommendation.city,
+                  `${number(recommendation.durationDays, 5)} أيام`
+                ].filter(Boolean).join(" • ")
+              )}
+            </p>
+          </div>
+
+          <span class="tic-badge tic-badge-${
+            affordable ? "success" : "warning"
+          }">
+            ${
+              affordable
+                ? "مناسبة الآن"
+                : `ينقصك ${escapeHTML(
+                    formatCurrency(missing, currencyCode)
+                  )}`
+            }
+          </span>
+        </div>
+
+        <div class="tic-trip-meta">
+          <div>
+            <small>التكلفة المتوقعة</small>
+            <strong>
+              ${escapeHTML(formatCurrency(cost, currencyCode))}
+            </strong>
+          </div>
+          <div>
+            <small>مطابقة ذوقك</small>
+            <strong>
+              ${Math.round(
+                nonNegative(
+                  recommendation.matchScore ??
+                  recommendation.score ??
+                  number(recommendation.confidence) * 100,
+                  75
+                )
+              )}%
+            </strong>
+          </div>
+          <div>
+            <small>الجاهزية</small>
+            <strong>
+              ${
+                affordable
+                  ? "جاهزة للتخطيط"
+                  : recommendation.monthsToReady
+                    ? `بعد ${recommendation.monthsToReady} أشهر`
+                    : "تحتاج ادخار"
+              }
+            </strong>
+          </div>
+        </div>
+
+        ${
+          array(recommendation.highlights).length
+            ? `
+              <div class="tic-budget-travel-highlights">
+                ${array(recommendation.highlights)
+                  .slice(0, 4)
+                  .map(
+                    (item) =>
+                      `<span class="tic-chip">${escapeHTML(item)}</span>`
+                  )
+                  .join("")}
+              </div>
+            `
+            : ""
+        }
+
+        <div class="tic-budget-inline-actions">
+          <button
+            type="button"
+            class="tic-btn tic-btn-primary"
+            data-budget-travel-action="add-planned-trip"
+            data-recommendation-id="${escapeHTML(id)}"
+            ${alreadyAdded ? "disabled" : ""}
+          >
+            <span>
+              ${
+                alreadyAdded
+                  ? "مضافة إلى الرحلات المخطط لها"
+                  : "إضافة إلى الرحلات المخطط لها"
+              }
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="tic-btn tic-btn-secondary"
+            data-budget-travel-action="open-guide"
+            data-country-code="${escapeHTML(
+              recommendation.countryCode || ""
+            )}"
+          >
+            <span>عرض دليل الوجهة</span>
+          </button>
+        </div>
+      </article>
+    `;
+  };
+
+  const buildSectionHTML = (analysis) => {
+    const raw = getStoreState();
+    const currencyCode = text(
+      analysis.context?.currency ||
+      raw.profile?.currency,
+      "AED"
+    );
+
+    const balance = nonNegative(
+      analysis.balance ??
+      analysis.context?.balance ??
+      raw.savings?.balance ??
+      raw.savings?.currentBalance ??
+      raw.budgets?.savingsBalance
+    );
+
+    const monthlySaving = nonNegative(
+      analysis.monthlySaving ??
+      analysis.context?.monthlySaving ??
+      raw.savings?.monthlySaving ??
+      raw.budgets?.monthlySavingTarget
+    );
+
+    const recommendations = array(
+      analysis.recommendations
+    );
+
+    const multiTrips = array(
+      analysis.multiTripPlan?.trips
+    );
+
+    return `
+      <section
+        class="tic-budget-travel-intelligence"
+        data-budget-travel-intelligence
+        data-extension-version="${EXTENSION_VERSION}"
+      >
+        <div class="tic-budget-section-heading">
+          <div>
+            <small>TRAVEL BUDGET INTELLIGENCE</small>
+            <h2>شو تقدر تسافر بميزانيتك؟</h2>
+            <p>
+              اقتراحات وجهات وتواريخ ومدد مبنية على رصيدك،
+              ادخارك، وعدد المسافرين وذوقك.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            class="tic-btn tic-btn-secondary"
+            data-budget-travel-action="regenerate"
+          >
+            <span>تحديث الاقتراحات</span>
+          </button>
+        </div>
+
+        <article class="tic-card tic-card-body tic-budget-ai-card">
+          <div class="tic-feature-row">
+            <div>
+              <span class="tic-chip">SMART TRAVEL ADVICE</span>
+              <h3 class="tic-card-title">
+                ${escapeHTML(
+                  analysis.advice ||
+                  analysis.summaryAr ||
+                  "كل زيادة في صندوق السفر تفتح لك خيارات أجمل."
+                )}
+              </h3>
+              <p class="tic-card-text">
+                رصيد السفر:
+                ${escapeHTML(formatCurrency(balance, currencyCode))}
+                • الادخار الشهري:
+                ${escapeHTML(formatCurrency(monthlySaving, currencyCode))}
+              </p>
+            </div>
+
+            <span class="tic-badge tic-badge-info">
+              ${recommendations.length} اقتراحات
+            </span>
+          </div>
+        </article>
+
+        ${
+          multiTrips.length > 1
+            ? `
+              <article class="tic-card tic-card-body">
+                <div class="tic-feature-row">
+                  <div>
+                    <span class="tic-chip">MULTI TRIP PLAN</span>
+                    <h3 class="tic-card-title">
+                      ميزانيتك تسمح بخطة أكثر من سفرة
+                    </h3>
+                    <p class="tic-card-text">
+                      نقدر نوزع الرصيد على رحلتين بدل استهلاكه في رحلة واحدة.
+                    </p>
+                  </div>
+                  <span class="tic-badge tic-badge-success">
+                    ${multiTrips.length} رحلات
+                  </span>
+                </div>
+
+                <div class="tic-settings-list">
+                  ${multiTrips
+                    .map(
+                      (trip) => `
+                        <div class="tic-budget-report-row">
+                          <span>
+                            ${escapeHTML(
+                              trip.title ||
+                              trip.city ||
+                              trip.country ||
+                              "رحلة"
+                            )}
+                          </span>
+                          <strong>
+                            ${escapeHTML(
+                              formatCurrency(
+                                trip.estimatedCost ||
+                                trip.totalCost,
+                                currencyCode
+                              )
+                            )}
+                          </strong>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+            : ""
+        }
+
+        <div class="tic-settings-list">
+          ${
+            recommendations.length
+              ? recommendations
+                  .slice(0, 5)
+                  .map((item) =>
+                    buildRecommendationCard(
+                      item,
+                      analysis,
+                      currencyCode
+                    )
+                  )
+                  .join("")
+              : `
+                <article class="tic-card tic-card-body">
+                  <h3 class="tic-card-title">
+                    نحتاج بيانات ادخار أكثر
+                  </h3>
+                  <p class="tic-card-text">
+                    أضف رصيد صندوق السفر والادخار الشهري حتى
+                    نبني لك اقتراحات مناسبة.
+                  </p>
+                </article>
+              `
+          }
+        </div>
+      </section>
+    `;
+  };
+
+  const getOverviewPanel = () =>
+    document.querySelector(
+      `${PAGE_SELECTOR} [data-budget-panel="overview"]`
+    );
+
+  const inject = (force = false) => {
+    if (runtime.rendering) return false;
+
+    const page = document.querySelector(PAGE_SELECTOR);
+    const overview = getOverviewPanel();
+
+    if (!page || !overview) return false;
+
+    runtime.rendering = true;
+
+    try {
+      const analysis = getAnalysis();
+      const signature = JSON.stringify({
+        analysisId: analysis.id,
+        generatedAt: analysis.generatedAt,
+        balance:
+          analysis.balance ??
+          analysis.context?.balance,
+        monthlySaving:
+          analysis.monthlySaving ??
+          analysis.context?.monthlySaving,
+        recommendationIds: array(
+          analysis.recommendations
+        ).map((item) => [
+          item.id,
+          item.recommendationId,
+          item.estimatedCost,
+          item.suggestedMonth
+        ]),
+        plannedTripIds: array(
+          getStoreState().plannedTrips
+        ).map((item) => [
+          item.id,
+          item.sourceRecommendationId,
+          item.status
+        ])
+      });
+
+      if (!force && signature === runtime.lastSignature) {
+        return false;
+      }
+
+      const current = overview.querySelector(
+        INJECTION_SELECTOR
+      );
+
+      if (current) current.remove();
+
+      overview.insertAdjacentHTML(
+        "afterbegin",
+        buildSectionHTML(analysis)
+      );
+
+      runtime.lastSignature = signature;
+      return true;
+    } finally {
+      runtime.rendering = false;
+    }
+  };
+
+  const findRecommendation = (recommendationId) => {
+    const analysis = getAnalysis();
+
+    return array(analysis.recommendations).find(
+      (item) =>
+        String(item.id) === String(recommendationId) ||
+        String(item.recommendationId) === String(recommendationId)
+    ) || null;
+  };
+
+  const addPlannedTrip = (recommendationId) => {
+    const store = getStore();
+    const recommendation =
+      findRecommendation(recommendationId);
+
+    if (!store || !recommendation) {
+      notify("تعذر العثور على بيانات الاقتراح.", "danger");
+      return false;
+    }
+
+    try {
+      let result = null;
+
+      if (
+        typeof store.createPlannedTripFromRecommendation ===
+        "function"
+      ) {
+        result =
+          store.createPlannedTripFromRecommendation(
+            recommendation
+          );
+      } else {
+        const payload = {
+          title:
+            recommendation.title ||
+            `رحلة ${recommendation.city || recommendation.country || ""}`,
+          destinationId:
+            recommendation.destinationId ||
+            recommendation.id,
+          country: recommendation.country,
+          countryCode: recommendation.countryCode,
+          city: recommendation.city,
+          suggestedMonth:
+            recommendation.suggestedMonth,
+          durationDays:
+            number(recommendation.durationDays, 5),
+          travelers:
+            number(recommendation.travelers, 2),
+          estimatedBudget:
+            nonNegative(
+              recommendation.estimatedCost ??
+              recommendation.totalCost ??
+              recommendation.budget
+            ),
+          currency:
+            recommendation.currency ||
+            getStoreState().profile?.currency ||
+            "AED",
+          sourceRecommendationId:
+            recommendation.recommendationId ||
+            recommendation.id,
+          sourceAnalysisId:
+            getAnalysis().id ||
+            null,
+          source: {
+            engine:
+              recommendation.source ||
+              "BudgetTravelIntelligence",
+            confidence:
+              number(recommendation.confidence, 0)
+          },
+          costBreakdown:
+            clone(recommendation.costBreakdown || {}),
+          highlights:
+            array(recommendation.highlights),
+          checklist: {
+            destinationApproved: true,
+            budgetApproved: true,
+            flightBooked: false,
+            hotelBooked: false,
+            insuranceReady: false,
+            visaReady: false,
+            documentsReady: false,
+            activitiesPlanned: false,
+            packingReady: false
+          }
+        };
+
+        if (
+          typeof store.createPlannedTrip === "function"
+        ) {
+          result = store.createPlannedTrip(payload);
+        } else if (
+          typeof store.addPlannedTrip === "function"
+        ) {
+          result = store.addPlannedTrip(payload);
+        } else if (
+          typeof store.dispatch === "function"
+        ) {
+          result = store.dispatch(
+            "plannedTrips/add",
+            payload
+          );
+        }
+      }
+
+      if (!result) {
+        notify(
+          "تعذر إضافة الرحلة. تأكد من اعتماد Store V2.3.0.",
+          "danger"
+        );
+        return false;
+      }
+
+      notify(
+        "تمت إضافة الرحلة إلى الرحلات المخطط لها.",
+        "success"
+      );
+
+      window.dispatchEvent(
+        new CustomEvent(
+          "tic:budget-travel-planned-trip-created",
+          {
+            detail: {
+              recommendationId,
+              plannedTrip: clone(result)
+            }
+          }
+        )
+      );
+
+      inject(true);
+      return true;
+    } catch (error) {
+      console.error(
+        "Budget Travel Intelligence planned trip creation failed.",
+        error
+      );
+
+      notify(
+        error?.message ||
+        "تعذر إضافة الرحلة المخطط لها.",
+        "danger"
+      );
+
+      return false;
+    }
+  };
+
+  const regenerate = () => {
+    const analysis = generateAnalysis();
+    saveAnalysis(analysis);
+    runtime.lastSignature = "";
+    inject(true);
+    notify("تم تحديث اقتراحات السفر.", "success");
+  };
+
+  const openGuide = (countryCode) => {
+    const router = getRouter();
+
+    if (typeof router?.go === "function") {
+      router.go("guide", {
+        countryCode,
+        view: "country"
+      });
+      return true;
+    }
+
+    window.location.hash = countryCode
+      ? `#guide?countryCode=${encodeURIComponent(countryCode)}`
+      : "#guide";
+
+    return true;
+  };
+
+  const onClick = (event) => {
+    const target = event.target.closest(
+      "[data-budget-travel-action]"
+    );
+
+    if (!target) return;
+
+    event.preventDefault();
+
+    const action =
+      target.dataset.budgetTravelAction;
+
+    if (action === "regenerate") {
+      regenerate();
+      return;
+    }
+
+    if (action === "add-planned-trip") {
+      addPlannedTrip(
+        target.dataset.recommendationId
+      );
+      return;
+    }
+
+    if (action === "open-guide") {
+      openGuide(target.dataset.countryCode || "");
+    }
+  };
+
+  const observePage = () => {
+    if (runtime.observer) return;
+
+    runtime.observer = new MutationObserver(() => {
+      window.requestAnimationFrame(() => {
+        inject(false);
+      });
+    });
+
+    runtime.observer.observe(
+      document.documentElement,
+      {
+        childList: true,
+        subtree: true
+      }
+    );
+  };
+
+  const bindEvents = () => {
+    if (!runtime.clickBound) {
+      document.addEventListener("click", onClick);
+      runtime.clickBound = true;
+    }
+
+    [
+      "tic:page:budget:mounted",
+      "tic:page:budget:refreshed",
+      "tic:savings-changed",
+      "tic:budget-integration-sync-completed",
+      "tic:store-change",
+      "store:changed"
+    ].forEach((eventName) => {
+      const handler = () => {
+        window.requestAnimationFrame(() => {
+          inject(false);
+        });
+      };
+
+      window.addEventListener(eventName, handler);
+      runtime.eventHandlers.push({
+        eventName,
+        handler
+      });
+    });
+  };
+
+  const patchBudgetPage = () => {
+    const page =
+      window.TIC?.Pages?.budget ||
+      window.TICBudgetPage;
+
+    if (!page || page.__budgetTravelPatched) {
+      return false;
+    }
+
+    ["mount", "afterEnter", "refresh", "setView"].forEach(
+      (methodName) => {
+        if (typeof page[methodName] !== "function") return;
+
+        const original = page[methodName].bind(page);
+
+        page[methodName] = function patchedBudgetMethod(
+          ...args
+        ) {
+          const result = original(...args);
+
+          window.requestAnimationFrame(() => {
+            inject(true);
+          });
+
+          return result;
+        };
+      }
+    );
+
+    Object.defineProperty(
+      page,
+      "__budgetTravelPatched",
+      {
+        value: true,
+        configurable: false,
+        enumerable: false,
+        writable: false
+      }
+    );
+
+    page.getTravelBudgetAnalysis = () =>
+      clone(getAnalysis());
+
+    page.regenerateTravelBudgetAnalysis = () => {
+      regenerate();
+      return clone(getAnalysis());
+    };
+
+    return true;
+  };
+
+  const init = () => {
+    if (runtime.initialized) return true;
+
+    bindEvents();
+    observePage();
+    patchBudgetPage();
+
+    runtime.initialized = true;
+
+    window.requestAnimationFrame(() => {
+      inject(true);
+    });
+
+    window.TIC = window.TIC || {};
+    window.TIC.Features =
+      window.TIC.Features || {};
+
+    window.TIC.Features.budgetTravelPageIntegration =
+      Object.freeze({
+        version: EXTENSION_VERSION,
+        inject: () => inject(true),
+        regenerate,
+        getAnalysis: () => clone(getAnalysis()),
+        addPlannedTrip,
+        diagnostics() {
+          return {
+            version: EXTENSION_VERSION,
+            initialized: runtime.initialized,
+            pageAvailable: Boolean(
+              document.querySelector(PAGE_SELECTOR)
+            ),
+            sectionInjected: Boolean(
+              document.querySelector(
+                INJECTION_SELECTOR
+              )
+            ),
+            storeAvailable: Boolean(getStore()),
+            travelEngineAvailable: Boolean(
+              getTravelEngine()
+            ),
+            lastSignature:
+              runtime.lastSignature
+          };
+        }
+      });
+
+    return true;
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      init,
+      { once: true }
+    );
+  } else {
+    init();
+  }
+})(window, document);
+
