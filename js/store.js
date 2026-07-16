@@ -1,31 +1,18 @@
 /* =========================================================
    Travel Intelligence Center
-   Central Store V2.2.0
-   Guide Intelligence Integration Ready
+   Central Store V2.3.0
+   Budget Travel Intelligence Integration Ready
 
    File Path:
    js/store.js
 
    Purpose:
-   - Single source of truth for the entire application.
-   - Preserves rich trip, flight, hotel, passport and finance data.
-   - Automatically classifies trips by local calendar dates.
-   - Keeps Trips, Passport, Guide, Wishlist and Annual Planner synced.
-   - Adds complete persistence APIs required by GuideEngine,
-     TravelAI and PlannerEngine.
-   - Preserves Budget Intelligence persistence architecture.
-   - Supports localStorage, migration, backup, restore,
-     import, export, subscriptions and legacy Store aliases.
-
-   V2.2.0:
-   - Adds annualPlans and guideIntelligence state branches.
-   - Adds normalized wishlist and annual-plan records.
-   - Adds countryCode, planningStatus and checklist support to trips.
-   - Adds Wishlist CRUD APIs.
-   - Adds Annual Planner CRUD and conversion-link persistence.
-   - Adds generic dispatch() compatibility for the new engines.
-   - Adds Guide/Passport statistics synchronized from completed trips.
-   - Preserves every V2.1.0 trip, finance and backup API.
+   - Single source of truth for the application.
+   - Preserves existing Trips, Guide, Passport and Budget data.
+   - Adds Planned Trips persistence and conversion workflows.
+   - Stores Budget Travel Intelligence analyses and recommendations.
+   - Preserves localStorage, migration, backup, import and export.
+   - Preserves legacy global Store aliases.
 
    Global APIs:
    - window.TIC.Store
@@ -45,7 +32,7 @@
     );
   }
 
-  const STORE_VERSION = "2.2.0";
+  const STORE_VERSION = "2.3.0";
   const STORAGE_KEY = Config.storage.stateKey;
   const BACKUP_KEY = Config.storage.backupKey;
   const SCHEMA_VERSION = Config.storage.schemaVersion;
@@ -74,14 +61,19 @@
     "cancelled"
   ];
 
-  const TRIP_PLANNING_STATUSES = [
-    "draft",
-    "planned",
-    "booking",
-    "ready",
-    "active",
-    "completed",
-    "cancelled"
+  const REQUIRED_PLANNED_ITEMS = [
+    "destinationApproved",
+    "budgetApproved",
+    "flightBooked",
+    "hotelBooked"
+  ];
+
+  const OPTIONAL_PLANNED_ITEMS = [
+    "insuranceReady",
+    "visaReady",
+    "documentsReady",
+    "activitiesPlanned",
+    "packingReady"
   ];
 
   const listeners = new Set();
@@ -103,9 +95,7 @@
     if (typeof structuredClone === "function") {
       try {
         return structuredClone(value);
-      } catch (_) {
-        // Continue to JSON fallback.
-      }
+      } catch (_) {}
     }
 
     try {
@@ -116,14 +106,6 @@
   };
 
   const nowISO = () => new Date().toISOString();
-
-  const formatLocalDate = (date) => [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0")
-  ].join("-");
-
-  const todayISO = () => formatLocalDate(new Date());
 
   const createId = (prefix = "item") => {
     const random =
@@ -179,7 +161,11 @@
     const date = new Date(raw);
     if (Number.isNaN(date.getTime())) return raw;
 
-    return formatLocalDate(date);
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0")
+    ].join("-");
   };
 
   const normalizeTimeValue = (value) => {
@@ -191,34 +177,6 @@
     if (direct) {
       const hours = Math.max(0, Math.min(23, toNumber(direct[1])));
       const minutes = Math.max(0, Math.min(59, toNumber(direct[2])));
-
-      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-    }
-
-    const arabicPeriod = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(ص|م)$/);
-
-    if (arabicPeriod) {
-      let hours = toNumber(arabicPeriod[1]) % 12;
-      if (arabicPeriod[3] === "م") hours += 12;
-
-      const minutes = Math.max(
-        0,
-        Math.min(59, toNumber(arabicPeriod[2], 0))
-      );
-
-      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-    }
-
-    const englishPeriod = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
-
-    if (englishPeriod) {
-      let hours = toNumber(englishPeriod[1]) % 12;
-      if (englishPeriod[3].toUpperCase() === "PM") hours += 12;
-
-      const minutes = Math.max(
-        0,
-        Math.min(59, toNumber(englishPeriod[2], 0))
-      );
 
       return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
     }
@@ -297,18 +255,6 @@
     return Array.from(map.values());
   };
 
-  const compareTripsNewestFirst = (a, b) => {
-    const aDate = dateToUtcNumber(a.endDate || a.startDate) || 0;
-    const bDate = dateToUtcNumber(b.endDate || b.startDate) || 0;
-    return bDate - aDate;
-  };
-
-  const compareTripsSoonestFirst = (a, b) => {
-    const aDate = dateToUtcNumber(a.startDate) || Number.MAX_SAFE_INTEGER;
-    const bDate = dateToUtcNumber(b.startDate) || Number.MAX_SAFE_INTEGER;
-    return aDate - bDate;
-  };
-
   /* =========================================================
      Default state
   ========================================================= */
@@ -324,7 +270,8 @@
       lastBackupAt: null,
       lastMigrationAt: null,
       lastTripLifecycleSyncAt: null,
-      lastGuideSyncAt: null
+      lastGuideSyncAt: null,
+      lastBudgetTravelSyncAt: null
     },
 
     profile: {
@@ -355,6 +302,9 @@
       completedTrips: 0,
       upcomingTrips: 0,
       activeTrips: 0,
+      plannedTrips: 0,
+      readyPlannedTrips: 0,
+      convertedPlannedTrips: 0,
       visitedCountries: 0,
       visitedCities: 0,
       wishlistCount: 0,
@@ -367,10 +317,12 @@
       paymentCount: 0,
       overduePayments: 0,
       activeBudgetAlerts: 0,
-      unreadBudgetNotifications: 0
+      unreadBudgetNotifications: 0,
+      budgetTravelRecommendationCount: 0
     },
 
     trips: [],
+    plannedTrips: [],
     destinations: [],
     wishlist: [],
     annualPlans: [],
@@ -389,6 +341,18 @@
       recommendations: [],
       recentSearches: [],
       countryViews: {},
+      lastGeneratedAt: null,
+      updatedAt: nowISO()
+    },
+
+    budgetTravelIntelligence: {
+      currentAnalysis: null,
+      recommendations: [],
+      timeline: [],
+      multiTripPlan: null,
+      history: [],
+      dismissedRecommendationIds: [],
+      acceptedRecommendationIds: [],
       lastGeneratedAt: null,
       updatedAt: nowISO()
     },
@@ -467,12 +431,10 @@
     },
 
     documents: [],
-
     packing: {
       templates: [],
       lists: []
     },
-
     reviews: [],
     memories: [],
     analytics: {},
@@ -499,14 +461,7 @@
   const resolveTripStatus = (status) => {
     const raw = toText(status) || toText(Config.defaults.tripStatus, "planning");
 
-    if (
-      isObject(Config.tripStatuses) &&
-      Object.prototype.hasOwnProperty.call(Config.tripStatuses, raw)
-    ) {
-      return raw;
-    }
-
-    const supportedStatuses = [
+    const supported = [
       "draft",
       "planning",
       "planned",
@@ -520,9 +475,7 @@
       "archived"
     ];
 
-    return supportedStatuses.includes(raw)
-      ? raw
-      : toText(Config.defaults.tripStatus, "planning");
+    return supported.includes(raw) ? raw : "planning";
   };
 
   const resolveLifecycleStatus = ({
@@ -535,14 +488,11 @@
 
     if (LOCKED_STATUSES.includes(currentStatus)) return currentStatus;
 
-    const normalizedStart = normalizeDateValue(startDate);
-    const normalizedEnd =
-      normalizeDateValue(endDate) ||
-      deriveEndDateFromDuration(normalizedStart, durationDays);
-
-    const today = dateToUtcNumber(todayISO());
-    const start = dateToUtcNumber(normalizedStart);
-    const end = dateToUtcNumber(normalizedEnd);
+    const start = dateToUtcNumber(startDate);
+    const end = dateToUtcNumber(
+      endDate || deriveEndDateFromDuration(startDate, durationDays)
+    );
+    const today = dateToUtcNumber(normalizeDateValue(new Date()));
 
     if (start === null && end === null) return currentStatus;
     if (end !== null && today > end) return "completed";
@@ -561,81 +511,47 @@
       return "active";
     }
 
-    if (start === null && end !== null && today <= end) {
-      return ACTIVE_STATUSES.includes(currentStatus)
-        ? currentStatus
-        : "active";
-    }
-
     return currentStatus;
   };
 
   const normalizeTripChecklist = (checklist = {}) => ({
+    destinationApproved: toBoolean(checklist.destinationApproved, true),
+    budgetApproved: toBoolean(checklist.budgetApproved, false),
     flightBooked: toBoolean(checklist.flightBooked, false),
     hotelBooked: toBoolean(checklist.hotelBooked, false),
     documentsReady: toBoolean(checklist.documentsReady, false),
     insuranceReady: toBoolean(checklist.insuranceReady, false),
+    visaReady: toBoolean(checklist.visaReady, false),
     transportPlanned: toBoolean(checklist.transportPlanned, false),
-    itineraryReady: toBoolean(checklist.itineraryReady, false)
+    itineraryReady: toBoolean(checklist.itineraryReady, false),
+    activitiesPlanned: toBoolean(checklist.activitiesPlanned, false),
+    packingReady: toBoolean(checklist.packingReady, false)
   });
 
   const normalizeTrip = (trip = {}) => {
     const source = isObject(trip) ? clone(trip) : {};
-
-    const maxTravelers = toNumber(Config.validation?.trip?.maxTravelers, 99);
-    const maxBudget = toNumber(
-      Config.validation?.trip?.maxBudget,
-      Number.MAX_SAFE_INTEGER
-    );
-    const notesMaxLength = toNumber(
-      Config.validation?.trip?.notesMaxLength,
-      10000
-    );
-
     const startDate = normalizeDateValue(source.startDate);
     const sourceDuration = Math.max(
       0,
       toNumber(firstDefined(source.durationDays, source.days), 0)
     );
-
     const endDate =
       normalizeDateValue(source.endDate) ||
       deriveEndDateFromDuration(startDate, sourceDuration);
-
     const durationDays = calculateDurationDays(
       startDate,
       endDate,
       sourceDuration
     );
-
-    const previousStatus = resolveTripStatus(source.status);
     const status = resolveLifecycleStatus({
-      status: previousStatus,
+      status: source.status,
       startDate,
       endDate,
       durationDays
     });
 
-    const lifecycleChangedAt =
-      status !== previousStatus
-        ? nowISO()
-        : source.lifecycleChangedAt || null;
-
-    const planningStatus = TRIP_PLANNING_STATUSES.includes(
-      toText(source.planningStatus)
-    )
-      ? toText(source.planningStatus)
-      : status === "completed"
-        ? "completed"
-        : status === "active"
-          ? "active"
-          : status === "ready"
-            ? "ready"
-            : "planned";
-
     return {
       ...source,
-
       id: source.id || createId("trip"),
       title: toText(source.title),
       destination: toText(
@@ -648,97 +564,64 @@
         firstDefined(
           source.countryCode,
           source.destinationCountryCode,
-          source.guideCountryCode,
-          source.destination?.countryCode
-        )
-      ),
-      guideCountryCode: normalizeCountryCode(
-        firstDefined(
-          source.guideCountryCode,
-          source.countryCode,
-          source.destinationCountryCode
+          source.guideCountryCode
         )
       ),
       city: toText(firstDefined(source.city, source.destinationCity)),
-
       purpose: toText(source.purpose, "leisure") || "leisure",
       tripType: toText(source.tripType, "family") || "family",
       travelStyle:
         toText(source.travelStyle, "premium-family") || "premium-family",
       priority: toText(source.priority, "normal") || "normal",
-
       status,
-      planningStatus,
+      planningStatus:
+        status === "completed"
+          ? "completed"
+          : status === "active"
+            ? "active"
+            : status === "ready"
+              ? "ready"
+              : toText(source.planningStatus, "planned"),
       lifecycleStatus: status,
-      lifecycleChangedAt,
       completedAt:
         status === "completed"
-          ? source.completedAt || lifecycleChangedAt || nowISO()
+          ? source.completedAt || nowISO()
           : source.completedAt || null,
-
       startDate,
       endDate,
       durationDays,
       days: durationDays,
-
-      travelers: Math.max(
-        1,
-        Math.min(
-          maxTravelers,
-          toNumber(source.travelers, Config.defaults.travelers || 1)
-        )
-      ),
-
+      travelers: Math.max(1, toNumber(source.travelers, 1)),
       adults: Math.max(0, toNumber(source.adults, source.travelers || 1)),
       children: Math.max(0, toNumber(source.children, 0)),
       infants: Math.max(0, toNumber(source.infants, 0)),
-
-      budget: Math.max(
-        0,
-        Math.min(maxBudget, toNumber(source.budget, Config.defaults.budget || 0))
+      budget: toNonNegative(firstDefined(source.budget, source.estimatedBudget, 0)),
+      estimatedBudget: toNonNegative(
+        firstDefined(source.estimatedBudget, source.budget, 0)
       ),
-      spent: Math.max(0, toNumber(source.spent, 0)),
-
+      spent: toNonNegative(source.spent, 0),
       currency:
         toText(source.currency, Config.defaults.currency) ||
         Config.defaults.currency,
-
-      departureAirport: toText(
-        source.departureAirport || source.originAirport
-      ),
-      arrivalAirport: toText(
-        source.arrivalAirport || source.destinationAirport
-      ),
+      departureAirport: toText(source.departureAirport || source.originAirport),
+      arrivalAirport: toText(source.arrivalAirport || source.destinationAirport),
       airline: toText(source.airline || source.airlineName),
       flightNumber: toText(source.flightNumber || source.flightNo),
       departureDate: normalizeDateValue(
         source.departureDate || source.flightDate
       ),
       departureTime: normalizeTimeValue(
-        source.departureTime ||
-          source.flightTime ||
-          source.flightDepartureTime
+        source.departureTime || source.flightTime
       ),
       arrivalDate: normalizeDateValue(source.arrivalDate),
-      arrivalTime: normalizeTimeValue(
-        source.arrivalTime || source.flightArrivalTime
-      ),
-      departureDateTime: toText(source.departureDateTime),
-      arrivalDateTime: toText(source.arrivalDateTime),
-      terminal: toText(source.terminal || source.departureTerminal),
-      gate: toText(source.gate || source.departureGate),
-      seatNumber: toText(source.seatNumber || source.seat),
+      arrivalTime: normalizeTimeValue(source.arrivalTime),
       bookingReference: toText(
         source.bookingReference || source.pnr || source.confirmationNumber
       ),
       airportLeadMinutes: Math.max(
         0,
-        toNumber(
-          source.airportLeadMinutes ?? source.arriveAirportBeforeMinutes,
-          120
-        )
+        toNumber(source.airportLeadMinutes, 120)
       ),
-
       accommodation:
         typeof source.accommodation === "string"
           ? source.accommodation.trim()
@@ -756,44 +639,151 @@
       hotelCheckOut: normalizeDateValue(
         source.hotelCheckOut || source.checkOut
       ),
-
-      transport: toText(source.transport),
       activities: toArray(source.activities),
-      notes: toText(source.notes).slice(0, notesMaxLength),
+      notes: toText(source.notes),
       emergencyContact: toText(source.emergencyContact),
       visaRequired: toBoolean(source.visaRequired, false),
       insuranceRequired: toBoolean(source.insuranceRequired, true),
       featured: toBoolean(source.featured, false),
-
       annualPlanId: source.annualPlanId || null,
+      plannedTripId: source.plannedTripId || null,
+      sourceRecommendationId: source.sourceRecommendationId || null,
       source: toText(source.source, "manual") || "manual",
       checklist: normalizeTripChecklist(source.checklist),
-
-      ticketImport: source.ticketImport ? clone(source.ticketImport) : null,
-      hotelImport: source.hotelImport ? clone(source.hotelImport) : null,
-      flight: isObject(source.flight) ? clone(source.flight) : source.flight || null,
-      outboundFlight: isObject(source.outboundFlight)
-        ? clone(source.outboundFlight)
-        : source.outboundFlight || null,
-      returnFlight: isObject(source.returnFlight)
-        ? clone(source.returnFlight)
-        : source.returnFlight || null,
-      hotel: isObject(source.hotel) ? clone(source.hotel) : source.hotel || null,
-
+      costBreakdown: isObject(source.costBreakdown)
+        ? clone(source.costBreakdown)
+        : {},
       flights: toArray(source.flights),
       bookings: toArray(source.bookings),
-      itinerary: Array.isArray(source.itinerary)
-        ? clone(source.itinerary)
-        : source.itinerary
-          ? clone(source.itinerary)
-          : [],
+      itinerary: toArray(source.itinerary),
       expenses: toArray(source.expenses),
       documents: toArray(source.documents),
       packing: toArray(source.packing),
       memories: toArray(source.memories),
-
       coverImage: toText(source.coverImage),
       archivedAt: source.archivedAt || null,
+      convertedAt: source.convertedAt || null,
+      createdAt: source.createdAt || nowISO(),
+      updatedAt: nowISO()
+    };
+  };
+
+  const normalizePlannedChecklist = (checklist = {}, estimatedBudget = 0) => ({
+    destinationApproved: toBoolean(checklist.destinationApproved, true),
+    budgetApproved: toBoolean(
+      checklist.budgetApproved,
+      toNonNegative(estimatedBudget) > 0
+    ),
+    flightBooked: toBoolean(checklist.flightBooked, false),
+    hotelBooked: toBoolean(checklist.hotelBooked, false),
+    insuranceReady: toBoolean(checklist.insuranceReady, false),
+    visaReady: toBoolean(checklist.visaReady, false),
+    documentsReady: toBoolean(checklist.documentsReady, false),
+    activitiesPlanned: toBoolean(checklist.activitiesPlanned, false),
+    packingReady: toBoolean(checklist.packingReady, false)
+  });
+
+  const calculatePlannedReadiness = (trip = {}) => {
+    const checklist = normalizePlannedChecklist(
+      trip.checklist,
+      trip.estimatedBudget
+    );
+
+    const requiredCompleted = REQUIRED_PLANNED_ITEMS.filter(
+      (item) => checklist[item] === true
+    ).length;
+
+    const optionalCompleted = OPTIONAL_PLANNED_ITEMS.filter(
+      (item) => checklist[item] === true
+    ).length;
+
+    return {
+      percentage: Math.round(
+        (requiredCompleted / REQUIRED_PLANNED_ITEMS.length) * 80 +
+        (optionalCompleted / OPTIONAL_PLANNED_ITEMS.length) * 20
+      ),
+      requiredCompleted,
+      requiredTotal: REQUIRED_PLANNED_ITEMS.length,
+      optionalCompleted,
+      optionalTotal: OPTIONAL_PLANNED_ITEMS.length,
+      readyForConversion: REQUIRED_PLANNED_ITEMS.every(
+        (item) => checklist[item] === true
+      ),
+      missingRequiredItems: REQUIRED_PLANNED_ITEMS.filter(
+        (item) => checklist[item] !== true
+      )
+    };
+  };
+
+  const normalizePlannedTrip = (trip = {}) => {
+    const source = isObject(trip) ? clone(trip) : {};
+    const estimatedBudget = toNonNegative(
+      firstDefined(source.estimatedBudget, source.budget, 0)
+    );
+    const checklist = normalizePlannedChecklist(
+      source.checklist,
+      estimatedBudget
+    );
+    const readiness = calculatePlannedReadiness({
+      ...source,
+      estimatedBudget,
+      checklist
+    });
+
+    let status = toText(source.status, "planned");
+
+    if (!["converted", "archived", "cancelled"].includes(status)) {
+      status = readiness.readyForConversion ? "ready" : "planned";
+    }
+
+    return {
+      ...source,
+      id: source.id || createId("planned_trip"),
+      type: "planned",
+      status,
+      title:
+        toText(source.title) ||
+        [source.city, source.country].filter(Boolean).join("، ") ||
+        "رحلة مخطط لها",
+      destinationId: toText(source.destinationId),
+      country: toText(source.country),
+      countryCode: normalizeCountryCode(source.countryCode),
+      city: toText(source.city),
+      startDate: normalizeDateValue(source.startDate),
+      endDate: normalizeDateValue(source.endDate),
+      suggestedMonth:
+        source.suggestedMonth !== undefined &&
+        source.suggestedMonth !== null &&
+        source.suggestedMonth !== ""
+          ? Math.max(1, Math.min(12, toNumber(source.suggestedMonth, 1)))
+          : null,
+      durationDays: Math.max(1, toNumber(source.durationDays, 5)),
+      travelers: Math.max(1, toNumber(source.travelers, 1)),
+      estimatedBudget,
+      currency:
+        toText(source.currency, Config.defaults.currency) ||
+        Config.defaults.currency,
+      sourceRecommendationId: source.sourceRecommendationId || null,
+      sourceAnalysisId: source.sourceAnalysisId || null,
+      source: isObject(source.source)
+        ? clone(source.source)
+        : { engine: toText(source.source, "manual") || "manual" },
+      costBreakdown: isObject(source.costBreakdown)
+        ? clone(source.costBreakdown)
+        : {},
+      highlights: toArray(source.highlights),
+      checklist,
+      readiness,
+      notes: toText(source.notes),
+      booking: isObject(source.booking)
+        ? clone(source.booking)
+        : {
+            flightReference: "",
+            hotelReference: ""
+          },
+      convertedTripId: source.convertedTripId || null,
+      convertedAt: source.convertedAt || null,
+      archived: status === "archived" || toBoolean(source.archived, false),
       createdAt: source.createdAt || nowISO(),
       updatedAt: nowISO()
     };
@@ -806,21 +796,9 @@
       ...source,
       id: source.id || createId("wishlist"),
       countryCode: normalizeCountryCode(
-        firstDefined(
-          source.countryCode,
-          source.code,
-          source.iso2,
-          source.country?.code
-        )
+        firstDefined(source.countryCode, source.code, source.iso2)
       ),
-      countryName: toText(
-        firstDefined(
-          source.countryName,
-          source.country?.nameAr,
-          typeof source.country === "string" ? source.country : ""
-        )
-      ),
-      addedAt: source.addedAt || source.createdAt || nowISO(),
+      countryName: toText(source.countryName),
       source: toText(source.source, "guide") || "guide",
       priority: Math.max(1, Math.min(5, toNumber(source.priority, 3))),
       preferredMonth: source.preferredMonth
@@ -837,27 +815,11 @@
   const normalizeAnnualPlan = (plan = {}) => {
     const source = isObject(plan) ? clone(plan) : {};
 
-    const status = PLAN_STATUSES.includes(toText(source.status))
-      ? toText(source.status)
-      : "idea";
-
     return {
       ...source,
       id: source.id || createId("annual_plan"),
-      countryCode: normalizeCountryCode(
-        firstDefined(
-          source.countryCode,
-          source.code,
-          source.destination?.countryCode
-        )
-      ),
-      countryName: toText(
-        firstDefined(
-          source.countryName,
-          source.destination?.countryName,
-          source.country
-        )
-      ),
+      countryCode: normalizeCountryCode(source.countryCode),
+      countryName: toText(source.countryName || source.country),
       year: Math.max(
         new Date().getFullYear(),
         toNumber(source.year, new Date().getFullYear())
@@ -870,12 +832,13 @@
       budgetAED: toNonNegative(
         firstDefined(source.budgetAED, source.budget, 0)
       ),
-      status,
+      status: PLAN_STATUSES.includes(toText(source.status))
+        ? toText(source.status)
+        : "idea",
       source: toText(source.source, "guide") || "guide",
       convertedTripId: source.convertedTripId || source.tripId || null,
       checklist: {
-        destinationSelected:
-          source.checklist?.destinationSelected !== false,
+        destinationSelected: source.checklist?.destinationSelected !== false,
         budgetReviewed: toBoolean(source.checklist?.budgetReviewed, false),
         datesSelected: toBoolean(source.checklist?.datesSelected, false),
         flightBooked: toBoolean(source.checklist?.flightBooked, false),
@@ -906,14 +869,12 @@
         toText(source.currency, Config.defaults.currency) ||
         Config.defaults.currency,
       date: normalizeDateValue(
-        firstDefined(source.date, source.paidAt, source.expenseDate, todayISO())
+        firstDefined(source.date, source.paidAt, source.expenseDate)
       ),
-      paidAt: source.paidAt || source.date || null,
       status: toText(source.status, "paid") || "paid",
       paymentMethod:
         toText(source.paymentMethod || source.method, "other") || "other",
       notes: toText(source.notes),
-      reference: toText(source.reference || source.transactionReference),
       deletedAt: source.deletedAt || null,
       isDeleted: toBoolean(source.isDeleted, false),
       createdAt: source.createdAt || nowISO(),
@@ -929,7 +890,7 @@
       id: source.id || createId("saving"),
       type: toText(source.type, "deposit") || "deposit",
       amount: toNonNegative(source.amount),
-      date: normalizeDateValue(source.date || todayISO()),
+      date: normalizeDateValue(source.date),
       notes: toText(source.notes),
       createdAt: source.createdAt || nowISO(),
       updatedAt: nowISO()
@@ -943,15 +904,8 @@
 
     let status = toText(source.status, "pending") || "pending";
 
-    if (
-      paidAmount >= amount &&
-      amount > 0 &&
-      !["refunded", "cancelled"].includes(status)
-    ) {
-      status = "paid";
-    } else if (paidAmount > 0 && paidAmount < amount && status === "pending") {
-      status = "partial";
-    }
+    if (paidAmount >= amount && amount > 0) status = "paid";
+    else if (paidAmount > 0 && paidAmount < amount) status = "partial";
 
     return {
       ...source,
@@ -978,204 +932,8 @@
     };
   };
 
-  const normalizeNotification = (notification = {}) => {
-    const source = isObject(notification) ? clone(notification) : {};
-
-    return {
-      ...source,
-      id: source.id || createId("budget_notification"),
-      read: toBoolean(source.read, false),
-      status: toText(source.status, "active") || "active",
-      createdAt: source.createdAt || nowISO(),
-      updatedAt: nowISO()
-    };
-  };
-
   /* =========================================================
-     Finance synchronization
-  ========================================================= */
-
-  const calculateSavingsBalance = (savings) =>
-    toArray(savings.entries).reduce((total, item) => {
-      const amount = toNonNegative(item.amount);
-      return item.type === "withdrawal" ? total - amount : total + amount;
-    }, 0);
-
-  const syncFinanceAliases = (currentState) => {
-    const expenseCandidates = []
-      .concat(toArray(currentState.expenses))
-      .concat(toArray(currentState.budgets?.expenses))
-      .concat(toArray(currentState.finance?.expenses));
-
-    currentState.expenses = uniqueById(expenseCandidates.map(normalizeExpense));
-
-    currentState.budgets = isObject(currentState.budgets)
-      ? currentState.budgets
-      : {};
-    currentState.budgets.expenses = clone(currentState.expenses);
-
-    currentState.savings = isObject(currentState.savings)
-      ? currentState.savings
-      : {};
-
-    const savingEntries = uniqueById(
-      []
-        .concat(toArray(currentState.savings.entries))
-        .concat(toArray(currentState.savings.contributions))
-        .concat(toArray(currentState.savings.transactions))
-        .map(normalizeSavingEntry)
-    );
-
-    currentState.savings.entries = savingEntries;
-    currentState.savings.contributions = clone(savingEntries);
-    currentState.savings.transactions = clone(savingEntries);
-
-    const calculatedBalance = calculateSavingsBalance(currentState.savings);
-
-    currentState.savings.balance = firstDefined(
-      currentState.savings.balance,
-      currentState.savings.currentBalance,
-      currentState.budgets.savingsBalance,
-      calculatedBalance
-    );
-
-    if (savingEntries.length) currentState.savings.balance = calculatedBalance;
-
-    currentState.savings.currentBalance = toNumber(
-      currentState.savings.balance,
-      0
-    );
-
-    currentState.savings.monthlySaving = toNonNegative(
-      firstDefined(
-        currentState.savings.monthlySaving,
-        currentState.savings.monthlySavingTarget,
-        currentState.profile?.monthlySaving,
-        currentState.profile?.monthlyTravelSaving,
-        currentState.settings?.monthlySaving,
-        currentState.budgets?.monthlySavingTarget,
-        1500
-      )
-    );
-
-    currentState.savings.monthlySavingTarget =
-      currentState.savings.monthlySaving;
-
-    currentState.payments = uniqueById(
-      []
-        .concat(toArray(currentState.payments))
-        .concat(toArray(currentState.finance?.payments))
-        .map(normalizePayment)
-    );
-
-    currentState.budgetAlerts = isObject(currentState.budgetAlerts)
-      ? currentState.budgetAlerts
-      : { items: [], rules: {} };
-    currentState.budgetAlerts.items = uniqueById(
-      toArray(currentState.budgetAlerts.items)
-    );
-
-    currentState.budgetRecommendations = isObject(
-      currentState.budgetRecommendations
-    )
-      ? currentState.budgetRecommendations
-      : { items: [], dismissed: [] };
-    currentState.budgetRecommendations.items = uniqueById(
-      toArray(currentState.budgetRecommendations.items)
-    );
-
-    currentState.budgetNotifications = isObject(
-      currentState.budgetNotifications
-    )
-      ? currentState.budgetNotifications
-      : { items: [], preferences: {} };
-    currentState.budgetNotifications.items = uniqueById(
-      toArray(currentState.budgetNotifications.items).map(normalizeNotification)
-    );
-
-    currentState.finance = isObject(currentState.finance)
-      ? currentState.finance
-      : {};
-    currentState.finance.expenses = clone(currentState.expenses);
-    currentState.finance.savings = clone(currentState.savings);
-    currentState.finance.payments = clone(currentState.payments);
-    currentState.finance.alerts = clone(currentState.budgetAlerts);
-    currentState.finance.recommendations = clone(
-      currentState.budgetRecommendations
-    );
-    currentState.finance.notifications = clone(
-      currentState.budgetNotifications
-    );
-    currentState.finance.updatedAt = nowISO();
-
-    currentState.budgets.savingsBalance = toNumber(
-      currentState.savings.balance,
-      0
-    );
-    currentState.budgets.monthlySavingTarget =
-      currentState.savings.monthlySaving;
-
-    currentState.profile = isObject(currentState.profile)
-      ? currentState.profile
-      : {};
-    currentState.profile.monthlySaving = currentState.savings.monthlySaving;
-    currentState.profile.monthlyTravelSaving =
-      currentState.savings.monthlySaving;
-
-    currentState.settings = isObject(currentState.settings)
-      ? currentState.settings
-      : {};
-    currentState.settings.monthlySaving = currentState.savings.monthlySaving;
-    currentState.settings.annualTravelBudget = toNonNegative(
-      firstDefined(
-        currentState.settings.annualTravelBudget,
-        currentState.profile.annualTravelBudget,
-        currentState.budgets.annualBudget,
-        30000
-      )
-    );
-
-    currentState.profile.annualTravelBudget =
-      currentState.settings.annualTravelBudget;
-    currentState.budgets.annualBudget =
-      currentState.settings.annualTravelBudget;
-
-    return currentState;
-  };
-
-  const recalculateTripSpending = (currentState) => {
-    const totals = new Map();
-
-    currentState.expenses
-      .filter(
-        (expense) =>
-          !expense.deletedAt &&
-          expense.isDeleted !== true &&
-          expense.status !== "cancelled"
-      )
-      .forEach((expense) => {
-        if (!expense.tripId) return;
-
-        const key = String(expense.tripId);
-        totals.set(
-          key,
-          toNumber(totals.get(key), 0) + toNonNegative(expense.amount)
-        );
-      });
-
-    currentState.trips = currentState.trips.map((trip) => ({
-      ...trip,
-      spent: totals.has(String(trip.id))
-        ? totals.get(String(trip.id))
-        : toNonNegative(trip.spent),
-      updatedAt: trip.updatedAt || nowISO()
-    }));
-
-    return currentState;
-  };
-
-  /* =========================================================
-     State normalization and statistics
+     State normalization
   ========================================================= */
 
   const normalizeState = (input) => {
@@ -1189,76 +947,106 @@
     merged.meta.updatedAt = nowISO();
 
     merged.trips = uniqueById(toArray(merged.trips).map(normalizeTrip));
+    merged.plannedTrips = uniqueById(
+      toArray(merged.plannedTrips).map(normalizePlannedTrip)
+    );
     merged.wishlist = uniqueById(
       toArray(merged.wishlist).map(normalizeWishlistItem)
     ).filter((item) => item.countryCode);
-
     merged.annualPlans = uniqueById(
       toArray(merged.annualPlans).map(normalizeAnnualPlan)
-    ).filter((plan) => plan.countryCode);
+    );
+    merged.expenses = uniqueById(
+      []
+        .concat(toArray(merged.expenses))
+        .concat(toArray(merged.budgets?.expenses))
+        .map(normalizeExpense)
+    );
 
-    [
-      "destinations",
-      "documents",
-      "reviews",
-      "memories",
-      "notifications"
-    ].forEach((key) => {
-      if (!Array.isArray(merged[key])) merged[key] = [];
-    });
+    merged.savings = isObject(merged.savings)
+      ? merged.savings
+      : clone(defaults.savings);
 
-    merged.passport = isObject(merged.passport)
-      ? merged.passport
-      : clone(defaults.passport);
+    merged.savings.entries = uniqueById(
+      []
+        .concat(toArray(merged.savings.entries))
+        .concat(toArray(merged.savings.contributions))
+        .concat(toArray(merged.savings.transactions))
+        .map(normalizeSavingEntry)
+    );
 
-    merged.guideIntelligence = isObject(merged.guideIntelligence)
-      ? merged.guideIntelligence
-      : clone(defaults.guideIntelligence);
+    const savingsBalance = merged.savings.entries.reduce(
+      (total, item) =>
+        item.type === "withdrawal"
+          ? total - toNonNegative(item.amount)
+          : total + toNonNegative(item.amount),
+      0
+    );
 
-    syncFinanceAliases(merged);
-    recalculateTripSpending(merged);
+    if (merged.savings.entries.length) {
+      merged.savings.balance = savingsBalance;
+    }
+
+    merged.savings.currentBalance = toNumber(merged.savings.balance, 0);
+    merged.savings.monthlySaving = toNonNegative(
+      firstDefined(
+        merged.savings.monthlySaving,
+        merged.profile?.monthlySaving,
+        merged.settings?.monthlySaving,
+        1500
+      )
+    );
+    merged.savings.monthlySavingTarget = merged.savings.monthlySaving;
+
+    merged.payments = uniqueById(
+      toArray(merged.payments).map(normalizePayment)
+    );
+
+    merged.budgetTravelIntelligence = deepMerge(
+      defaults.budgetTravelIntelligence,
+      isObject(merged.budgetTravelIntelligence)
+        ? merged.budgetTravelIntelligence
+        : {}
+    );
+
+    merged.budgetTravelIntelligence.recommendations = uniqueById(
+      toArray(merged.budgetTravelIntelligence.recommendations)
+    );
+
+    merged.budgetTravelIntelligence.history = uniqueById(
+      toArray(merged.budgetTravelIntelligence.history)
+    ).slice(0, 20);
+
+    merged.budgets.expenses = clone(merged.expenses);
+    merged.budgets.savingsBalance = merged.savings.currentBalance;
+    merged.budgets.monthlySavingTarget = merged.savings.monthlySaving;
+
+    merged.finance.expenses = clone(merged.expenses);
+    merged.finance.savings = clone(merged.savings);
+    merged.finance.payments = clone(merged.payments);
+    merged.finance.updatedAt = nowISO();
 
     return merged;
   };
 
-  const calculatePlanReadiness = (plan) => {
-    const checklist = isObject(plan?.checklist) ? plan.checklist : {};
-
-    const steps = [
-      checklist.destinationSelected !== false,
-      checklist.budgetReviewed === true,
-      checklist.datesSelected === true,
-      checklist.flightBooked === true,
-      checklist.hotelBooked === true,
-      checklist.documentsReady === true
-    ];
-
-    const completed = steps.filter(Boolean).length;
-
-    return {
-      completed,
-      total: steps.length,
-      percent: Math.round((completed / steps.length) * 100),
-      readyForTrip:
-        checklist.flightBooked === true &&
-        checklist.hotelBooked === true
-    };
-  };
-
   const calculateStatistics = (currentState) => {
-    const trips = toArray(currentState.trips);
-    const expenses = toArray(currentState.expenses).filter(
+    const visibleTrips = currentState.trips.filter(
+      (trip) => trip.status !== "archived"
+    );
+
+    const visiblePlannedTrips = currentState.plannedTrips.filter(
+      (trip) => !["archived", "cancelled"].includes(trip.status)
+    );
+
+    const completedTrips = visibleTrips.filter(
+      (trip) => trip.status === "completed"
+    );
+
+    const expenses = currentState.expenses.filter(
       (expense) =>
         !expense.deletedAt &&
         expense.isDeleted !== true &&
         expense.status !== "cancelled"
-    );
-
-    const wishlist = toArray(currentState.wishlist);
-    const annualPlans = toArray(currentState.annualPlans);
-    const visibleTrips = trips.filter((trip) => trip.status !== "archived");
-    const completedTrips = visibleTrips.filter(
-      (trip) => trip.status === "completed"
     );
 
     const countries = new Set(
@@ -1268,7 +1056,9 @@
     );
 
     const cities = new Set(
-      completedTrips.map((trip) => toText(trip.city).toLowerCase()).filter(Boolean)
+      completedTrips
+        .map((trip) => toText(trip.city).toLowerCase())
+        .filter(Boolean)
     );
 
     const totalTravelSpend = expenses.reduce(
@@ -1281,20 +1071,6 @@
       0
     );
 
-    const overduePayments = currentState.payments.filter(
-      (payment) => payment.status === "overdue"
-    ).length;
-
-    const activeBudgetAlerts = currentState.budgetAlerts.items.filter(
-      (alert) => !["resolved", "dismissed"].includes(alert.status)
-    ).length;
-
-    const unreadBudgetNotifications =
-      currentState.budgetNotifications.items.filter(
-        (notification) =>
-          notification.read !== true && notification.status === "active"
-      ).length;
-
     currentState.statistics = {
       totalTrips: visibleTrips.length,
       completedTrips: completedTrips.length,
@@ -1304,21 +1080,41 @@
       activeTrips: visibleTrips.filter((trip) =>
         ACTIVE_STATUSES.includes(trip.status)
       ).length,
+      plannedTrips: visiblePlannedTrips.length,
+      readyPlannedTrips: visiblePlannedTrips.filter(
+        (trip) => trip.readiness?.readyForConversion === true
+      ).length,
+      convertedPlannedTrips: currentState.plannedTrips.filter(
+        (trip) => trip.status === "converted"
+      ).length,
       visitedCountries: countries.size,
       visitedCities: cities.size,
-      wishlistCount: wishlist.length,
-      annualPlanCount: annualPlans.length,
-      readyAnnualPlans: annualPlans.filter(
-        (plan) => calculatePlanReadiness(plan).readyForTrip
+      wishlistCount: currentState.wishlist.length,
+      annualPlanCount: currentState.annualPlans.length,
+      readyAnnualPlans: currentState.annualPlans.filter(
+        (plan) =>
+          plan.checklist?.flightBooked === true &&
+          plan.checklist?.hotelBooked === true
       ).length,
       totalTravelSpend,
       totalTravelBudget,
       savedForTravel: toNumber(currentState.savings.balance, 0),
       expenseCount: expenses.length,
       paymentCount: currentState.payments.length,
-      overduePayments,
-      activeBudgetAlerts,
-      unreadBudgetNotifications
+      overduePayments: currentState.payments.filter(
+        (payment) => payment.status === "overdue"
+      ).length,
+      activeBudgetAlerts: toArray(currentState.budgetAlerts?.items).filter(
+        (alert) => !["resolved", "dismissed"].includes(alert.status)
+      ).length,
+      unreadBudgetNotifications:
+        toArray(currentState.budgetNotifications?.items).filter(
+          (notification) =>
+            notification.read !== true &&
+            notification.status === "active"
+        ).length,
+      budgetTravelRecommendationCount:
+        currentState.budgetTravelIntelligence.recommendations.length
     };
 
     currentState.budgets.totalSpent = totalTravelSpend;
@@ -1342,29 +1138,25 @@
   );
 
   /* =========================================================
-     Persistence and subscriptions
+     Persistence
   ========================================================= */
 
-  const dispatchStoreEvents = (event, snapshotValue) => {
-    const detail = { state: snapshotValue, event };
-
-    ["tic:store-change", "store:changed"].forEach((name) => {
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-    });
-  };
-
   const notifyListeners = (event = {}) => {
-    const snapshotValue = clone(state);
+    const snapshot = clone(state);
 
     listeners.forEach((listener) => {
       try {
-        listener(snapshotValue, event);
+        listener(snapshot, event);
       } catch (error) {
         console.error("TIC Store subscriber error:", error);
       }
     });
 
-    dispatchStoreEvents(event, snapshotValue);
+    const detail = { state: snapshot, event };
+
+    ["tic:store-change", "store:changed"].forEach((name) => {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+    });
   };
 
   const persistImmediately = (event = { type: "persist" }) => {
@@ -1389,6 +1181,7 @@
     }
 
     window.clearTimeout(saveTimer);
+
     saveTimer = window.setTimeout(() => {
       persistImmediately(event);
     }, AUTO_SAVE_DELAY);
@@ -1400,91 +1193,16 @@
     return clone(state);
   };
 
-  const setByPath = (target, path, value) => {
-    const parts = Array.isArray(path)
-      ? path
-      : String(path)
-          .split(".")
-          .map((part) => part.trim())
-          .filter(Boolean);
-
-    if (!parts.length) return false;
-
-    let cursor = target;
-
-    for (let index = 0; index < parts.length - 1; index += 1) {
-      const key = parts[index];
-
-      if (!isObject(cursor[key]) && !Array.isArray(cursor[key])) {
-        cursor[key] = {};
-      }
-
-      cursor = cursor[key];
-    }
-
-    cursor[parts[parts.length - 1]] = clone(value);
-    return true;
-  };
-
-  const getByPath = (target, path, fallback = null) => {
-    if (path === undefined || path === null || path === "") {
-      return clone(target);
-    }
-
-    const parts = Array.isArray(path)
-      ? path
-      : String(path)
-          .split(".")
-          .map((part) => part.trim())
-          .filter(Boolean);
-
-    let cursor = target;
-
-    for (const key of parts) {
-      if (
-        cursor === null ||
-        cursor === undefined ||
-        !Object.prototype.hasOwnProperty.call(cursor, key)
-      ) {
-        return clone(fallback);
-      }
-
-      cursor = cursor[key];
-    }
-
-    return clone(cursor);
-  };
-
   const findTripIndex = (tripId) =>
     state.trips.findIndex((trip) => String(trip.id) === String(tripId));
 
-  const findExpenseIndex = (expenseId) =>
-    state.expenses.findIndex(
-      (expense) => String(expense.id) === String(expenseId)
-    );
-
-  const findPaymentIndex = (paymentId) =>
-    state.payments.findIndex(
-      (payment) => String(payment.id) === String(paymentId)
-    );
-
-  const findWishlistIndex = (identifier) => {
-    const code = normalizeCountryCode(identifier);
-
-    return state.wishlist.findIndex(
-      (item) =>
-        String(item.id) === String(identifier) ||
-        (code && item.countryCode === code)
-    );
-  };
-
-  const findAnnualPlanIndex = (planId) =>
-    state.annualPlans.findIndex(
-      (plan) => String(plan.id) === String(planId)
+  const findPlannedTripIndex = (tripId) =>
+    state.plannedTrips.findIndex(
+      (trip) => String(trip.id) === String(tripId)
     );
 
   /* =========================================================
-     Public Store API
+     Public API
   ========================================================= */
 
   const Store = {
@@ -1495,12 +1213,43 @@
     },
 
     get(path, fallback = null) {
-      return getByPath(state, path, fallback);
+      if (!path) return clone(state);
+
+      const parts = String(path).split(".").filter(Boolean);
+      let cursor = state;
+
+      for (const key of parts) {
+        if (
+          cursor === null ||
+          cursor === undefined ||
+          !Object.prototype.hasOwnProperty.call(cursor, key)
+        ) {
+          return clone(fallback);
+        }
+
+        cursor = cursor[key];
+      }
+
+      return clone(cursor);
     },
 
     set(path, value, options = {}) {
-      if (!setByPath(state, path, value)) return false;
+      const parts = String(path).split(".").filter(Boolean);
+      if (!parts.length) return false;
 
+      let cursor = state;
+
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        const key = parts[index];
+
+        if (!isObject(cursor[key]) && !Array.isArray(cursor[key])) {
+          cursor[key] = {};
+        }
+
+        cursor = cursor[key];
+      }
+
+      cursor[parts[parts.length - 1]] = clone(value);
       state = calculateStatistics(normalizeState(state));
 
       if (options.immediate === true) {
@@ -1509,36 +1258,6 @@
 
       schedulePersist({ type: "set", path });
       return true;
-    },
-
-    setState(nextState, options = {}) {
-      if (typeof nextState === "function") {
-        return this.update(nextState, options);
-      }
-
-      return replaceStateInternal(nextState, {
-        type: options.eventType || "set-state"
-      });
-    },
-
-    replaceState(nextState, options = {}) {
-      return replaceStateInternal(nextState, {
-        type: options.eventType || "replace-state"
-      });
-    },
-
-    patch(path, partialValue, options = {}) {
-      if (isObject(path) && partialValue === undefined) {
-        return this.update((draft) => deepMerge(draft, path), options);
-      }
-
-      const current = getByPath(state, path, {});
-
-      if (!isObject(current) || !isObject(partialValue)) {
-        return this.set(path, partialValue, options);
-      }
-
-      return this.set(path, deepMerge(current, partialValue), options);
     },
 
     update(mutator, options = {}) {
@@ -1560,6 +1279,38 @@
       }
 
       return clone(state);
+    },
+
+    setState(nextState, options = {}) {
+      if (typeof nextState === "function") {
+        return this.update(nextState, options);
+      }
+
+      return replaceStateInternal(nextState, {
+        type: options.eventType || "set-state"
+      });
+    },
+
+    replaceState(nextState, options = {}) {
+      return replaceStateInternal(nextState, {
+        type: options.eventType || "replace-state"
+      });
+    },
+
+    patch(path, value, options = {}) {
+      if (isObject(path) && value === undefined) {
+        return this.update((draft) => deepMerge(draft, path), options);
+      }
+
+      const current = this.get(path, {});
+
+      return this.set(
+        path,
+        isObject(current) && isObject(value)
+          ? deepMerge(current, value)
+          : value,
+        options
+      );
     },
 
     transaction(mutator, options = {}) {
@@ -1597,10 +1348,6 @@
       return persistImmediately({ type: "manual-save" });
     },
 
-    /* =======================================================
-       Generic action dispatcher
-    ======================================================= */
-
     dispatch(actionOrObject, payload) {
       const action =
         typeof actionOrObject === "string"
@@ -1615,45 +1362,25 @@
       const handlers = {
         "trips/add": () => this.createTrip(data),
         ADD_TRIP: () => this.createTrip(data),
-        "trip/add": () => this.createTrip(data),
-
         "trips/update": () => this.updateTrip(data?.id, data),
-        UPDATE_TRIP: () => this.updateTrip(data?.id, data),
-        "trip/update": () => this.updateTrip(data?.id, data),
 
-        "wishlist/add": () => this.addWishlistItem(data),
-        ADD_WISHLIST_ITEM: () => this.addWishlistItem(data),
-        "guide/addWishlist": () => this.addWishlistItem(data),
+        "plannedTrips/add": () => this.createPlannedTrip(data),
+        ADD_PLANNED_TRIP: () => this.createPlannedTrip(data),
+        "plannedTrips/update": () =>
+          this.updatePlannedTrip(data?.id, data),
+        "plannedTrips/checklist": () =>
+          this.updatePlannedTripChecklist(data?.id, data?.checklist || data),
+        "plannedTrips/convert": () =>
+          this.convertPlannedTrip(data?.id || data?.plannedTripId, data),
+        "plannedTrips/remove": () =>
+          this.deletePlannedTrip(data?.id || data),
 
-        "wishlist/update": () => this.updateWishlistItem(data?.id, data),
-        UPDATE_WISHLIST_ITEM: () => this.updateWishlistItem(data?.id, data),
-        "guide/updateWishlist": () =>
-          this.updateWishlistItem(data?.id, data),
-
-        "wishlist/remove": () =>
-          this.removeWishlistItem(data?.id || data?.countryCode),
-        REMOVE_WISHLIST_ITEM: () =>
-          this.removeWishlistItem(data?.id || data?.countryCode),
-        "guide/removeWishlist": () =>
-          this.removeWishlistItem(data?.id || data?.countryCode),
-
-        "annualPlans/add": () => this.addAnnualPlan(data),
-        ADD_ANNUAL_PLAN: () => this.addAnnualPlan(data),
-        "guide/addAnnualPlan": () => this.addAnnualPlan(data),
-
-        "annualPlans/update": () =>
-          this.updateAnnualPlan(data?.id, data),
-        UPDATE_ANNUAL_PLAN: () =>
-          this.updateAnnualPlan(data?.id, data),
-        "guide/updateAnnualPlan": () =>
-          this.updateAnnualPlan(data?.id, data),
-
-        "annualPlans/remove": () =>
-          this.removeAnnualPlan(data?.id),
-        REMOVE_ANNUAL_PLAN: () =>
-          this.removeAnnualPlan(data?.id),
-        "guide/removeAnnualPlan": () =>
-          this.removeAnnualPlan(data?.id)
+        "budgetTravel/setAnalysis": () =>
+          this.setBudgetTravelAnalysis(data),
+        "budgetTravel/dismissRecommendation": () =>
+          this.dismissBudgetTravelRecommendation(data?.id || data),
+        "budgetTravel/acceptRecommendation": () =>
+          this.acceptBudgetTravelRecommendation(data?.id || data)
       };
 
       if (!handlers[action]) {
@@ -1671,45 +1398,9 @@
       return this.dispatch(actionOrObject, payload);
     },
 
-    /* =======================================================
-       Trip APIs and lifecycle
-    ======================================================= */
-
-    syncTripStatuses(options = {}) {
-      const before = state.trips.map((trip) => ({
-        id: trip.id,
-        status: trip.status
-      }));
-
-      state = calculateStatistics(normalizeState(state));
-      state.meta.lastTripLifecycleSyncAt = nowISO();
-
-      const changedTripIds = state.trips
-        .filter((trip) => {
-          const previous = before.find(
-            (item) => String(item.id) === String(trip.id)
-          );
-          return previous && previous.status !== trip.status;
-        })
-        .map((trip) => trip.id);
-
-      if (changedTripIds.length || options.forcePersist === true) {
-        persistImmediately({
-          type: "trip-lifecycle-synced",
-          changedTripIds
-        });
-      }
-
-      return {
-        changed: changedTripIds.length > 0,
-        changedTripIds: clone(changedTripIds),
-        trips: clone(state.trips)
-      };
-    },
+    /* Trips */
 
     getTrips(options = {}) {
-      this.syncTripStatuses();
-
       let items = state.trips.filter(
         (trip) => options.includeArchived === true || trip.status !== "archived"
       );
@@ -1722,26 +1413,13 @@
         items = items.filter((trip) => statuses.includes(trip.status));
       }
 
-      if (options.planningStatus) {
-        items = items.filter(
-          (trip) => trip.planningStatus === options.planningStatus
+      if (options.sort === "soonest") {
+        items.sort(
+          (a, b) =>
+            (dateToUtcNumber(a.startDate) || Number.MAX_SAFE_INTEGER) -
+            (dateToUtcNumber(b.startDate) || Number.MAX_SAFE_INTEGER)
         );
       }
-
-      if (options.countryCode) {
-        const code = normalizeCountryCode(options.countryCode);
-        items = items.filter((trip) => trip.countryCode === code);
-      }
-
-      if (options.country) {
-        const country = toText(options.country).toLowerCase();
-        items = items.filter(
-          (trip) => toText(trip.country).toLowerCase() === country
-        );
-      }
-
-      if (options.sort === "newest") items.sort(compareTripsNewestFirst);
-      if (options.sort === "soonest") items.sort(compareTripsSoonestFirst);
 
       return clone(items);
     },
@@ -1755,53 +1433,43 @@
     },
 
     getActiveTrips() {
-      return this.getTrips({ status: ACTIVE_STATUSES, sort: "soonest" });
+      return this.getTrips({ status: ACTIVE_STATUSES });
     },
 
     getCompletedTrips() {
-      return this.getTrips({ status: "completed", sort: "newest" });
+      return this.getTrips({ status: "completed" });
     },
 
     getPassportTrips() {
       return this.getCompletedTrips();
     },
 
-    getTripLifecycleStatus(tripOrId) {
-      const trip = isObject(tripOrId) ? tripOrId : this.getTrip(tripOrId);
-      if (!trip) return null;
+    getTrip(tripId) {
+      const trip = state.trips.find(
+        (item) => String(item.id) === String(tripId)
+      );
 
-      return resolveLifecycleStatus({
-        status: trip.status,
-        startDate: trip.startDate,
-        endDate: trip.endDate,
-        durationDays: trip.durationDays
-      });
+      return trip ? clone(trip) : null;
+    },
+
+    getTripById(tripId) {
+      return this.getTrip(tripId);
     },
 
     createTrip(tripData) {
       const trip = normalizeTrip(tripData);
 
-      const titleMinLength = toNumber(
-        Config.validation?.trip?.titleMinLength,
-        1
-      );
-
-      const titleMaxLength = toNumber(
-        Config.validation?.trip?.titleMaxLength,
-        200
-      );
-
-      if (trip.title.length < titleMinLength) {
-        throw new Error("اسم الرحلة قصير جداً.");
-      }
-
-      if (trip.title.length > titleMaxLength) {
-        throw new Error("اسم الرحلة أطول من الحد المسموح.");
+      if (!trip.title) {
+        throw new Error("اسم الرحلة مطلوب.");
       }
 
       state.trips.unshift(trip);
       state = calculateStatistics(normalizeState(state));
-      persistImmediately({ type: "trip-created", tripId: trip.id });
+
+      persistImmediately({
+        type: "trip-created",
+        tripId: trip.id
+      });
 
       return this.getTrip(trip.id);
     },
@@ -1824,33 +1492,19 @@
       });
 
       state = calculateStatistics(normalizeState(state));
-      persistImmediately({ type: "trip-updated", tripId });
+
+      persistImmediately({
+        type: "trip-updated",
+        tripId
+      });
 
       return this.getTrip(tripId);
     },
 
     upsertTrip(tripData) {
-      const tripId = tripData?.id;
-
-      if (tripId && findTripIndex(tripId) !== -1) {
-        return this.updateTrip(tripId, tripData);
-      }
-
-      return this.createTrip(tripData);
-    },
-
-    getTrip(tripId) {
-      this.syncTripStatuses();
-
-      const trip = state.trips.find(
-        (item) => String(item.id) === String(tripId)
-      );
-
-      return trip ? clone(trip) : null;
-    },
-
-    getTripById(tripId) {
-      return this.getTrip(tripId);
+      return tripData?.id && findTripIndex(tripData.id) !== -1
+        ? this.updateTrip(tripData.id, tripData)
+        : this.createTrip(tripData);
     },
 
     updateTripChecklist(tripId, changes = {}) {
@@ -1862,14 +1516,12 @@
         ...clone(changes)
       });
 
-      const planningStatus =
-        checklist.flightBooked && checklist.hotelBooked
-          ? "ready"
-          : trip.planningStatus;
-
       return this.updateTrip(tripId, {
         checklist,
-        planningStatus
+        planningStatus:
+          checklist.flightBooked && checklist.hotelBooked
+            ? "ready"
+            : trip.planningStatus
       });
     },
 
@@ -1878,17 +1530,19 @@
       if (index === -1) return false;
 
       state.trips.splice(index, 1);
-
       state.expenses = state.expenses.filter(
         (expense) => String(expense.tripId) !== String(tripId)
       );
-
       state.payments = state.payments.filter(
         (payment) => String(payment.tripId) !== String(tripId)
       );
 
       state = calculateStatistics(normalizeState(state));
-      persistImmediately({ type: "trip-deleted", tripId });
+
+      persistImmediately({
+        type: "trip-deleted",
+        tripId
+      });
 
       return true;
     },
@@ -1901,253 +1555,409 @@
     },
 
     restoreTrip(tripId) {
-      const trip = this.getTrip(tripId);
-      if (!trip) return null;
-
       return this.updateTrip(tripId, {
-        status: resolveLifecycleStatus({
-          status: "planning",
-          startDate: trip.startDate,
-          endDate: trip.endDate,
-          durationDays: trip.durationDays
-        }),
+        status: "planning",
         archivedAt: null
       });
     },
 
-    /* =======================================================
-       Wishlist APIs
-    ======================================================= */
+    /* Planned Trips */
 
-    getWishlist(options = {}) {
-      let items = clone(state.wishlist);
+    getPlannedTrips(options = {}) {
+      let items = clone(state.plannedTrips);
 
-      if (options.countryCode) {
-        const code = normalizeCountryCode(options.countryCode);
-        items = items.filter((item) => item.countryCode === code);
-      }
-
-      return items;
-    },
-
-    getWishlistItem(identifier) {
-      const index = findWishlistIndex(identifier);
-      return index === -1 ? null : clone(state.wishlist[index]);
-    },
-
-    isWishlisted(identifier) {
-      return findWishlistIndex(identifier) !== -1;
-    },
-
-    addWishlistItem(itemData) {
-      const item = normalizeWishlistItem(itemData);
-
-      if (!item.countryCode) {
-        throw new Error("رمز الدولة مطلوب لإضافة الأمنية.");
-      }
-
-      const existingIndex = findWishlistIndex(item.countryCode);
-
-      if (existingIndex !== -1) {
-        return clone(state.wishlist[existingIndex]);
-      }
-
-      state.wishlist.unshift(item);
-      state = calculateStatistics(normalizeState(state));
-
-      persistImmediately({
-        type: "wishlist-item-created",
-        wishlistId: item.id,
-        countryCode: item.countryCode
-      });
-
-      return this.getWishlistItem(item.id);
-    },
-
-    addWishlist(itemData) {
-      return this.addWishlistItem(itemData);
-    },
-
-    updateWishlistItem(identifier, changes = {}) {
-      const index = findWishlistIndex(identifier);
-      if (index === -1) return null;
-
-      const current = state.wishlist[index];
-
-      state.wishlist[index] = normalizeWishlistItem({
-        ...current,
-        ...clone(changes),
-        id: current.id,
-        countryCode: current.countryCode,
-        createdAt: current.createdAt
-      });
-
-      state = calculateStatistics(normalizeState(state));
-
-      persistImmediately({
-        type: "wishlist-item-updated",
-        wishlistId: current.id
-      });
-
-      return this.getWishlistItem(current.id);
-    },
-
-    removeWishlistItem(identifier) {
-      const index = findWishlistIndex(identifier);
-      if (index === -1) return false;
-
-      const [removed] = state.wishlist.splice(index, 1);
-      state = calculateStatistics(normalizeState(state));
-
-      persistImmediately({
-        type: "wishlist-item-deleted",
-        wishlistId: removed.id,
-        countryCode: removed.countryCode
-      });
-
-      return true;
-    },
-
-    removeWishlist(identifier) {
-      return this.removeWishlistItem(identifier);
-    },
-
-    toggleWishlist(itemData) {
-      const identifier =
-        itemData?.id ||
-        itemData?.countryCode ||
-        itemData;
-
-      if (this.isWishlisted(identifier)) {
-        this.removeWishlistItem(identifier);
-        return null;
-      }
-
-      return this.addWishlistItem(itemData);
-    },
-
-    /* =======================================================
-       Annual Planner APIs
-    ======================================================= */
-
-    getAnnualPlans(options = {}) {
-      let items = clone(state.annualPlans);
-
-      if (options.year) {
+      if (options.includeArchived !== true) {
         items = items.filter(
-          (plan) => plan.year === Number(options.year)
+          (trip) => !["archived", "cancelled"].includes(trip.status)
         );
       }
 
       if (options.status) {
+        const statuses = Array.isArray(options.status)
+          ? options.status
+          : [options.status];
+
+        items = items.filter((trip) => statuses.includes(trip.status));
+      }
+
+      if (options.ready === true) {
         items = items.filter(
-          (plan) => plan.status === options.status
+          (trip) => trip.readiness?.readyForConversion === true
         );
       }
-
-      if (options.countryCode) {
-        const code = normalizeCountryCode(options.countryCode);
-        items = items.filter((plan) => plan.countryCode === code);
-      }
-
-      items.sort((a, b) => {
-        if (a.year !== b.year) return a.year - b.year;
-        return (a.month || 13) - (b.month || 13);
-      });
 
       return items;
     },
 
-    getAnnualPlan(planId) {
-      const index = findAnnualPlanIndex(planId);
-      return index === -1 ? null : clone(state.annualPlans[index]);
+    listPlannedTrips(options = {}) {
+      return this.getPlannedTrips(options);
     },
 
-    addAnnualPlan(planData) {
-      const plan = normalizeAnnualPlan(planData);
+    getPlannedTrip(tripId) {
+      const index = findPlannedTripIndex(tripId);
+      return index === -1 ? null : clone(state.plannedTrips[index]);
+    },
 
-      if (!plan.countryCode) {
-        throw new Error("الدولة مطلوبة لإنشاء الخطة السنوية.");
+    createPlannedTrip(tripData = {}) {
+      const trip = normalizePlannedTrip(tripData);
+
+      if (
+        trip.sourceRecommendationId &&
+        state.plannedTrips.some(
+          (item) =>
+            item.sourceRecommendationId === trip.sourceRecommendationId &&
+            !["archived", "cancelled"].includes(item.status)
+        )
+      ) {
+        return clone(
+          state.plannedTrips.find(
+            (item) =>
+              item.sourceRecommendationId === trip.sourceRecommendationId &&
+              !["archived", "cancelled"].includes(item.status)
+          )
+        );
       }
 
-      const duplicate = state.annualPlans.find(
-        (item) =>
-          item.countryCode === plan.countryCode &&
-          item.year === plan.year &&
-          item.month === plan.month &&
-          item.status !== "cancelled"
-      );
-
-      if (duplicate) return clone(duplicate);
-
-      state.annualPlans.push(plan);
+      state.plannedTrips.unshift(trip);
       state = calculateStatistics(normalizeState(state));
 
+      if (trip.sourceRecommendationId) {
+        this.acceptBudgetTravelRecommendation(
+          trip.sourceRecommendationId,
+          { persist: false }
+        );
+      }
+
       persistImmediately({
-        type: "annual-plan-created",
-        planId: plan.id
+        type: "planned-trip-created",
+        plannedTripId: trip.id
       });
 
-      return this.getAnnualPlan(plan.id);
+      return this.getPlannedTrip(trip.id);
     },
 
-    createAnnualPlan(planData) {
-      return this.addAnnualPlan(planData);
+    addPlannedTrip(tripData) {
+      return this.createPlannedTrip(tripData);
     },
 
-    updateAnnualPlan(planId, changes = {}) {
-      const index = findAnnualPlanIndex(planId);
+    updatePlannedTrip(tripId, changes = {}) {
+      const index = findPlannedTripIndex(tripId);
       if (index === -1) return null;
 
-      const current = state.annualPlans[index];
+      const current = state.plannedTrips[index];
 
-      state.annualPlans[index] = normalizeAnnualPlan({
+      state.plannedTrips[index] = normalizePlannedTrip({
         ...current,
         ...clone(changes),
+        checklist: {
+          ...current.checklist,
+          ...(isObject(changes.checklist) ? changes.checklist : {})
+        },
         id: current.id,
-        countryCode: current.countryCode,
         createdAt: current.createdAt
       });
 
       state = calculateStatistics(normalizeState(state));
 
       persistImmediately({
-        type: "annual-plan-updated",
-        planId
+        type: "planned-trip-updated",
+        plannedTripId: tripId
       });
 
-      return this.getAnnualPlan(planId);
+      return this.getPlannedTrip(tripId);
     },
 
-    removeAnnualPlan(planId) {
-      const index = findAnnualPlanIndex(planId);
-      if (index === -1) return false;
+    updatePlannedTripChecklist(tripId, changes = {}) {
+      const trip = this.getPlannedTrip(tripId);
+      if (!trip) return null;
 
-      state.annualPlans.splice(index, 1);
+      return this.updatePlannedTrip(tripId, {
+        checklist: {
+          ...trip.checklist,
+          ...clone(changes)
+        }
+      });
+    },
+
+    setPlannedTripChecklistItem(tripId, item, completed = true) {
+      if (![...REQUIRED_PLANNED_ITEMS, ...OPTIONAL_PLANNED_ITEMS].includes(item)) {
+        throw new Error(`Unknown planned trip checklist item: ${item}`);
+      }
+
+      return this.updatePlannedTripChecklist(tripId, {
+        [item]: completed === true
+      });
+    },
+
+    canConvertPlannedTrip(tripId) {
+      return Boolean(
+        this.getPlannedTrip(tripId)?.readiness?.readyForConversion
+      );
+    },
+
+    convertPlannedTrip(tripId, options = {}) {
+      const index = findPlannedTripIndex(tripId);
+      if (index === -1) return null;
+
+      const plannedTrip = state.plannedTrips[index];
+
+      if (plannedTrip.status === "converted" && plannedTrip.convertedTripId) {
+        return this.getTrip(plannedTrip.convertedTripId);
+      }
+
+      if (!plannedTrip.readiness?.readyForConversion) {
+        return {
+          success: false,
+          status: "blocked",
+          reason: "REQUIREMENTS_NOT_MET",
+          missingRequiredItems:
+            plannedTrip.readiness?.missingRequiredItems || []
+        };
+      }
+
+      const convertedAt = nowISO();
+
+      const activeTrip = normalizeTrip({
+        ...plannedTrip,
+        id: options.tripId || createId("trip"),
+        plannedTripId: plannedTrip.id,
+        budget: plannedTrip.estimatedBudget,
+        status: "ready",
+        planningStatus: "ready",
+        source: "planned-trip",
+        convertedAt,
+        checklist: {
+          ...plannedTrip.checklist,
+          flightBooked: true,
+          hotelBooked: true
+        },
+        bookingReference:
+          options.flightReference ||
+          plannedTrip.booking?.flightReference ||
+          "",
+        hotelBookingReference:
+          options.hotelReference ||
+          plannedTrip.booking?.hotelReference ||
+          "",
+        createdAt: nowISO()
+      });
+
+      state.trips.unshift(activeTrip);
+
+      state.plannedTrips[index] = normalizePlannedTrip({
+        ...plannedTrip,
+        status: "converted",
+        convertedTripId: activeTrip.id,
+        convertedAt
+      });
+
       state = calculateStatistics(normalizeState(state));
 
       persistImmediately({
-        type: "annual-plan-deleted",
-        planId
+        type: "planned-trip-converted",
+        plannedTripId: plannedTrip.id,
+        tripId: activeTrip.id
+      });
+
+      return this.getTrip(activeTrip.id);
+    },
+
+    archivePlannedTrip(tripId) {
+      return this.updatePlannedTrip(tripId, {
+        status: "archived",
+        archived: true
+      });
+    },
+
+    restorePlannedTrip(tripId) {
+      return this.updatePlannedTrip(tripId, {
+        status: "planned",
+        archived: false,
+        convertedTripId: null,
+        convertedAt: null
+      });
+    },
+
+    deletePlannedTrip(tripId) {
+      const index = findPlannedTripIndex(tripId);
+      if (index === -1) return false;
+
+      state.plannedTrips.splice(index, 1);
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "planned-trip-deleted",
+        plannedTripId: tripId
       });
 
       return true;
     },
 
-    deleteAnnualPlan(planId) {
-      return this.removeAnnualPlan(planId);
+    /* Budget Travel Intelligence */
+
+    getBudgetTravelIntelligence() {
+      return clone(state.budgetTravelIntelligence);
     },
 
-    linkAnnualPlanToTrip(planId, tripId) {
-      return this.updateAnnualPlan(planId, {
-        status: "converted",
-        convertedTripId: tripId
+    setBudgetTravelAnalysis(analysis = {}) {
+      const normalized = isObject(analysis)
+        ? clone(analysis)
+        : {};
+
+      normalized.id = normalized.id || createId("budget_analysis");
+      normalized.savedAt = nowISO();
+
+      state.budgetTravelIntelligence.currentAnalysis = normalized;
+      state.budgetTravelIntelligence.recommendations = uniqueById(
+        toArray(normalized.recommendations)
+      );
+      state.budgetTravelIntelligence.timeline = toArray(normalized.timeline);
+      state.budgetTravelIntelligence.multiTripPlan =
+        normalized.multiTripPlan
+          ? clone(normalized.multiTripPlan)
+          : null;
+      state.budgetTravelIntelligence.history = uniqueById([
+        normalized,
+        ...toArray(state.budgetTravelIntelligence.history)
+      ]).slice(0, 20);
+      state.budgetTravelIntelligence.lastGeneratedAt =
+        normalized.generatedAt || nowISO();
+      state.budgetTravelIntelligence.updatedAt = nowISO();
+      state.meta.lastBudgetTravelSyncAt = nowISO();
+
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "budget-travel-analysis-saved",
+        analysisId: normalized.id
       });
+
+      return this.getBudgetTravelIntelligence();
     },
 
-    /* =======================================================
-       Guide Intelligence APIs
-    ======================================================= */
+    saveBudgetTravelAnalysis(analysis) {
+      return this.setBudgetTravelAnalysis(analysis);
+    },
+
+    clearBudgetTravelAnalysis() {
+      state.budgetTravelIntelligence.currentAnalysis = null;
+      state.budgetTravelIntelligence.recommendations = [];
+      state.budgetTravelIntelligence.timeline = [];
+      state.budgetTravelIntelligence.multiTripPlan = null;
+      state.budgetTravelIntelligence.updatedAt = nowISO();
+
+      state = calculateStatistics(normalizeState(state));
+
+      persistImmediately({
+        type: "budget-travel-analysis-cleared"
+      });
+
+      return this.getBudgetTravelIntelligence();
+    },
+
+    getBudgetTravelRecommendations(options = {}) {
+      let items = clone(
+        state.budgetTravelIntelligence.recommendations
+      );
+
+      if (options.includeDismissed !== true) {
+        const dismissed = new Set(
+          state.budgetTravelIntelligence.dismissedRecommendationIds
+        );
+
+        items = items.filter((item) => !dismissed.has(item.id));
+      }
+
+      return items;
+    },
+
+    dismissBudgetTravelRecommendation(recommendationId, options = {}) {
+      if (!recommendationId) return false;
+
+      const ids = new Set(
+        state.budgetTravelIntelligence.dismissedRecommendationIds
+      );
+
+      ids.add(String(recommendationId));
+      state.budgetTravelIntelligence.dismissedRecommendationIds =
+        Array.from(ids);
+      state.budgetTravelIntelligence.updatedAt = nowISO();
+
+      if (options.persist !== false) {
+        persistImmediately({
+          type: "budget-travel-recommendation-dismissed",
+          recommendationId
+        });
+      }
+
+      return true;
+    },
+
+    acceptBudgetTravelRecommendation(recommendationId, options = {}) {
+      if (!recommendationId) return false;
+
+      const ids = new Set(
+        state.budgetTravelIntelligence.acceptedRecommendationIds
+      );
+
+      ids.add(String(recommendationId));
+      state.budgetTravelIntelligence.acceptedRecommendationIds =
+        Array.from(ids);
+      state.budgetTravelIntelligence.updatedAt = nowISO();
+
+      if (options.persist !== false) {
+        persistImmediately({
+          type: "budget-travel-recommendation-accepted",
+          recommendationId
+        });
+      }
+
+      return true;
+    },
+
+    createPlannedTripFromRecommendation(recommendation, options = {}) {
+      if (!isObject(recommendation)) {
+        throw new Error("بيانات الاقتراح غير صالحة.");
+      }
+
+      let draft = {
+        title: recommendation.title,
+        destinationId: recommendation.id,
+        country: recommendation.country,
+        countryCode: recommendation.countryCode,
+        city: recommendation.city,
+        suggestedMonth: recommendation.suggestedMonth,
+        durationDays: recommendation.durationDays,
+        travelers: recommendation.travelers,
+        estimatedBudget: recommendation.estimatedCost,
+        currency: recommendation.currency,
+        sourceRecommendationId:
+          recommendation.recommendationId || recommendation.id,
+        sourceAnalysisId:
+          state.budgetTravelIntelligence.currentAnalysis?.id || null,
+        source: {
+          engine: recommendation.source || "TravelBudgetIntelligence",
+          confidence: recommendation.confidence || 0
+        },
+        costBreakdown: recommendation.costBreakdown,
+        highlights: recommendation.highlights,
+        notes: options.notes || "",
+        ...options
+      };
+
+      if (
+        window.PlannedTripEngine &&
+        typeof window.PlannedTripEngine.create === "function"
+      ) {
+        try {
+          draft = window.PlannedTripEngine.create(draft);
+        } catch (_) {}
+      }
+
+      return this.createPlannedTrip(draft);
+    },
+
+    /* Compatibility setters */
 
     getGuideIntelligence() {
       return clone(state.guideIntelligence);
@@ -2158,14 +1968,9 @@
         state.guideIntelligence,
         payload
       );
-
       state.guideIntelligence.updatedAt = nowISO();
       state.meta.lastGuideSyncAt = nowISO();
-
-      schedulePersist({
-        type: "guide-intelligence-updated"
-      });
-
+      schedulePersist({ type: "guide-intelligence-updated" });
       return this.getGuideIntelligence();
     },
 
@@ -2189,9 +1994,144 @@
       });
     },
 
-    /* =======================================================
-       Expense APIs
-    ======================================================= */
+    getWishlist() {
+      return clone(state.wishlist);
+    },
+
+    addWishlistItem(itemData) {
+      const item = normalizeWishlistItem(itemData);
+
+      if (!item.countryCode) {
+        throw new Error("رمز الدولة مطلوب.");
+      }
+
+      const existing = state.wishlist.find(
+        (current) => current.countryCode === item.countryCode
+      );
+
+      if (existing) return clone(existing);
+
+      state.wishlist.unshift(item);
+      state = calculateStatistics(normalizeState(state));
+      persistImmediately({ type: "wishlist-item-created", wishlistId: item.id });
+
+      return clone(item);
+    },
+
+    addWishlist(itemData) {
+      return this.addWishlistItem(itemData);
+    },
+
+    isWishlisted(identifier) {
+      const code = normalizeCountryCode(identifier);
+
+      return state.wishlist.some(
+        (item) =>
+          String(item.id) === String(identifier) ||
+          (code && item.countryCode === code)
+      );
+    },
+
+    removeWishlistItem(identifier) {
+      const code = normalizeCountryCode(identifier);
+      const index = state.wishlist.findIndex(
+        (item) =>
+          String(item.id) === String(identifier) ||
+          (code && item.countryCode === code)
+      );
+
+      if (index === -1) return false;
+
+      state.wishlist.splice(index, 1);
+      state = calculateStatistics(normalizeState(state));
+      persistImmediately({ type: "wishlist-item-deleted" });
+
+      return true;
+    },
+
+    removeWishlist(identifier) {
+      return this.removeWishlistItem(identifier);
+    },
+
+    toggleWishlist(itemData) {
+      const identifier = itemData?.id || itemData?.countryCode || itemData;
+
+      if (this.isWishlisted(identifier)) {
+        this.removeWishlistItem(identifier);
+        return null;
+      }
+
+      return this.addWishlistItem(itemData);
+    },
+
+    getAnnualPlans() {
+      return clone(state.annualPlans);
+    },
+
+    getAnnualPlan(planId) {
+      return clone(
+        state.annualPlans.find(
+          (plan) => String(plan.id) === String(planId)
+        ) || null
+      );
+    },
+
+    addAnnualPlan(planData) {
+      const plan = normalizeAnnualPlan(planData);
+      state.annualPlans.push(plan);
+      state = calculateStatistics(normalizeState(state));
+      persistImmediately({ type: "annual-plan-created", planId: plan.id });
+      return clone(plan);
+    },
+
+    createAnnualPlan(planData) {
+      return this.addAnnualPlan(planData);
+    },
+
+    updateAnnualPlan(planId, changes = {}) {
+      const index = state.annualPlans.findIndex(
+        (plan) => String(plan.id) === String(planId)
+      );
+
+      if (index === -1) return null;
+
+      state.annualPlans[index] = normalizeAnnualPlan({
+        ...state.annualPlans[index],
+        ...clone(changes),
+        id: state.annualPlans[index].id,
+        createdAt: state.annualPlans[index].createdAt
+      });
+
+      state = calculateStatistics(normalizeState(state));
+      persistImmediately({ type: "annual-plan-updated", planId });
+
+      return this.getAnnualPlan(planId);
+    },
+
+    removeAnnualPlan(planId) {
+      const index = state.annualPlans.findIndex(
+        (plan) => String(plan.id) === String(planId)
+      );
+
+      if (index === -1) return false;
+
+      state.annualPlans.splice(index, 1);
+      state = calculateStatistics(normalizeState(state));
+      persistImmediately({ type: "annual-plan-deleted", planId });
+
+      return true;
+    },
+
+    deleteAnnualPlan(planId) {
+      return this.removeAnnualPlan(planId);
+    },
+
+    linkAnnualPlanToTrip(planId, tripId) {
+      return this.updateAnnualPlan(planId, {
+        status: "converted",
+        convertedTripId: tripId
+      });
+    },
 
     getExpenses(options = {}) {
       let items = state.expenses.filter(
@@ -2206,12 +2146,6 @@
         );
       }
 
-      if (options.category) {
-        items = items.filter(
-          (expense) => expense.category === options.category
-        );
-      }
-
       return clone(items);
     },
 
@@ -2220,49 +2154,43 @@
     },
 
     getExpense(expenseId) {
-      const item = state.expenses.find(
-        (expense) => String(expense.id) === String(expenseId)
+      return clone(
+        state.expenses.find(
+          (expense) => String(expense.id) === String(expenseId)
+        ) || null
       );
+    },
 
-      return item ? clone(item) : null;
+    addExpense(expenseData) {
+      const expense = normalizeExpense(expenseData);
+
+      if (!expense.title || expense.amount <= 0) {
+        throw new Error("بيانات المصروف غير مكتملة.");
+      }
+
+      state.expenses.unshift(expense);
+      state = calculateStatistics(normalizeState(state));
+      persistImmediately({ type: "expense-created", expenseId: expense.id });
+
+      return this.getExpense(expense.id);
     },
 
     createExpense(expenseData) {
       return this.addExpense(expenseData);
     },
 
-    addExpense(expenseData) {
-      const expense = normalizeExpense(expenseData);
-
-      if (!expense.title) throw new Error("اسم المصروف مطلوب.");
-
-      if (expense.amount <= 0) {
-        throw new Error("قيمة المصروف يجب أن تكون أكبر من صفر.");
-      }
-
-      state.expenses.unshift(expense);
-      state = calculateStatistics(normalizeState(state));
-
-      persistImmediately({
-        type: "expense-created",
-        expenseId: expense.id,
-        tripId: expense.tripId
-      });
-
-      return this.getExpense(expense.id);
-    },
-
     updateExpense(expenseId, changes = {}) {
-      const index = findExpenseIndex(expenseId);
+      const index = state.expenses.findIndex(
+        (expense) => String(expense.id) === String(expenseId)
+      );
+
       if (index === -1) return null;
 
-      const current = state.expenses[index];
-
       state.expenses[index] = normalizeExpense({
-        ...current,
+        ...state.expenses[index],
         ...clone(changes),
-        id: current.id,
-        createdAt: current.createdAt
+        id: state.expenses[index].id,
+        createdAt: state.expenses[index].createdAt
       });
 
       state = calculateStatistics(normalizeState(state));
@@ -2272,7 +2200,10 @@
     },
 
     deleteExpense(expenseId, options = {}) {
-      const index = findExpenseIndex(expenseId);
+      const index = state.expenses.findIndex(
+        (expense) => String(expense.id) === String(expenseId)
+      );
+
       if (index === -1) return false;
 
       if (options.soft === true) {
@@ -2291,10 +2222,6 @@
       return true;
     },
 
-    /* =======================================================
-       Savings APIs
-    ======================================================= */
-
     getSavings() {
       return clone(state.savings);
     },
@@ -2308,14 +2235,7 @@
 
       state.savings.entries.unshift(entry);
       state = calculateStatistics(normalizeState(state));
-
-      persistImmediately({
-        type:
-          entry.type === "withdrawal"
-            ? "savings-withdrawal-added"
-            : "savings-deposit-added",
-        savingId: entry.id
-      });
+      persistImmediately({ type: "saving-entry-created", savingId: entry.id });
 
       return clone(entry);
     },
@@ -2333,23 +2253,24 @@
     },
 
     setMonthlySaving(value) {
-      const monthlySaving = isObject(value)
-        ? toNonNegative(firstDefined(value.monthlySaving, value.amount, 0))
-        : toNonNegative(value);
+      state.savings.monthlySaving = toNonNegative(
+        isObject(value)
+          ? firstDefined(value.monthlySaving, value.amount, 0)
+          : value
+      );
 
-      state.savings.monthlySaving = monthlySaving;
       state = calculateStatistics(normalizeState(state));
-
-      persistImmediately({
-        type: "savings-plan-updated",
-        monthlySaving
-      });
+      persistImmediately({ type: "savings-plan-updated" });
 
       return this.getSavings();
     },
 
     updateSavingsPlan(plan = {}) {
-      state.savings = { ...state.savings, ...clone(plan) };
+      state.savings = {
+        ...state.savings,
+        ...clone(plan)
+      };
+
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "savings-plan-updated" });
 
@@ -2364,63 +2285,44 @@
       return this.updateSavingsPlan(plan);
     },
 
-    /* =======================================================
-       Payment APIs
-    ======================================================= */
-
-    getPayments(options = {}) {
-      let items = state.payments.filter(
-        (payment) => options.includeDeleted === true || !payment.deletedAt
-      );
-
-      if (options.tripId) {
-        items = items.filter(
-          (payment) => String(payment.tripId) === String(options.tripId)
-        );
-      }
-
-      return clone(items);
+    getPayments() {
+      return clone(state.payments);
     },
 
     getPayment(paymentId) {
-      const item = state.payments.find(
-        (payment) => String(payment.id) === String(paymentId)
+      return clone(
+        state.payments.find(
+          (payment) => String(payment.id) === String(paymentId)
+        ) || null
       );
-
-      return item ? clone(item) : null;
     },
 
     createPayment(paymentData) {
       const payment = normalizePayment(paymentData);
 
-      if (!payment.title) throw new Error("اسم الدفعة مطلوب.");
-
-      if (payment.amount <= 0) {
-        throw new Error("قيمة الدفعة يجب أن تكون أكبر من صفر.");
+      if (!payment.title || payment.amount <= 0) {
+        throw new Error("بيانات الدفعة غير مكتملة.");
       }
 
       state.payments.unshift(payment);
       state = calculateStatistics(normalizeState(state));
-
-      persistImmediately({
-        type: "payment-created",
-        paymentId: payment.id
-      });
+      persistImmediately({ type: "payment-created", paymentId: payment.id });
 
       return this.getPayment(payment.id);
     },
 
     updatePayment(paymentId, changes = {}) {
-      const index = findPaymentIndex(paymentId);
+      const index = state.payments.findIndex(
+        (payment) => String(payment.id) === String(paymentId)
+      );
+
       if (index === -1) return null;
 
-      const current = state.payments[index];
-
       state.payments[index] = normalizePayment({
-        ...current,
+        ...state.payments[index],
         ...clone(changes),
-        id: current.id,
-        createdAt: current.createdAt
+        id: state.payments[index].id,
+        createdAt: state.payments[index].createdAt
       });
 
       state = calculateStatistics(normalizeState(state));
@@ -2430,80 +2332,43 @@
     },
 
     recordPayment(paymentId, paymentData = {}) {
-      const current = this.getPayment(paymentId);
-      if (!current) return null;
+      const payment = this.getPayment(paymentId);
+      if (!payment) return null;
 
-      const amount = toNonNegative(
-        firstDefined(paymentData.amount, current.remainingAmount, 0)
-      );
-
-      const nextPaidAmount = Math.min(
-        current.amount,
-        current.paidAmount + amount
-      );
-
-      const updated = this.updatePayment(paymentId, {
-        paidAmount: nextPaidAmount,
-        paidAt: paymentData.paidAt || todayISO()
+      return this.updatePayment(paymentId, {
+        paidAmount: Math.min(
+          payment.amount,
+          payment.paidAmount +
+            toNonNegative(
+              firstDefined(paymentData.amount, payment.remainingAmount, 0)
+            )
+        ),
+        paidAt: paymentData.paidAt || nowISO()
       });
-
-      if (updated && paymentData.createExpense === true && amount > 0) {
-        const expense = this.addExpense({
-          tripId: current.tripId,
-          title: `دفعة: ${current.title}`,
-          amount,
-          category: current.type || "other",
-          currency: current.currency,
-          date: paymentData.paidAt || todayISO(),
-          paymentMethod: current.paymentMethod,
-          paymentId: current.id,
-          status: "paid"
-        });
-
-        this.updatePayment(paymentId, { expenseId: expense.id });
-      }
-
-      persistImmediately({
-        type: "payment-paid",
-        paymentId,
-        amount
-      });
-
-      return this.getPayment(paymentId);
     },
 
     markPaymentPaid(paymentId, paymentData = {}) {
       return this.recordPayment(paymentId, paymentData);
     },
 
-    deletePayment(paymentId, options = {}) {
-      const index = findPaymentIndex(paymentId);
+    deletePayment(paymentId) {
+      const index = state.payments.findIndex(
+        (payment) => String(payment.id) === String(paymentId)
+      );
+
       if (index === -1) return false;
 
-      if (options.soft === true) {
-        state.payments[index] = normalizePayment({
-          ...state.payments[index],
-          deletedAt: nowISO()
-        });
-      } else {
-        state.payments.splice(index, 1);
-      }
-
+      state.payments.splice(index, 1);
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "payment-deleted", paymentId });
 
       return true;
     },
 
-    /* =======================================================
-       Budget Intelligence persistence APIs
-    ======================================================= */
-
     setBudgetAlerts(payload = {}) {
       state.budgetAlerts = deepMerge(state.budgetAlerts, payload);
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "budget-alerts-updated" });
-
       return clone(state.budgetAlerts);
     },
 
@@ -2512,10 +2377,8 @@
         state.budgetRecommendations,
         payload
       );
-
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "budget-recommendations-updated" });
-
       return clone(state.budgetRecommendations);
     },
 
@@ -2524,10 +2387,8 @@
         state.budgetNotifications,
         payload
       );
-
       state = calculateStatistics(normalizeState(state));
       persistImmediately({ type: "budget-notifications-updated" });
-
       return clone(state.budgetNotifications);
     },
 
@@ -2536,20 +2397,11 @@
         state.budgetIntelligence,
         payload
       );
-
       state.budgetIntelligence.updatedAt = nowISO();
       state = calculateStatistics(normalizeState(state));
-
-      schedulePersist({
-        type: "budget-intelligence-updated"
-      });
-
+      schedulePersist({ type: "budget-intelligence-updated" });
       return clone(state.budgetIntelligence);
     },
-
-    /* =======================================================
-       Backup / import / export
-    ======================================================= */
 
     createBackup() {
       const backups = this.getBackups();
@@ -2565,34 +2417,23 @@
 
       backups.unshift(backup);
 
-      try {
-        localStorage.setItem(
-          BACKUP_KEY,
-          JSON.stringify(backups.slice(0, MAX_BACKUPS))
-        );
+      localStorage.setItem(
+        BACKUP_KEY,
+        JSON.stringify(backups.slice(0, MAX_BACKUPS))
+      );
 
-        state.meta.lastBackupAt = backup.createdAt;
+      state.meta.lastBackupAt = backup.createdAt;
+      persistImmediately({ type: "backup-created", backupId: backup.id });
 
-        persistImmediately({
-          type: "backup-created",
-          backupId: backup.id
-        });
-
-        return clone(backup);
-      } catch (error) {
-        console.error("TIC Store: failed to create backup.", error);
-        return null;
-      }
+      return clone(backup);
     },
 
     getBackups() {
       try {
         const raw = localStorage.getItem(BACKUP_KEY);
         const backups = raw ? JSON.parse(raw) : [];
-
         return Array.isArray(backups) ? backups : [];
-      } catch (error) {
-        console.error("TIC Store: failed to read backups.", error);
+      } catch (_) {
         return [];
       }
     },
@@ -2602,7 +2443,7 @@
         (item) => item.id === backupId
       );
 
-      if (!backup || !backup.state) return false;
+      if (!backup?.state) return false;
 
       replaceStateInternal(backup.state, {
         type: "backup-restored",
@@ -2628,22 +2469,22 @@
     },
 
     importData(payload) {
-      let parsed = payload;
+      const parsed =
+        typeof payload === "string"
+          ? JSON.parse(payload)
+          : payload;
 
-      if (typeof payload === "string") {
-        parsed = JSON.parse(payload);
-      }
-
-      const importedState = parsed && parsed.state ? parsed.state : parsed;
+      const importedState = parsed?.state || parsed;
 
       if (!isObject(importedState)) {
         throw new Error("ملف البيانات غير صالح.");
       }
 
       this.createBackup();
-      replaceStateInternal(importedState, { type: "data-imported" });
 
-      return clone(state);
+      return replaceStateInternal(importedState, {
+        type: "data-imported"
+      });
     },
 
     reset(options = {}) {
@@ -2659,28 +2500,17 @@
 
     diagnostics() {
       return {
-        version: this.version,
+        version: STORE_VERSION,
         storageKey: STORAGE_KEY,
-        backupKey: BACKUP_KEY,
         schemaVersion: SCHEMA_VERSION,
-        subscriberCount: listeners.size,
         tripCount: state.trips.length,
-        upcomingTripCount: state.statistics.upcomingTrips,
-        activeTripCount: state.statistics.activeTrips,
-        completedTripCount: state.statistics.completedTrips,
-        passportTripCount: state.statistics.completedTrips,
-        visitedCountryCount: state.statistics.visitedCountries,
-        wishlistCount: state.wishlist.length,
-        annualPlanCount: state.annualPlans.length,
-        expenseCount: state.expenses.length,
-        paymentCount: state.payments.length,
-        savingEntryCount: state.savings.entries.length,
-        budgetAlertCount: state.budgetAlerts.items.length,
-        budgetNotificationCount: state.budgetNotifications.items.length,
-        lastTripLifecycleSyncAt: state.meta.lastTripLifecycleSyncAt,
-        lastGuideSyncAt: state.meta.lastGuideSyncAt,
+        plannedTripCount: state.plannedTrips.length,
+        readyPlannedTripCount: state.statistics.readyPlannedTrips,
+        convertedPlannedTripCount: state.statistics.convertedPlannedTrips,
+        recommendationCount:
+          state.statistics.budgetTravelRecommendationCount,
         lastUpdatedAt: state.meta.updatedAt,
-        lastBackupAt: state.meta.lastBackupAt
+        lastBudgetTravelSyncAt: state.meta.lastBudgetTravelSyncAt
       };
     }
   };
@@ -2691,22 +2521,16 @@
 
   const storedState = readStoredState();
 
-  if (!storedState) {
-    state.meta.lastTripLifecycleSyncAt = nowISO();
-    state.meta.lastGuideSyncAt = nowISO();
+  state.meta.lastMigrationAt = storedState ? nowISO() : null;
+  state.meta.lastTripLifecycleSyncAt = nowISO();
+  state.meta.lastGuideSyncAt = nowISO();
+  state.meta.lastBudgetTravelSyncAt = nowISO();
 
-    persistImmediately({
-      type: "store-initialized-v2.2.0"
-    });
-  } else {
-    state.meta.lastMigrationAt = nowISO();
-    state.meta.lastTripLifecycleSyncAt = nowISO();
-    state.meta.lastGuideSyncAt = nowISO();
-
-    persistImmediately({
-      type: "store-migrated-v2.2.0"
-    });
-  }
+  persistImmediately({
+    type: storedState
+      ? "store-migrated-v2.3.0"
+      : "store-initialized-v2.3.0"
+  });
 
   window.TIC = window.TIC || {};
   window.TIC.Store = Store;
