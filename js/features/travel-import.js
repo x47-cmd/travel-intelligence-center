@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Travel Import Engine V1.0.0
+   Travel Import Engine V1.1.0
 
    File Path:
    js/features/travel-import.js
@@ -9,11 +9,12 @@
    - Safe import layer for Travel Intelligence Center data.
    - Imports JSON, TXT, CSV, backup objects, and shared travel packages.
    - Detects structure, validates records, normalizes supported branches,
-     prevents duplicate trips, and generates a detailed import report.
+     prevents duplicate records, and generates a detailed import report.
    - Supports preview mode before committing data.
-   - Integrates defensively with Store, Events, UI, TravelBrain,
-     localStorage, and future sync modules.
+   - Integrates defensively with Store V2.5.0, Events, UI,
+     TravelBrain V1.1.0, localStorage, and future sync modules.
    - Never overwrites the full application state unless explicitly requested.
+   - Uses branch-level Store APIs whenever available.
    - Works fully offline and requires no external libraries.
 
    Recommended Load Order:
@@ -26,8 +27,9 @@
    7) js/features/travel-assistant.js
    8) js/features/travel-import.js
 
-   Public Global:
+   Public Globals:
    - window.TravelImport
+   - window.TIC.TravelImport
 
    Main APIs:
    - TravelImport.init()
@@ -36,23 +38,33 @@
    - TravelImport.importData(input, options)
    - TravelImport.importFile(file, options)
    - TravelImport.validate(payload, options)
+   - TravelImport.normalize(payload, options)
    - TravelImport.getLastReport()
-   - TravelImport.subscribe(listener)
+   - TravelImport.clearLastReport()
+   - TravelImport.getState()
+   - TravelImport.getHealth()
+   - TravelImport.subscribe(listener, options)
    - TravelImport.destroy()
    ========================================================= */
 
 (function travelImportFactory(global) {
   "use strict";
 
-  if (!global || global.TravelImport) {
+  if (!global) return;
+
+  global.TIC = global.TIC || {};
+
+  if (global.TravelImport || global.TIC.TravelImport) {
     return;
   }
 
-  var VERSION = "1.0.0";
+  var VERSION = "1.1.0";
   var MODULE_NAME = "TravelImport";
   var STORAGE_KEY = "tic_travel_import_report_v1";
   var MAX_FILE_SIZE = 20 * 1024 * 1024;
+  var MAX_RECORDS = 10000;
   var DEFAULT_DUPLICATE_MODE = "skip";
+  var DEFAULT_OBJECT_MODE = "merge";
 
   var SUPPORTED_BRANCHES = Object.freeze([
     "profile",
@@ -74,15 +86,40 @@
     "settings"
   ]);
 
+  var ARRAY_BRANCHES = Object.freeze([
+    "trips",
+    "plannedTrips",
+    "destinations",
+    "wishlist",
+    "guides",
+    "budgets",
+    "savings",
+    "documents",
+    "packing",
+    "reviews",
+    "memories",
+    "annualPlans",
+    "notifications"
+  ]);
+
+  var OBJECT_BRANCHES = Object.freeze([
+    "profile",
+    "statistics",
+    "guideIntelligence",
+    "settings"
+  ]);
+
   var runtime = {
     initialized: false,
     destroyed: false,
     busy: false,
     listeners: new Set(),
     eventUnsubscribers: [],
+    domUnsubscribers: [],
     lastReport: null,
     sequence: 0,
-    lastError: null
+    lastError: null,
+    activeImportId: null
   };
 
   function nowIso() {
@@ -102,10 +139,7 @@
   }
 
   function asString(value, fallback) {
-    if (value === null || value === undefined) {
-      return fallback || "";
-    }
-
+    if (value === null || value === undefined) return fallback || "";
     var text = String(value).trim();
     return text || fallback || "";
   }
@@ -118,22 +152,14 @@
   }
 
   function asBoolean(value, fallback) {
-    if (typeof value === "boolean") {
-      return value;
-    }
-
-    if (value === "true" || value === "1" || value === 1) {
-      return true;
-    }
-
-    if (value === "false" || value === "0" || value === 0) {
-      return false;
-    }
-
+    if (typeof value === "boolean") return value;
+    if (value === "true" || value === "1" || value === 1) return true;
+    if (value === "false" || value === "0" || value === 0) return false;
     return Boolean(fallback);
   }
 
   function safeClone(value) {
+    if (value === undefined) return undefined;
     try {
       return JSON.parse(JSON.stringify(value));
     } catch (error) {
@@ -142,9 +168,7 @@
   }
 
   function safeCall(fn, fallback, context, args) {
-    if (typeof fn !== "function") {
-      return fallback;
-    }
+    if (typeof fn !== "function") return fallback;
 
     try {
       var result = fn.apply(context || null, asArray(args));
@@ -176,10 +200,7 @@
   }
 
   function parseDate(value) {
-    if (!value) {
-      return null;
-    }
-
+    if (!value) return null;
     var date = value instanceof Date ? value : new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
   }
@@ -190,19 +211,41 @@
   }
 
   function getStore() {
-    return global.Store || global.TravelStore || global.AppStore || null;
+    return (
+      (global.TIC && global.TIC.Store) ||
+      global.Store ||
+      global.TravelStore ||
+      global.AppStore ||
+      null
+    );
   }
 
   function getEvents() {
-    return global.Events || global.EventBus || global.TravelEvents || null;
+    return (
+      global.Events ||
+      global.EventBus ||
+      global.TravelEvents ||
+      (global.TIC && global.TIC.Events) ||
+      null
+    );
   }
 
   function getUI() {
-    return global.UI || global.TravelUI || global.AppUI || null;
+    return (
+      global.UI ||
+      global.TravelUI ||
+      global.AppUI ||
+      (global.TIC && global.TIC.UI) ||
+      null
+    );
   }
 
   function getBrain() {
-    return global.TravelBrain || null;
+    return (
+      global.TravelBrain ||
+      (global.TIC && global.TIC.TravelBrain) ||
+      null
+    );
   }
 
   function readStoreState() {
@@ -216,30 +259,37 @@
         safeCall(store.getData, null, store) ||
         safeCall(store.read, null, store);
 
-      if (!state && isObject(store.state)) {
-        state = store.state;
-      }
-
-      if (!state && isObject(store.data)) {
-        state = store.data;
-      }
+      if (!state && isObject(store.state)) state = store.state;
+      if (!state && isObject(store.data)) state = store.data;
     }
 
     return safeClone(asObject(state));
   }
 
   function emit(name, payload) {
-    var events = getEvents();
+    var bus = getEvents();
+    var emitted = false;
 
-    if (!events) {
-      return false;
+    if (bus) {
+      emitted = Boolean(
+        safeCall(bus.emit, false, bus, [name, payload]) ||
+        safeCall(bus.publish, false, bus, [name, payload]) ||
+        safeCall(bus.dispatch, false, bus, [name, payload])
+      );
     }
 
-    return Boolean(
-      safeCall(events.emit, false, events, [name, payload]) ||
-      safeCall(events.publish, false, events, [name, payload]) ||
-      safeCall(events.dispatch, false, events, [name, payload])
-    );
+    if (global.document && typeof global.CustomEvent === "function") {
+      try {
+        global.document.dispatchEvent(new global.CustomEvent(name, {
+          detail: safeClone(payload)
+        }));
+        emitted = true;
+      } catch (error) {
+        runtime.lastError = error;
+      }
+    }
+
+    return emitted;
   }
 
   function notify(reason, payload) {
@@ -248,7 +298,7 @@
     runtime.listeners.forEach(function notifyListener(listener) {
       try {
         listener(state, {
-          reason: reason,
+          reason: asString(reason, "update"),
           payload: safeClone(payload),
           generatedAt: nowIso()
         });
@@ -258,7 +308,7 @@
     });
 
     emit("travel-import:updated", {
-      reason: reason,
+      reason: asString(reason, "update"),
       payload: safeClone(payload),
       generatedAt: nowIso()
     });
@@ -266,9 +316,7 @@
 
   function persistReport(report) {
     try {
-      if (!global.localStorage) {
-        return false;
-      }
+      if (!global.localStorage) return false;
 
       global.localStorage.setItem(
         STORAGE_KEY,
@@ -288,14 +336,10 @@
 
   function restoreReport() {
     try {
-      if (!global.localStorage) {
-        return null;
-      }
+      if (!global.localStorage) return null;
 
       var raw = global.localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        return null;
-      }
+      if (!raw) return null;
 
       var parsed = JSON.parse(raw);
       return parsed && parsed.report ? parsed.report : null;
@@ -329,6 +373,35 @@
     }
   }
 
+  function splitCsvRecords(text) {
+    var source = stripBom(text);
+    var records = [];
+    var current = "";
+    var quoted = false;
+
+    for (var index = 0; index < source.length; index += 1) {
+      var character = source[index];
+      var next = source[index + 1];
+
+      if (character === '"' && quoted && next === '"') {
+        current += '""';
+        index += 1;
+      } else if (character === '"') {
+        quoted = !quoted;
+        current += character;
+      } else if ((character === "\n" || character === "\r") && !quoted) {
+        if (character === "\r" && next === "\n") index += 1;
+        if (current.trim()) records.push(current);
+        current = "";
+      } else {
+        current += character;
+      }
+    }
+
+    if (current.trim()) records.push(current);
+    return records;
+  }
+
   function splitCsvLine(line, delimiter) {
     var cells = [];
     var current = "";
@@ -356,13 +429,13 @@
   }
 
   function detectDelimiter(text) {
-    var firstLine = asString(text).split(/\r?\n/)[0] || "";
+    var firstRecord = splitCsvRecords(text)[0] || "";
     var choices = [",", ";", "\t", "|"];
     var best = ",";
     var highest = -1;
 
     choices.forEach(function score(delimiter) {
-      var count = firstLine.split(delimiter).length - 1;
+      var count = splitCsvLine(firstRecord, delimiter).length - 1;
 
       if (count > highest) {
         highest = count;
@@ -377,13 +450,9 @@
     var settings = asObject(options);
     var source = stripBom(text);
     var delimiter = asString(settings.delimiter, detectDelimiter(source));
-    var lines = source
-      .split(/\r?\n/)
-      .filter(function keep(line) {
-        return line.trim() !== "";
-      });
+    var records = splitCsvRecords(source);
 
-    if (!lines.length) {
+    if (!records.length) {
       return {
         success: true,
         format: "csv",
@@ -392,17 +461,17 @@
       };
     }
 
-    var headers = splitCsvLine(lines[0], delimiter).map(function normalizeHeader(header) {
-      return normalizeText(header).replace(/\s+/g, "_");
+    var headers = splitCsvLine(records[0], delimiter).map(function normalizeHeader(header, index) {
+      var normalized = normalizeText(header).replace(/\s+/g, "_");
+      return normalized || "column_" + index;
     });
 
-    var rows = lines.slice(1).map(function mapRow(line) {
-      var cells = splitCsvLine(line, delimiter);
+    var rows = records.slice(1).map(function mapRow(recordLine) {
+      var cells = splitCsvLine(recordLine, delimiter);
       var record = {};
 
       headers.forEach(function assign(header, index) {
-        record[header || "column_" + index] =
-          cells[index] === undefined ? "" : cells[index];
+        record[header] = cells[index] === undefined ? "" : cells[index];
       });
 
       return record;
@@ -412,7 +481,11 @@
       success: true,
       format: "csv",
       data: rows,
-      error: null
+      error: null,
+      metadata: {
+        delimiter: delimiter,
+        headers: headers
+      }
     };
   }
 
@@ -420,20 +493,18 @@
     var source = stripBom(text);
     var lines = source
       .split(/\r?\n/)
-      .map(function trim(line) {
-        return line.trim();
-      })
+      .map(function trim(line) { return line.trim(); })
       .filter(Boolean);
 
     var keyValue = {};
     var validPairs = 0;
 
     lines.forEach(function parseLine(line) {
-      var separator = line.indexOf(":");
+      var colon = line.indexOf(":");
+      var arabicColon = line.indexOf("：");
+      var separator = colon >= 0 ? colon : arabicColon;
 
-      if (separator <= 0) {
-        return;
-      }
+      if (separator <= 0) return;
 
       var key = normalizeText(line.slice(0, separator)).replace(/\s+/g, "_");
       var value = line.slice(separator + 1).trim();
@@ -459,21 +530,13 @@
 
   function detectFormat(input, options) {
     var settings = asObject(options);
-    var explicit = asString(settings.format, "").toLowerCase();
+    var explicit = asString(settings.format).toLowerCase();
 
-    if (explicit) {
-      return explicit;
-    }
-
-    if (isObject(input) || Array.isArray(input)) {
-      return "object";
-    }
+    if (explicit) return explicit;
+    if (isObject(input) || Array.isArray(input)) return "object";
 
     var text = stripBom(input);
-
-    if (!text) {
-      return "text";
-    }
+    if (!text) return "text";
 
     if (
       (text[0] === "{" && text[text.length - 1] === "}") ||
@@ -482,12 +545,13 @@
       return "json";
     }
 
-    var firstLine = text.split(/\r?\n/)[0] || "";
+    var firstLine = splitCsvRecords(text)[0] || "";
 
     if (
       firstLine.indexOf(",") !== -1 ||
       firstLine.indexOf(";") !== -1 ||
-      firstLine.indexOf("\t") !== -1
+      firstLine.indexOf("\t") !== -1 ||
+      firstLine.indexOf("|") !== -1
     ) {
       return "csv";
     }
@@ -507,14 +571,8 @@
       };
     }
 
-    if (format === "json") {
-      return parseJson(input);
-    }
-
-    if (format === "csv") {
-      return parseCsv(input, options);
-    }
-
+    if (format === "json") return parseJson(input);
+    if (format === "csv") return parseCsv(input, options);
     return parsePlainText(input);
   }
 
@@ -526,7 +584,10 @@
           title: item,
           completed: false,
           category: "general",
-          order: index
+          required: true,
+          order: index,
+          dueDate: null,
+          notes: ""
         };
       }
 
@@ -542,8 +603,8 @@
         category: asString(record.category, "general"),
         required: record.required !== false,
         order: asNumber(record.order, index),
-        dueDate: record.dueDate || null,
-        notes: asString(record.notes, "")
+        dueDate: dateToIso(record.dueDate) || record.dueDate || null,
+        notes: asString(record.notes)
       };
     });
   }
@@ -554,17 +615,32 @@
     return {
       id: asString(record.id, createId("expense")),
       title: asString(record.title, asString(record.name, "مصروف")),
-      amount: asNumber(
-        record.amount,
-        asNumber(record.value, asNumber(record.cost, 0))
-      ),
+      amount: asNumber(record.amount, asNumber(record.value, asNumber(record.cost, 0))),
       category: asString(record.category, "other"),
       date: dateToIso(record.date || record.createdAt) || null,
       paid: record.paid !== false,
       currency: asString(record.currency, "AED"),
-      notes: asString(record.notes, ""),
+      notes: asString(record.notes),
       order: index
     };
+  }
+
+  function stableTripId(record, index, startDate, country, city) {
+    if (record.id) return asString(record.id);
+
+    var slug = normalizeText(
+      record.title ||
+      record.name ||
+      country ||
+      city ||
+      "trip_" + index
+    ).replace(/\s+/g, "_");
+
+    var datePart = asString(dateToIso(startDate) || startDate).slice(0, 10);
+
+    return ["trip", slug || index, datePart || index]
+      .join("_")
+      .replace(/[^a-zA-Z0-9_\u0600-\u06FF-]/g, "_");
   }
 
   function normalizeTrip(item, index, source) {
@@ -593,13 +669,13 @@
       record.country,
       asString(
         destination.country,
-        asString(record.destinationName, asString(destination.name, ""))
+        asString(record.destinationName, asString(destination.name))
       )
     );
 
     var city = asString(
       record.city,
-      asString(destination.city, asString(record.location, ""))
+      asString(destination.city, asString(record.location))
     );
 
     var expenses = asArray(
@@ -629,40 +705,31 @@
       )
     );
 
+    var normalizedSource = asString(record.source, "import");
+    var defaultStatus = source === "plannedTrips" ? "planned" : "upcoming";
+
     return {
-      id: asString(
-        record.id,
-        [
-          "trip",
-          normalizeText(record.title || record.name || country || city || index),
-          dateToIso(startDate) || index
-        ].join("_").replace(/[^a-zA-Z0-9_\u0600-\u06FF-]/g, "_")
-      ),
+      id: stableTripId(record, index, startDate, country, city),
       title: asString(
         record.title,
         asString(record.name, country ? "رحلة " + country : "رحلة")
       ),
-      status: asString(record.status, asString(source, "planned")),
-      planningStatus: asString(record.planningStatus, ""),
+      status: asString(record.status, defaultStatus),
+      lifecycle: asString(record.lifecycle),
+      planningStatus: asString(record.planningStatus),
       startDate: dateToIso(startDate) || startDate || null,
       endDate: dateToIso(endDate) || endDate || null,
       country: country,
       countryCode: asString(
         record.countryCode,
-        asString(destination.countryCode, asString(destination.code, ""))
+        asString(destination.countryCode, asString(destination.code))
       ).toUpperCase(),
       city: city,
-      destinationName: country || city,
-      travelers: Math.max(
-        1,
-        asNumber(record.travelers, asNumber(record.people, 1))
-      ),
+      destinationName: asString(record.destinationName, country || city),
+      travelers: Math.max(1, asNumber(record.travelers, asNumber(record.people, 1))),
       budget: totalBudget,
       spent: spent,
-      currency: asString(
-        record.currency,
-        asString(budget.currency, "AED")
-      ),
+      currency: asString(record.currency, asString(budget.currency, "AED")),
       expenses: expenses,
       checklist: normalizeChecklist(
         record.checklist ||
@@ -674,8 +741,9 @@
       flights: asArray(record.flights || (record.flight ? [record.flight] : [])),
       hotels: asArray(record.hotels || (record.hotel ? [record.hotel] : [])),
       documents: asArray(record.documents),
-      notes: asString(record.notes, ""),
-      source: asString(record.source, source || "import"),
+      notes: asString(record.notes),
+      source: normalizedSource,
+      importedAt: nowIso(),
       createdAt: dateToIso(record.createdAt) || nowIso(),
       updatedAt: nowIso()
     };
@@ -686,22 +754,17 @@
 
     return {
       id: asString(record.id, createId("destination")),
-      name: asString(
-        record.name,
-        asString(record.country, asString(record.title, "وجهة"))
-      ),
-      country: asString(record.country, asString(record.name, "")),
-      city: asString(record.city, ""),
-      countryCode: asString(
-        record.countryCode,
-        asString(record.code, "")
-      ).toUpperCase(),
-      region: asString(record.region, ""),
+      name: asString(record.name, asString(record.country, asString(record.title, "وجهة"))),
+      country: asString(record.country, asString(record.name)),
+      city: asString(record.city),
+      countryCode: asString(record.countryCode, asString(record.code)).toUpperCase(),
+      region: asString(record.region),
       wishlist: asBoolean(record.wishlist, false),
       visited: asBoolean(record.visited, false),
       rating: asNumber(record.rating, asNumber(record.score, 0)),
-      notes: asString(record.notes, ""),
+      notes: asString(record.notes),
       order: index,
+      importedAt: nowIso(),
       createdAt: dateToIso(record.createdAt) || nowIso(),
       updatedAt: nowIso()
     };
@@ -713,18 +776,16 @@
     return {
       id: asString(record.id, createId("budget")),
       title: asString(record.title, asString(record.name, "ميزانية سفر")),
-      tripId: asString(record.tripId, ""),
-      amount: asNumber(
-        record.amount,
-        asNumber(record.total, asNumber(record.budget, 0))
-      ),
+      tripId: asString(record.tripId),
+      amount: asNumber(record.amount, asNumber(record.total, asNumber(record.budget, 0))),
       spent: asNumber(record.spent, 0),
       currency: asString(record.currency, "AED"),
       expenses: asArray(record.expenses).map(normalizeExpense),
       startDate: dateToIso(record.startDate) || record.startDate || null,
       endDate: dateToIso(record.endDate) || record.endDate || null,
-      notes: asString(record.notes, ""),
+      notes: asString(record.notes),
       order: index,
+      importedAt: nowIso(),
       createdAt: dateToIso(record.createdAt) || nowIso(),
       updatedAt: nowIso()
     };
@@ -736,22 +797,14 @@
     return {
       id: asString(record.id, createId("saving")),
       title: asString(record.title, asString(record.name, "ادخار سفر")),
-      currentAmount: asNumber(
-        record.currentAmount,
-        asNumber(record.amount, asNumber(record.saved, 0))
-      ),
-      targetAmount: asNumber(
-        record.targetAmount,
-        asNumber(record.target, 0)
-      ),
-      monthlyAmount: asNumber(
-        record.monthlyAmount,
-        asNumber(record.monthlySaving, 0)
-      ),
+      currentAmount: asNumber(record.currentAmount, asNumber(record.amount, asNumber(record.saved, 0))),
+      targetAmount: asNumber(record.targetAmount, asNumber(record.target, 0)),
+      monthlyAmount: asNumber(record.monthlyAmount, asNumber(record.monthlySaving, 0)),
       currency: asString(record.currency, "AED"),
       targetDate: dateToIso(record.targetDate) || record.targetDate || null,
-      notes: asString(record.notes, ""),
+      notes: asString(record.notes),
       order: index,
+      importedAt: nowIso(),
       createdAt: dateToIso(record.createdAt) || nowIso(),
       updatedAt: nowIso()
     };
@@ -759,22 +812,24 @@
 
   function normalizeDocument(item, index) {
     var record = asObject(item);
+    var expiry =
+      record.expiryDate ||
+      record.expiresAt ||
+      record.expirationDate ||
+      null;
 
     return {
       id: asString(record.id, createId("document")),
       title: asString(record.title, asString(record.name, "مستند سفر")),
       type: asString(record.type, "document"),
-      number: asString(record.number, ""),
-      countryCode: asString(record.countryCode, "").toUpperCase(),
+      number: asString(record.number),
+      countryCode: asString(record.countryCode).toUpperCase(),
       issueDate: dateToIso(record.issueDate) || record.issueDate || null,
-      expiryDate: dateToIso(
-        record.expiryDate ||
-        record.expiresAt ||
-        record.expirationDate
-      ) || record.expiryDate || null,
+      expiryDate: dateToIso(expiry) || expiry || null,
       required: record.required !== false,
-      notes: asString(record.notes, ""),
+      notes: asString(record.notes),
       order: index,
+      importedAt: nowIso(),
       createdAt: dateToIso(record.createdAt) || nowIso(),
       updatedAt: nowIso()
     };
@@ -786,14 +841,15 @@
     return {
       id: asString(record.id, createId("memory")),
       title: asString(record.title, asString(record.name, "ذكرى سفر")),
-      tripId: asString(record.tripId, ""),
+      tripId: asString(record.tripId),
       date: dateToIso(record.date || record.createdAt) || nowIso(),
-      country: asString(record.country, ""),
-      city: asString(record.city, ""),
-      notes: asString(record.notes, asString(record.description, "")),
+      country: asString(record.country),
+      city: asString(record.city),
+      notes: asString(record.notes, asString(record.description)),
       photos: asArray(record.photos),
       rating: asNumber(record.rating, 0),
       order: index,
+      importedAt: nowIso(),
       createdAt: dateToIso(record.createdAt) || nowIso(),
       updatedAt: nowIso()
     };
@@ -805,12 +861,13 @@
     return {
       id: asString(record.id, createId("review")),
       title: asString(record.title, asString(record.name, "تقييم سفر")),
-      tripId: asString(record.tripId, ""),
-      destinationId: asString(record.destinationId, ""),
+      tripId: asString(record.tripId),
+      destinationId: asString(record.destinationId),
       rating: Math.max(0, Math.min(5, asNumber(record.rating, 0))),
-      notes: asString(record.notes, asString(record.review, "")),
+      notes: asString(record.notes, asString(record.review)),
       date: dateToIso(record.date || record.createdAt) || nowIso(),
       order: index,
+      importedAt: nowIso(),
       createdAt: dateToIso(record.createdAt) || nowIso(),
       updatedAt: nowIso()
     };
@@ -856,27 +913,36 @@
   function unwrapPayload(value) {
     var source = safeClone(value);
 
-    if (isObject(source.data) && Object.keys(source).length <= 4) {
-      if (
+    for (var depth = 0; depth < 4; depth += 1) {
+      if (!isObject(source)) break;
+
+      if (isObject(source.data) && (
         source.type ||
         source.version ||
         source.exportedAt ||
-        source.generatedAt
-      ) {
-        return source.data;
+        source.generatedAt ||
+        source.app
+      )) {
+        source = source.data;
+        continue;
       }
-    }
 
-    if (isObject(source.payload) && Object.keys(source).length <= 4) {
-      return source.payload;
-    }
+      if (isObject(source.payload) && Object.keys(source).length <= 6) {
+        source = source.payload;
+        continue;
+      }
 
-    if (isObject(source.backup)) {
-      return source.backup;
-    }
+      if (isObject(source.backup)) {
+        source = source.backup;
+        continue;
+      }
 
-    if (isObject(source.state)) {
-      return source.state;
+      if (isObject(source.state)) {
+        source = source.state;
+        continue;
+      }
+
+      break;
     }
 
     return source;
@@ -888,11 +954,7 @@
     var result = {};
 
     if (Array.isArray(source)) {
-      var inferred = asString(
-        settings.branch,
-        inferArrayBranch(source)
-      );
-
+      var inferred = asString(settings.branch, inferArrayBranch(source));
       result[inferred] = source;
     } else if (isObject(source)) {
       var recognized = SUPPORTED_BRANCHES.some(function hasBranch(branch) {
@@ -906,7 +968,7 @@
           }
         });
       } else {
-        var target = asString(settings.branch, "");
+        var target = asString(settings.branch);
 
         if (!target) {
           if (
@@ -949,11 +1011,7 @@
       } else if (branch === "destinations" || branch === "wishlist") {
         normalized[branch] = asArray(branchValue).map(function mapDestination(item, index) {
           var destination = normalizeDestination(item, index);
-
-          if (branch === "wishlist") {
-            destination.wishlist = true;
-          }
-
+          if (branch === "wishlist") destination.wishlist = true;
           return destination;
         });
       } else if (branch === "budgets") {
@@ -968,12 +1026,7 @@
         normalized[branch] = asArray(branchValue).map(normalizeMemory);
       } else if (branch === "reviews") {
         normalized[branch] = asArray(branchValue).map(normalizeReview);
-      } else if (
-        branch === "profile" ||
-        branch === "statistics" ||
-        branch === "guideIntelligence" ||
-        branch === "settings"
-      ) {
+      } else if (OBJECT_BRANCHES.indexOf(branch) !== -1) {
         normalized[branch] = asObject(branchValue);
       } else {
         normalized[branch] = safeClone(branchValue);
@@ -983,16 +1036,21 @@
     return normalized;
   }
 
+  function canonicalTripBranch(branch) {
+    return branch === "plannedTrips" ? "trips" : branch;
+  }
+
   function fingerprint(branch, item) {
     var record = asObject(item);
+    var canonical = canonicalTripBranch(branch);
 
     if (record.id) {
-      return branch + "|id|" + normalizeText(record.id);
+      return canonical + "|id|" + normalizeText(record.id);
     }
 
-    if (branch === "trips" || branch === "plannedTrips") {
+    if (canonical === "trips") {
       return [
-        branch,
+        canonical,
         normalizeText(record.title),
         normalizeText(record.country || record.destinationName),
         asString(record.startDate).slice(0, 10)
@@ -1010,7 +1068,7 @@
 
     if (branch === "destinations" || branch === "wishlist") {
       return [
-        branch,
+        "destinations",
         normalizeText(record.countryCode || record.country || record.name),
         normalizeText(record.city)
       ].join("|");
@@ -1023,7 +1081,22 @@
     ].join("|");
   }
 
-  function mergeArrays(branch, existing, incoming, mode) {
+  function buildGlobalFingerprintIndex(state) {
+    var index = new Map();
+
+    ["trips", "plannedTrips", "destinations", "wishlist"].forEach(function indexBranch(branch) {
+      asArray(asObject(state)[branch]).forEach(function indexItem(item) {
+        index.set(fingerprint(branch, item), {
+          branch: branch,
+          item: item
+        });
+      });
+    });
+
+    return index;
+  }
+
+  function mergeArrays(branch, existing, incoming, mode, globalIndex) {
     var current = asArray(existing).map(safeClone);
     var additions = asArray(incoming).map(safeClone);
     var indexByFingerprint = new Map();
@@ -1036,16 +1109,31 @@
       added: 0,
       skipped: 0,
       replaced: 0,
-      merged: 0
+      merged: 0,
+      crossBranchSkipped: 0
     };
 
     additions.forEach(function mergeIncoming(item) {
       var key = fingerprint(branch, item);
       var existingIndex = indexByFingerprint.get(key);
+      var globalMatch = globalIndex ? globalIndex.get(key) : null;
+
+      if (
+        existingIndex === undefined &&
+        globalMatch &&
+        globalMatch.branch !== branch &&
+        (branch === "trips" || branch === "plannedTrips" ||
+         branch === "destinations" || branch === "wishlist")
+      ) {
+        stats.skipped += 1;
+        stats.crossBranchSkipped += 1;
+        return;
+      }
 
       if (existingIndex === undefined) {
         current.push(item);
         indexByFingerprint.set(key, current.length - 1);
+        if (globalIndex) globalIndex.set(key, { branch: branch, item: item });
         stats.added += 1;
         return;
       }
@@ -1059,10 +1147,7 @@
           asObject(current[existingIndex]),
           asObject(item),
           {
-            id: asString(
-              asObject(current[existingIndex]).id,
-              asObject(item).id
-            ),
+            id: asString(asObject(current[existingIndex]).id, asObject(item).id),
             updatedAt: nowIso()
           }
         );
@@ -1104,44 +1189,54 @@
       }
 
       var value = source[branch];
-      var count = Array.isArray(value)
-        ? value.length
-        : isObject(value)
-          ? 1
-          : 0;
+      var expectedArray = ARRAY_BRANCHES.indexOf(branch) !== -1;
+      var expectedObject = OBJECT_BRANCHES.indexOf(branch) !== -1;
+      var count = Array.isArray(value) ? value.length : isObject(value) ? 1 : 0;
+      var validType =
+        (expectedArray && Array.isArray(value)) ||
+        (expectedObject && isObject(value));
 
       branchSummary[branch] = {
         count: count,
-        valid: true
+        valid: validType,
+        expectedType: expectedArray ? "array" : "object"
       };
 
       totalRecords += count;
 
-      if (
-        branch !== "profile" &&
-        branch !== "statistics" &&
-        branch !== "settings" &&
-        !Array.isArray(value) &&
-        !isObject(value)
-      ) {
+      if (!validType) {
         errors.push({
           code: "INVALID_BRANCH_TYPE",
           branch: branch,
           message: "نوع بيانات الفرع غير صالح."
         });
+      }
 
-        branchSummary[branch].valid = false;
+      if (Array.isArray(value)) {
+        value.forEach(function validateRecord(record, index) {
+          if (!isObject(record)) {
+            errors.push({
+              code: "INVALID_RECORD",
+              branch: branch,
+              index: index,
+              message: "السجل ليس كائناً صالحاً."
+            });
+          }
+        });
       }
     });
 
-    if (
-      settings.maximumRecords &&
-      totalRecords > asNumber(settings.maximumRecords, totalRecords)
-    ) {
+    var maximumRecords = Math.max(
+      1,
+      asNumber(settings.maximumRecords, MAX_RECORDS)
+    );
+
+    if (totalRecords > maximumRecords) {
       errors.push({
         code: "RECORD_LIMIT_EXCEEDED",
         message: "عدد السجلات تجاوز الحد المسموح.",
-        totalRecords: totalRecords
+        totalRecords: totalRecords,
+        maximumRecords: maximumRecords
       });
     }
 
@@ -1160,14 +1255,14 @@
 
     return {
       id: createId("report"),
+      importId: asString(settings.importId),
       version: VERSION,
       status: "pending",
       preview: settings.preview === true,
       format: asString(settings.format, "unknown"),
-      duplicateMode: asString(
-        settings.duplicateMode,
-        DEFAULT_DUPLICATE_MODE
-      ),
+      duplicateMode: asString(settings.duplicateMode, DEFAULT_DUPLICATE_MODE),
+      objectMode: asString(settings.objectMode, DEFAULT_OBJECT_MODE),
+      fullReplaceRequested: settings.fullReplace === true,
       startedAt: nowIso(),
       completedAt: null,
       durationMs: 0,
@@ -1176,48 +1271,51 @@
         detected: 0,
         added: 0,
         skipped: 0,
+        crossBranchSkipped: 0,
         replaced: 0,
         merged: 0,
         errors: 0,
         warnings: 0
       },
       validation: null,
+      commit: null,
       errors: [],
       warnings: [],
       source: safeClone(asObject(settings.source))
     };
   }
 
-  function buildImportState(normalized, options, report) {
+  function buildImportPlan(normalized, options, report) {
     var settings = asObject(options);
     var existingState = readStoreState();
-    var resultState = safeClone(existingState);
-    var duplicateMode = asString(
-      settings.duplicateMode,
-      DEFAULT_DUPLICATE_MODE
-    );
+    var nextState = safeClone(existingState);
+    var duplicateMode = asString(settings.duplicateMode, DEFAULT_DUPLICATE_MODE);
+    var objectMode = asString(settings.objectMode, DEFAULT_OBJECT_MODE);
+    var globalIndex = buildGlobalFingerprintIndex(existingState);
+    var branchChanges = {};
 
     Object.keys(normalized).forEach(function processBranch(branch) {
       var incoming = normalized[branch];
 
-      if (SUPPORTED_BRANCHES.indexOf(branch) === -1) {
-        return;
-      }
+      if (SUPPORTED_BRANCHES.indexOf(branch) === -1) return;
 
       if (Array.isArray(incoming)) {
         var merged = mergeArrays(
           branch,
-          resultState[branch],
+          nextState[branch],
           incoming,
-          duplicateMode
+          duplicateMode,
+          globalIndex
         );
 
-        resultState[branch] = merged.value;
+        nextState[branch] = merged.value;
+        branchChanges[branch] = safeClone(merged.value);
 
         report.branches[branch] = {
           detected: incoming.length,
           added: merged.stats.added,
           skipped: merged.stats.skipped,
+          crossBranchSkipped: merged.stats.crossBranchSkipped,
           replaced: merged.stats.replaced,
           merged: merged.stats.merged
         };
@@ -1225,34 +1323,103 @@
         report.totals.detected += incoming.length;
         report.totals.added += merged.stats.added;
         report.totals.skipped += merged.stats.skipped;
+        report.totals.crossBranchSkipped += merged.stats.crossBranchSkipped;
         report.totals.replaced += merged.stats.replaced;
         report.totals.merged += merged.stats.merged;
       } else if (isObject(incoming)) {
-        var oldObject = asObject(resultState[branch]);
-
-        resultState[branch] = settings.objectMode === "replace"
+        var oldObject = asObject(nextState[branch]);
+        var nextObject = objectMode === "replace"
           ? safeClone(incoming)
           : Object.assign({}, oldObject, incoming);
+
+        nextState[branch] = nextObject;
+        branchChanges[branch] = safeClone(nextObject);
 
         report.branches[branch] = {
           detected: 1,
           added: Object.keys(oldObject).length ? 0 : 1,
           skipped: 0,
-          replaced: settings.objectMode === "replace" ? 1 : 0,
-          merged: settings.objectMode === "replace" ? 0 : 1
+          crossBranchSkipped: 0,
+          replaced: objectMode === "replace" ? 1 : 0,
+          merged: objectMode === "replace" ? 0 : 1
         };
 
         report.totals.detected += 1;
         report.totals.added += Object.keys(oldObject).length ? 0 : 1;
-        report.totals.replaced += settings.objectMode === "replace" ? 1 : 0;
-        report.totals.merged += settings.objectMode === "replace" ? 0 : 1;
+        report.totals.replaced += objectMode === "replace" ? 1 : 0;
+        report.totals.merged += objectMode === "replace" ? 0 : 1;
       }
     });
 
-    return resultState;
+    return {
+      existingState: existingState,
+      nextState: nextState,
+      branchChanges: branchChanges
+    };
   }
 
-  function commitState(nextState, options) {
+  function writeBranch(store, branch, value) {
+    var methodName =
+      "set" + branch.charAt(0).toUpperCase() + branch.slice(1);
+
+    if (typeof store[methodName] === "function") {
+      return {
+        success: Boolean(safeCall(store[methodName], false, store, [
+          safeClone(value),
+          { source: "travel-import" }
+        ])),
+        method: methodName
+      };
+    }
+
+    if (typeof store.updateBranch === "function") {
+      return {
+        success: Boolean(safeCall(store.updateBranch, false, store, [
+          branch,
+          safeClone(value),
+          { source: "travel-import" }
+        ])),
+        method: "updateBranch"
+      };
+    }
+
+    if (typeof store.setBranch === "function") {
+      return {
+        success: Boolean(safeCall(store.setBranch, false, store, [
+          branch,
+          safeClone(value),
+          { source: "travel-import" }
+        ])),
+        method: "setBranch"
+      };
+    }
+
+    if (typeof store.dispatch === "function") {
+      var dispatchResult = safeCall(store.dispatch, undefined, store, [{
+        type: "IMPORT_BRANCH",
+        payload: {
+          branch: branch,
+          value: safeClone(value)
+        },
+        meta: {
+          source: "travel-import",
+          replace: true
+        }
+      }]);
+
+      return {
+        success: dispatchResult !== false && dispatchResult !== undefined,
+        method: "dispatch:IMPORT_BRANCH"
+      };
+    }
+
+    return {
+      success: false,
+      method: null
+    };
+  }
+
+  function commitPlan(plan, options) {
     var settings = asObject(options);
     var store = getStore();
 
@@ -1260,7 +1427,38 @@
       return {
         success: false,
         method: "none",
+        branches: {},
         error: new Error("Store integration is not available.")
+      };
+    }
+
+    var branchResults = {};
+    var branchNames = Object.keys(plan.branchChanges);
+    var allBranchWritesSucceeded = branchNames.length > 0;
+
+    branchNames.forEach(function commitBranch(branch) {
+      var result = writeBranch(store, branch, plan.branchChanges[branch]);
+      branchResults[branch] = result;
+      if (!result.success) allBranchWritesSucceeded = false;
+    });
+
+    if (allBranchWritesSucceeded) {
+      return {
+        success: true,
+        method: "branch-write",
+        branches: branchResults,
+        error: null
+      };
+    }
+
+    if (settings.fullReplace !== true) {
+      return {
+        success: false,
+        method: "branch-write",
+        branches: branchResults,
+        error: new Error(
+          "No compatible branch-level Store method accepted every branch. Full state replacement was not authorized."
+        )
       };
     }
 
@@ -1268,57 +1466,50 @@
     var method = "none";
 
     if (typeof store.replaceState === "function") {
-      success = Boolean(
-        safeCall(store.replaceState, false, store, [
-          safeClone(nextState),
-          { source: "travel-import" }
-        ])
-      );
+      success = Boolean(safeCall(store.replaceState, false, store, [
+        safeClone(plan.nextState),
+        { source: "travel-import", explicitFullReplace: true }
+      ]));
       method = "replaceState";
     }
 
     if (!success && typeof store.setState === "function") {
-      success = Boolean(
-        safeCall(store.setState, false, store, [
-          safeClone(nextState),
-          { source: "travel-import" }
-        ])
-      );
+      success = Boolean(safeCall(store.setState, false, store, [
+        safeClone(plan.nextState),
+        { source: "travel-import", explicitFullReplace: true }
+      ]));
       method = "setState";
     }
 
     if (!success && typeof store.restore === "function") {
-      success = Boolean(
-        safeCall(store.restore, false, store, [
-          safeClone(nextState),
-          { source: "travel-import" }
-        ])
-      );
+      success = Boolean(safeCall(store.restore, false, store, [
+        safeClone(plan.nextState),
+        { source: "travel-import", explicitFullReplace: true }
+      ]));
       method = "restore";
     }
 
     if (!success && typeof store.importData === "function") {
-      success = Boolean(
-        safeCall(store.importData, false, store, [
-          safeClone(nextState),
-          { source: "travel-import" }
-        ])
-      );
+      success = Boolean(safeCall(store.importData, false, store, [
+        safeClone(plan.nextState),
+        { source: "travel-import", explicitFullReplace: true }
+      ]));
       method = "importData";
     }
 
     if (!success && typeof store.dispatch === "function") {
-      success = Boolean(
-        safeCall(store.dispatch, false, store, [{
-          type: "IMPORT_DATA",
-          payload: safeClone(nextState),
-          meta: {
-            source: "travel-import",
-            replace: true
-          }
-        }])
-      );
-      method = "dispatch";
+      var dispatchResult = safeCall(store.dispatch, undefined, store, [{
+        type: "IMPORT_DATA",
+        payload: safeClone(plan.nextState),
+        meta: {
+          source: "travel-import",
+          replace: true,
+          explicitFullReplace: true
+        }
+      }]);
+
+      success = dispatchResult !== false && dispatchResult !== undefined;
+      method = "dispatch:IMPORT_DATA";
     }
 
     if (!success && settings.allowDirectState === true) {
@@ -1326,16 +1517,14 @@
         Object.keys(store.state).forEach(function remove(key) {
           delete store.state[key];
         });
-
-        Object.assign(store.state, safeClone(nextState));
+        Object.assign(store.state, safeClone(plan.nextState));
         success = true;
         method = "direct-state";
       } else if (isObject(store.data)) {
         Object.keys(store.data).forEach(function remove(key) {
           delete store.data[key];
         });
-
-        Object.assign(store.data, safeClone(nextState));
+        Object.assign(store.data, safeClone(plan.nextState));
         success = true;
         method = "direct-data";
       }
@@ -1344,31 +1533,34 @@
     return {
       success: success,
       method: method,
+      branches: branchResults,
       error: success
         ? null
-        : new Error("No compatible Store write method accepted the import.")
+        : new Error("No compatible Store write method accepted the explicit full import.")
     };
   }
 
-  function refreshIntegrations() {
+  function refreshIntegrations(branches) {
     var brain = getBrain();
 
     if (brain && typeof brain.refresh === "function") {
-      safeCall(brain.refresh, null, brain, ["travel-import"]);
+      safeCall(brain.refresh, null, brain, [{
+        reason: "travel-import",
+        branches: asArray(branches)
+      }]);
     }
 
     emit("store:updated", {
       source: "travel-import",
+      branches: asArray(branches),
       generatedAt: nowIso()
     });
   }
 
   function preview(input, options) {
-    var settings = Object.assign({}, asObject(options), {
+    return importData(input, Object.assign({}, asObject(options), {
       preview: true
-    });
-
-    return importData(input, settings);
+    }));
   }
 
   function importData(input, options) {
@@ -1383,131 +1575,156 @@
     }
 
     runtime.busy = true;
+    runtime.activeImportId = createId("import");
+
+    var importId = runtime.activeImportId;
     var started = Date.now();
     var parsed = parse(input, settings);
     var report = createReport({
+      importId: importId,
       preview: settings.preview === true,
       format: parsed.format,
       duplicateMode: settings.duplicateMode,
+      objectMode: settings.objectMode,
+      fullReplace: settings.fullReplace === true,
       source: settings.source
     });
 
-    return Promise.resolve().then(function processImport() {
-      if (!parsed.success) {
-        throw parsed.error || new Error("Unable to parse import data.");
-      }
+    notify("import-started", {
+      importId: importId,
+      preview: settings.preview === true,
+      format: parsed.format
+    });
 
-      var normalized = normalizePayload(parsed.data, settings);
-      var validation = validate(normalized, settings);
+    return Promise.resolve()
+      .then(function processImport() {
+        if (!parsed.success) {
+          throw parsed.error || new Error("Unable to parse import data.");
+        }
 
-      report.validation = validation;
-      report.errors = validation.errors.slice();
-      report.warnings = validation.warnings.slice();
-      report.totals.errors = validation.errors.length;
-      report.totals.warnings = validation.warnings.length;
+        var normalized = normalizePayload(parsed.data, settings);
+        var validation = validate(normalized, settings);
 
-      if (!validation.valid) {
-        report.status = "invalid";
+        report.validation = validation;
+        report.errors = validation.errors.slice();
+        report.warnings = validation.warnings.slice();
+        report.totals.errors = validation.errors.length;
+        report.totals.warnings = validation.warnings.length;
+
+        if (!validation.valid) {
+          report.status = "invalid";
+
+          return {
+            success: false,
+            preview: settings.preview === true,
+            normalized: normalized,
+            report: report
+          };
+        }
+
+        var plan = buildImportPlan(normalized, settings, report);
+
+        if (settings.preview === true) {
+          report.status = "preview";
+
+          return {
+            success: true,
+            preview: true,
+            normalized: normalized,
+            nextState: settings.includeNextState === false
+              ? undefined
+              : plan.nextState,
+            branchChanges: safeClone(plan.branchChanges),
+            report: report
+          };
+        }
+
+        var commit = commitPlan(plan, settings);
+        report.commit = {
+          success: commit.success,
+          method: commit.method,
+          branches: safeClone(commit.branches)
+        };
+
+        if (!commit.success) throw commit.error;
+
+        report.status = "completed";
+
+        var importedBranches = Object.keys(normalized);
+        refreshIntegrations(importedBranches);
+
+        emit("travel-import:completed", {
+          importId: importId,
+          report: safeClone(report),
+          branches: importedBranches,
+          generatedAt: nowIso()
+        });
+
+        var interfaceApi = getUI();
+        if (interfaceApi) {
+          safeCall(interfaceApi.toast, null, interfaceApi, [
+            "تم استيراد بيانات السفر بنجاح.",
+            "success"
+          ]);
+        }
+
+        return {
+          success: true,
+          preview: false,
+          normalized: normalized,
+          report: report
+        };
+      })
+      .catch(function handleError(error) {
+        runtime.lastError = error;
+        report.status = "failed";
+        report.errors.push({
+          code: "IMPORT_FAILED",
+          message: error && error.message ? error.message : String(error)
+        });
+        report.totals.errors = report.errors.length;
+
+        emit("travel-import:failed", {
+          importId: importId,
+          report: safeClone(report),
+          error: report.errors[report.errors.length - 1]
+        });
+
+        var interfaceApi = getUI();
+        if (interfaceApi) {
+          safeCall(interfaceApi.toast, null, interfaceApi, [
+            "تعذر استيراد بيانات السفر.",
+            "error"
+          ]);
+        }
+
         return {
           success: false,
           preview: settings.preview === true,
-          normalized: normalized,
-          report: report
+          report: report,
+          error: {
+            name: error && error.name ? error.name : "ImportError",
+            message: error && error.message ? error.message : String(error)
+          }
         };
-      }
+      })
+      .then(function finalize(result) {
+        report.completedAt = nowIso();
+        report.durationMs = Date.now() - started;
 
-      var nextState = buildImportState(normalized, settings, report);
+        runtime.lastReport = safeClone(report);
+        persistReport(runtime.lastReport);
+        notify("import-finished", runtime.lastReport);
 
-      if (settings.preview === true) {
-        report.status = "preview";
-        return {
-          success: true,
-          preview: true,
-          normalized: normalized,
-          nextState: settings.includeNextState === false
-            ? undefined
-            : nextState,
-          report: report
-        };
-      }
-
-      var commit = commitState(nextState, settings);
-
-      if (!commit.success) {
-        throw commit.error;
-      }
-
-      report.status = "completed";
-      report.commitMethod = commit.method;
-
-      refreshIntegrations();
-
-      emit("travel-import:completed", {
-        report: safeClone(report),
-        branches: Object.keys(normalized),
-        generatedAt: nowIso()
-      });
-
-      var interfaceApi = getUI();
-
-      if (interfaceApi) {
-        safeCall(interfaceApi.toast, null, interfaceApi, [
-          "تم استيراد بيانات السفر بنجاح.",
-          "success"
-        ]);
-      }
-
-      return {
-        success: true,
-        preview: false,
-        normalized: normalized,
-        report: report
-      };
-    }).catch(function handleError(error) {
-      runtime.lastError = error;
-      report.status = "failed";
-      report.errors.push({
-        code: "IMPORT_FAILED",
-        message: error && error.message ? error.message : String(error)
-      });
-      report.totals.errors = report.errors.length;
-
-      emit("travel-import:failed", {
-        report: safeClone(report),
-        error: report.errors[report.errors.length - 1]
-      });
-
-      var interfaceApi = getUI();
-
-      if (interfaceApi) {
-        safeCall(interfaceApi.toast, null, interfaceApi, [
-          "تعذر استيراد بيانات السفر.",
-          "error"
-        ]);
-      }
-
-      return {
-        success: false,
-        preview: settings.preview === true,
-        report: report,
-        error: {
-          name: error && error.name ? error.name : "ImportError",
-          message: error && error.message ? error.message : String(error)
+        result.report = safeClone(report);
+        return result;
+      })
+      .finally(function release() {
+        if (runtime.activeImportId === importId) {
+          runtime.activeImportId = null;
+          runtime.busy = false;
         }
-      };
-    }).then(function finalize(result) {
-      report.completedAt = nowIso();
-      report.durationMs = Date.now() - started;
-
-      runtime.lastReport = safeClone(report);
-      persistReport(runtime.lastReport);
-      notify("import-finished", runtime.lastReport);
-
-      result.report = safeClone(report);
-      return result;
-    }).finally(function release() {
-      runtime.busy = false;
-    });
+      });
   }
 
   function readFileAsText(file) {
@@ -1517,10 +1734,7 @@
         return;
       }
 
-      if (
-        typeof file.size === "number" &&
-        file.size > MAX_FILE_SIZE
-      ) {
+      if (typeof file.size === "number" && file.size > MAX_FILE_SIZE) {
         reject(new Error("File size exceeds the 20 MB import limit."));
         return;
       }
@@ -1550,78 +1764,66 @@
   }
 
   function fileFormat(file) {
-    var name = asString(file && file.name, "").toLowerCase();
-    var type = asString(file && file.type, "").toLowerCase();
+    var name = asString(file && file.name).toLowerCase();
+    var type = asString(file && file.type).toLowerCase();
 
-    if (
-      name.endsWith(".json") ||
-      type.indexOf("json") !== -1
-    ) {
-      return "json";
-    }
-
-    if (
-      name.endsWith(".csv") ||
-      type.indexOf("csv") !== -1
-    ) {
-      return "csv";
-    }
-
+    if (name.endsWith(".json") || type.indexOf("json") !== -1) return "json";
+    if (name.endsWith(".csv") || type.indexOf("csv") !== -1) return "csv";
     return "text";
   }
 
   function importFile(file, options) {
-    var settings = Object.assign({}, asObject(options), {
-      format: asString(
-        asObject(options).format,
-        fileFormat(file)
-      ),
+    var baseOptions = asObject(options);
+
+    var settings = Object.assign({}, baseOptions, {
+      format: asString(baseOptions.format, fileFormat(file)),
       source: Object.assign(
         {},
-        asObject(asObject(options).source),
+        asObject(baseOptions.source),
         {
           type: "file",
           name: file && file.name ? file.name : "",
-          size: file && typeof file.size === "number"
-            ? file.size
-            : null,
+          size: file && typeof file.size === "number" ? file.size : null,
           mimeType: file && file.type ? file.type : ""
         }
       )
     });
 
-    return readFileAsText(file).then(function onRead(text) {
-      return importData(text, settings);
-    }).catch(function onError(error) {
-      runtime.lastError = error;
+    return readFileAsText(file)
+      .then(function onRead(text) {
+        return importData(text, settings);
+      })
+      .catch(function onError(error) {
+        runtime.lastError = error;
 
-      var report = createReport({
-        preview: settings.preview === true,
-        format: settings.format,
-        source: settings.source
-      });
+        var report = createReport({
+          importId: createId("import"),
+          preview: settings.preview === true,
+          format: settings.format,
+          source: settings.source
+        });
 
-      report.status = "failed";
-      report.completedAt = nowIso();
-      report.errors.push({
-        code: "FILE_READ_FAILED",
-        message: error.message
-      });
-      report.totals.errors = 1;
-
-      runtime.lastReport = report;
-      persistReport(report);
-      notify("file-read-failed", report);
-
-      return {
-        success: false,
-        report: safeClone(report),
-        error: {
-          name: error.name,
+        report.status = "failed";
+        report.completedAt = nowIso();
+        report.errors.push({
+          code: "FILE_READ_FAILED",
           message: error.message
-        }
-      };
-    });
+        });
+        report.totals.errors = 1;
+
+        runtime.lastReport = report;
+        persistReport(report);
+        notify("file-read-failed", report);
+
+        return {
+          success: false,
+          report: safeClone(report),
+          error: {
+            name: error.name,
+            message: error.message
+          }
+        };
+      });
   }
 
   function getLastReport() {
@@ -1669,9 +1871,14 @@
       initialized: runtime.initialized,
       destroyed: runtime.destroyed,
       busy: runtime.busy,
+      activeImportId: runtime.activeImportId,
       lastReport: getLastReport(),
       supportedBranches: SUPPORTED_BRANCHES.slice(),
       supportedFormats: ["object", "json", "csv", "text"],
+      limits: {
+        maxFileSize: MAX_FILE_SIZE,
+        maxRecords: MAX_RECORDS
+      },
       generatedAt: nowIso()
     };
   }
@@ -1685,17 +1892,28 @@
       initialized: runtime.initialized,
       destroyed: runtime.destroyed,
       busy: runtime.busy,
+      activeImportId: runtime.activeImportId,
       integrations: {
         store: Boolean(store),
-        storeWrite:
-          Boolean(store && (
-            typeof store.replaceState === "function" ||
-            typeof store.setState === "function" ||
-            typeof store.restore === "function" ||
-            typeof store.importData === "function" ||
-            typeof store.dispatch === "function"
-          )),
+        storeVersion: store ? asString(store.version) : null,
+        branchWrite: Boolean(store && (
+          typeof store.updateBranch === "function" ||
+          typeof store.setBranch === "function" ||
+          typeof store.dispatch === "function" ||
+          SUPPORTED_BRANCHES.some(function hasSetter(branch) {
+            var method =
+              "set" + branch.charAt(0).toUpperCase() + branch.slice(1);
+            return typeof store[method] === "function";
+          })
+        )),
+        fullStateWrite: Boolean(store && (
+          typeof store.replaceState === "function" ||
+          typeof store.setState === "function" ||
+          typeof store.restore === "function" ||
+          typeof store.importData === "function"
+        )),
         events: Boolean(getEvents()),
+        domEvents: Boolean(global.document),
         ui: Boolean(getUI()),
         brain: Boolean(getBrain()),
         localStorage: Boolean(global.localStorage),
@@ -1711,15 +1929,13 @@
     };
   }
 
-  function bindEvents() {
-    var events = getEvents();
-
-    if (!events) {
+  function bindDomRequest() {
+    if (!global.document || typeof global.document.addEventListener !== "function") {
       return;
     }
 
-    var handler = function importRequest(payload) {
-      var request = asObject(payload);
+    var handler = function onImportRequest(event) {
+      var request = asObject(event && event.detail);
 
       if (request.file) {
         importFile(request.file, request.options);
@@ -1728,19 +1944,43 @@
       }
     };
 
-    var unsubscribe =
-      safeCall(events.on, null, events, [
-        "travel-import:request",
-        handler
-      ]) ||
-      safeCall(events.subscribe, null, events, [
-        "travel-import:request",
-        handler
-      ]);
+    global.document.addEventListener("travel-import:request", handler);
 
-    if (typeof unsubscribe === "function") {
-      runtime.eventUnsubscribers.push(unsubscribe);
+    runtime.domUnsubscribers.push(function removeDomRequest() {
+      global.document.removeEventListener("travel-import:request", handler);
+    });
+  }
+
+  function bindEvents() {
+    var events = getEvents();
+
+    if (events) {
+      var handler = function importRequest(payload) {
+        var request = asObject(payload);
+
+        if (request.file) {
+          importFile(request.file, request.options);
+        } else if (request.data !== undefined) {
+          importData(request.data, request.options);
+        }
+      };
+
+      var unsubscribe =
+        safeCall(events.on, null, events, [
+          "travel-import:request",
+          handler
+        ]) ||
+        safeCall(events.subscribe, null, events, [
+          "travel-import:request",
+          handler
+        ]);
+
+      if (typeof unsubscribe === "function") {
+        runtime.eventUnsubscribers.push(unsubscribe);
+      }
     }
+
+    bindDomRequest();
   }
 
   function init(options) {
@@ -1772,9 +2012,15 @@
       safeCall(fn, null);
     });
 
+    runtime.domUnsubscribers.forEach(function unsubscribeDom(fn) {
+      safeCall(fn, null);
+    });
+
     runtime.eventUnsubscribers = [];
+    runtime.domUnsubscribers = [];
     runtime.listeners.clear();
     runtime.busy = false;
+    runtime.activeImportId = null;
     runtime.initialized = false;
     runtime.destroyed = true;
 
@@ -1801,27 +2047,33 @@
     clearLastReport: clearLastReport,
     getState: getState,
     getHealth: getHealth,
-    subscribe: subscribe
+    subscribe: subscribe,
+
+    utils: Object.freeze({
+      normalizeText: normalizeText,
+      detectFormat: detectFormat,
+      fingerprint: fingerprint,
+      dateToIso: dateToIso
+    })
   };
 
-  global.TravelImport = Object.freeze(api);
+  var frozenApi = Object.freeze(api);
+
+  global.TravelImport = frozenApi;
+  global.TIC.TravelImport = frozenApi;
 
   if (global.document) {
     if (global.document.readyState === "loading") {
       global.document.addEventListener(
         "DOMContentLoaded",
         function autoInitOnReady() {
-          if (!runtime.initialized && !runtime.destroyed) {
-            init();
-          }
+          if (!runtime.initialized && !runtime.destroyed) init();
         },
         { once: true }
       );
     } else {
       global.setTimeout(function autoInit() {
-        if (!runtime.initialized && !runtime.destroyed) {
-          init();
-        }
+        if (!runtime.initialized && !runtime.destroyed) init();
       }, 0);
     }
   }
