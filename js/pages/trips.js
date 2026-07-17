@@ -7368,6 +7368,22 @@
       false;
   };
 
+  const cancelDeferredRefresh = () => {
+    clearTimer("refreshTimer");
+    clearTimer("renderTimer");
+    clearTimer("interactionTimer");
+    clearTimer("scrollTimer");
+
+    state.refreshQueued = false;
+    state.refreshRequestedAt = 0;
+    state.pendingRefreshReason = "";
+    state.lastRefreshReason = "";
+    state.isRefreshing = false;
+    state.isRendering = false;
+
+    return true;
+  };
+  
   /* =========================================================
      Public page API
   ========================================================= */
@@ -7387,7 +7403,7 @@
       ensurePlannedTripsStyles();
       registerActions();
       subscribeToStore();
-      bindIntegrationEvents?.();
+      registerIntegrationListeners();
 
       state.initialized = true;
       state.destroyed = false;
@@ -7554,7 +7570,7 @@
     unmount() {
       closeModal();
       closeCountrySheet();
-      cancelDeferredRefresh?.();
+      cancelDeferredRefresh();
 
       unbindPlannedTripsEvents();
 
