@@ -1,26 +1,42 @@
 /* =========================================================
    Travel Intelligence Center
-   Application Router V1.1.0
-   Fast Navigation & iPhone Stability Edition
+   Application Router V1.0.0
 
    File Path:
    js/router.js
 
    Purpose:
    - Central navigation service for the application.
-   - Keeps the bottom navigation responsive during route changes.
-   - Avoids replacing the current page with a loading screen during
-     normal tab navigation.
-   - Paints the active navigation state before heavy page work.
-   - Defers non-critical after-enter work until after the page appears.
-   - Uses instant route scrolling to avoid slow smooth-scroll transitions.
-   - Preserves browser history, hashes, lifecycle hooks, persistence,
-     focus management, errors, diagnostics, and existing page APIs.
+   - Registers the five main application routes.
+   - Supports page-module registration before or after startup.
+   - Handles browser history, URL hashes, delegated navigation,
+     active navigation states, route persistence, page lifecycle,
+     loading states, errors, focus management, and diagnostics.
+   - Does not own or modify travel business data.
 
    Dependencies:
    - js/config.js
    - js/store.js
    - js/ui.js is optional at load time and may be used when ready.
+
+   Expected Page Modules:
+   - js/pages/home.js
+   - js/pages/trips.js
+   - js/pages/guide.js
+   - js/pages/budget.js
+   - js/pages/more.js
+
+   Supported Page Module Shape:
+   {
+     id: "home",
+     render(context) => string | Node | void,
+     mount(context) => void,
+     unmount(context) => void,
+     beforeEnter(context) => boolean | Promise<boolean>,
+     afterEnter(context) => void,
+     beforeLeave(context) => boolean | Promise<boolean>,
+     afterLeave(context) => void
+   }
 ========================================================= */
 
 (function (window, document) {
@@ -34,7 +50,7 @@
     );
   }
 
-  const ROUTER_VERSION = "1.1.0";
+  const ROUTER_VERSION = "1.0.0";
   const ROUTE_STORAGE_KEY =
     Config.storage?.currentRouteKey || "tic.current-route.v1";
 
@@ -111,21 +127,6 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
-
-  const nextFrame = () =>
-    new Promise((resolve) => {
-      window.requestAnimationFrame(() => resolve());
-    });
-
-  const scheduleIdle = (callback) => {
-    if (typeof window.requestIdleCallback === "function") {
-      return window.requestIdleCallback(callback, {
-        timeout: 500
-      });
-    }
-
-    return window.setTimeout(callback, 0);
-  };
 
   const getViewElement = () => {
     if (viewElement && document.contains(viewElement)) {
@@ -276,7 +277,7 @@
       type,
       currentRoute,
       previousRoute,
-      ...detail
+      ...clone(detail)
     };
 
     listeners.forEach((listener) => {
@@ -314,11 +315,7 @@
       busy ? "true" : "false"
     );
 
-    /*
-     * Do not toggle a visual loading class during normal navigation.
-     * Some page styles attach transitions/opacity to .is-loading,
-     * which makes iPhone route changes feel slower.
-     */
+    container.classList.toggle("is-loading", Boolean(busy));
   };
 
   const renderLoading = (route) => {
@@ -449,7 +446,7 @@
     window.requestAnimationFrame(() => {
       try {
         container.focus({
-          preventScroll: true
+          preventScroll: options.scroll !== false
         });
       } catch (error) {
         container.focus();
@@ -462,14 +459,10 @@
       return;
     }
 
-    /*
-     * Route changes should be immediate. Smooth scrolling makes
-     * navigation look delayed and can keep Safari busy while the
-     * next page is rendering.
-     */
     const behavior =
       options.scrollBehavior ||
-      "auto";
+      Config.ui?.scrollBehavior ||
+      "smooth";
 
     window.requestAnimationFrame(() => {
       try {
@@ -497,49 +490,6 @@
     const result = await target[hookName](context);
 
     return result === undefined ? defaultValue : result;
-  };
-
-  const runPostEnterHooks = (
-    route,
-    module,
-    context
-  ) => {
-    scheduleIdle(async () => {
-      try {
-        await callHook(
-          route,
-          "afterEnter",
-          context,
-          true
-        );
-
-        await callHook(
-          module,
-          "afterEnter",
-          context,
-          true
-        );
-
-        emit("after-enter-complete", {
-          route: context.route,
-          navigationId: context.navigationId
-        });
-      } catch (error) {
-        console.error(
-          "TIC Router deferred afterEnter error:",
-          error
-        );
-
-        emit("after-enter-error", {
-          route: context.route,
-          navigationId: context.navigationId,
-          error: {
-            name: error?.name || "Error",
-            message: error?.message || String(error)
-          }
-        });
-      }
-    });
   };
 
   const renderModuleOutput = async (
@@ -579,10 +529,6 @@
       container.replaceChildren(...output);
     }
 
-    /*
-     * Mount remains awaited because event handlers must be ready
-     * before the user interacts with the newly rendered page.
-     */
     if (
       isObject(module) &&
       typeof module.mount === "function"
@@ -737,9 +683,7 @@
 
     Router.go(routeName, {
       params,
-      source: "click",
-      loading: false,
-      scrollBehavior: "auto"
+      source: "click"
     });
   };
 
@@ -760,9 +704,7 @@
           replace: true,
           history: false,
           persist: true,
-          source: "popstate",
-          loading: false,
-          scrollBehavior: "auto"
+          source: "popstate"
         });
       };
 
@@ -781,9 +723,7 @@
           Router.go(routeName, {
             history: false,
             persist: true,
-            source: "hashchange",
-            loading: false,
-            scrollBehavior: "auto"
+            source: "hashchange"
           });
         }
       };
@@ -870,7 +810,6 @@
       return this.go(initialRoute, {
         replace: true,
         source: "start",
-        loading: true,
         ...options
       });
     },
@@ -1097,23 +1036,10 @@
       navigating = true;
       navigationSequence += 1;
       const activeNavigationId = navigationSequence;
-      const routeBeforeNavigation = currentRoute;
 
-      /*
-       * Give immediate visual feedback before lifecycle/render work.
-       * This makes the bottom navigation respond on the same tap.
-       */
-      updateNavigationState(resolvedRoute);
       setBusy(true);
 
-      const shouldShowLoading =
-        options.loading === true ||
-        (
-          options.loading !== false &&
-          options.source === "start"
-        );
-
-      if (shouldShowLoading) {
+      if (options.loading !== false) {
         renderLoading(route);
       }
 
@@ -1125,11 +1051,6 @@
         source: options.source || "api"
       });
 
-      /*
-       * Allow Safari to paint the active tab before running page hooks.
-       */
-      await nextFrame();
-
       try {
         const canLeave = await unmountCurrentModule(
           resolvedRoute,
@@ -1137,11 +1058,6 @@
         );
 
         if (canLeave === false) {
-          updateNavigationState(
-            routeBeforeNavigation ||
-            DEFAULT_FALLBACK_ROUTE
-          );
-
           emit("cancelled", {
             route: resolvedRoute,
             reason: "before-leave"
@@ -1174,11 +1090,6 @@
         );
 
         if (routeCanEnter === false) {
-          updateNavigationState(
-            routeBeforeNavigation ||
-            DEFAULT_FALLBACK_ROUTE
-          );
-
           emit("cancelled", {
             route: resolvedRoute,
             reason: "route-before-enter"
@@ -1195,11 +1106,6 @@
         );
 
         if (moduleCanEnter === false) {
-          updateNavigationState(
-            routeBeforeNavigation ||
-            DEFAULT_FALLBACK_ROUTE
-          );
-
           emit("cancelled", {
             route: resolvedRoute,
             reason: "module-before-enter"
@@ -1228,13 +1134,23 @@
         updateNavigationState(currentRoute);
         setDocumentTitle(route);
 
+        await callHook(
+          route,
+          "afterEnter",
+          context,
+          true
+        );
+
+        await callHook(
+          module,
+          "afterEnter",
+          context,
+          true
+        );
+
         scrollToTop(options);
         focusView(options);
 
-        /*
-         * Mark the visible route as changed immediately.
-         * Non-critical afterEnter hooks run after paint.
-         */
         emit("changed", {
           route: currentRoute,
           requestedRoute,
@@ -1244,19 +1160,8 @@
           source: options.source || "api"
         });
 
-        runPostEnterHooks(
-          route,
-          module,
-          context
-        );
-
         return true;
       } catch (error) {
-        updateNavigationState(
-          routeBeforeNavigation ||
-          DEFAULT_FALLBACK_ROUTE
-        );
-
         renderError(error, route);
 
         emit("error", {
@@ -1291,8 +1196,7 @@
         ...options,
         force: true,
         replace: true,
-        source: options.source || "refresh",
-        loading: options.loading === true
+        source: options.source || "refresh"
       });
     },
 
