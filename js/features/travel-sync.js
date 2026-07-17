@@ -1,6 +1,6 @@
 /* =========================================================
    Travel Intelligence Center
-   Travel Sync Engine V1.0.0
+   Travel Sync Engine V1.1.0
 
    File Path:
    js/features/travel-sync.js
@@ -10,9 +10,11 @@
    - Keeps local Store data synchronized across browser tabs and sessions.
    - Supports offline-first operation, change queues, conflict detection,
      snapshots, revisions, backup transport hooks, and future cloud adapters.
-   - Integrates safely with Store, Storage, Events, UI, TravelBrain,
-     TravelAssistant, and TravelImport without modifying stable modules.
+   - Integrates safely with Store V2.5.0, Storage, Events, UI,
+     TravelBrain V1.1.0, TravelAssistant V1.1.0, and TravelImport V1.1.0.
    - Uses BroadcastChannel when available and localStorage events as fallback.
+   - Prevents sync loops, duplicate remote application, and accidental
+     destructive full-state replacement.
    - Does not require an external server or third-party library.
    - Cloud synchronization remains adapter-based and disabled by default.
 
@@ -27,33 +29,38 @@
    8) js/features/travel-import.js
    9) js/features/travel-sync.js
 
-   Public Global:
+   Public Globals:
    - window.TravelSync
+   - window.TIC.TravelSync
 
    Main APIs:
    - TravelSync.init(options)
    - TravelSync.sync(options)
    - TravelSync.push(options)
    - TravelSync.pull(options)
-   - TravelSync.queueChange(change)
+   - TravelSync.queueChange(change, options)
    - TravelSync.registerAdapter(name, adapter)
    - TravelSync.setActiveAdapter(name)
-   - TravelSync.createSnapshot()
+   - TravelSync.createSnapshot(options)
    - TravelSync.restoreSnapshot(snapshot, options)
    - TravelSync.getStatus()
-   - TravelSync.getQueue()
-   - TravelSync.subscribe(listener)
+   - TravelSync.getQueue(options)
+   - TravelSync.subscribe(listener, options)
    - TravelSync.destroy()
    ========================================================= */
 
 (function travelSyncFactory(global) {
   "use strict";
 
-  if (!global || global.TravelSync) {
+  if (!global) return;
+
+  global.TIC = global.TIC || {};
+
+  if (global.TravelSync || global.TIC.TravelSync) {
     return;
   }
 
-  var VERSION = "1.0.0";
+  var VERSION = "1.1.0";
   var MODULE_NAME = "TravelSync";
 
   var STORAGE_KEYS = Object.freeze({
@@ -67,7 +74,8 @@
   var DEFAULT_ADAPTER = "local";
   var MAX_QUEUE_SIZE = 500;
   var MAX_HISTORY_SIZE = 100;
-  var DEFAULT_DEBOUNCE_MS = 500;
+  var MAX_SEEN_MESSAGES = 250;
+  var DEFAULT_DEBOUNCE_MS = 650;
   var DEFAULT_SYNC_INTERVAL_MS = 60000;
   var DEFAULT_CONFLICT_STRATEGY = "latest";
   var SNAPSHOT_SCHEMA_VERSION = 1;
@@ -94,13 +102,19 @@
     history: [],
     listeners: new Set(),
     eventUnsubscribers: [],
+    domUnsubscribers: [],
     storeUnsubscribe: null,
     channel: null,
     syncTimer: null,
     debounceTimer: null,
     applyingRemoteState: false,
+    suppressStoreEventsUntil: 0,
     sequence: 0,
-    options: {}
+    options: {},
+    activeSyncId: null,
+    lastAppliedChecksum: "",
+    lastBroadcastId: "",
+    seenMessages: new Map()
   };
 
   function nowIso() {
@@ -120,10 +134,7 @@
   }
 
   function asString(value, fallback) {
-    if (value === null || value === undefined) {
-      return fallback || "";
-    }
-
+    if (value === null || value === undefined) return fallback || "";
     var text = String(value).trim();
     return text || fallback || "";
   }
@@ -136,22 +147,15 @@
   }
 
   function asBoolean(value, fallback) {
-    if (typeof value === "boolean") {
-      return value;
-    }
-
-    if (value === "true" || value === "1" || value === 1) {
-      return true;
-    }
-
-    if (value === "false" || value === "0" || value === 0) {
-      return false;
-    }
-
+    if (typeof value === "boolean") return value;
+    if (value === "true" || value === "1" || value === 1) return true;
+    if (value === "false" || value === "0" || value === 0) return false;
     return Boolean(fallback);
   }
 
   function safeClone(value) {
+    if (value === undefined) return undefined;
+
     try {
       return JSON.parse(JSON.stringify(value));
     } catch (error) {
@@ -160,9 +164,7 @@
   }
 
   function safeCall(fn, fallback, context, args) {
-    if (typeof fn !== "function") {
-      return fallback;
-    }
+    if (typeof fn !== "function") return fallback;
 
     try {
       var result = fn.apply(context || null, asArray(args));
@@ -182,6 +184,11 @@
       runtime.sequence.toString(36),
       Math.random().toString(36).slice(2, 8)
     ].join("_");
+  }
+
+  function parseTime(value) {
+    var time = new Date(value || 0).getTime();
+    return Number.isFinite(time) ? time : 0;
   }
 
   function hashString(value) {
@@ -230,27 +237,67 @@
   }
 
   function getStore() {
-    return global.Store || global.TravelStore || global.AppStore || null;
+    return (
+      (global.TIC && global.TIC.Store) ||
+      global.Store ||
+      global.TravelStore ||
+      global.AppStore ||
+      null
+    );
   }
 
   function getStorage() {
-    return global.Storage || global.TravelStorage || global.AppStorage || null;
+    return (
+      (global.TIC && global.TIC.Storage) ||
+      global.Storage ||
+      global.TravelStorage ||
+      global.AppStorage ||
+      null
+    );
   }
 
   function getEvents() {
-    return global.Events || global.EventBus || global.TravelEvents || null;
+    return (
+      (global.TIC && global.TIC.Events) ||
+      global.Events ||
+      global.EventBus ||
+      global.TravelEvents ||
+      null
+    );
   }
 
   function getUI() {
-    return global.UI || global.TravelUI || global.AppUI || null;
+    return (
+      (global.TIC && global.TIC.UI) ||
+      global.UI ||
+      global.TravelUI ||
+      global.AppUI ||
+      null
+    );
   }
 
   function getBrain() {
-    return global.TravelBrain || null;
+    return (
+      global.TravelBrain ||
+      (global.TIC && global.TIC.TravelBrain) ||
+      null
+    );
   }
 
   function getAssistant() {
-    return global.TravelAssistant || null;
+    return (
+      global.TravelAssistant ||
+      (global.TIC && global.TIC.TravelAssistant) ||
+      null
+    );
+  }
+
+  function getImportEngine() {
+    return (
+      global.TravelImport ||
+      (global.TIC && global.TIC.TravelImport) ||
+      null
+    );
   }
 
   function readStoreState() {
@@ -264,13 +311,8 @@
         safeCall(store.getData, null, store) ||
         safeCall(store.read, null, store);
 
-      if (!value && isObject(store.state)) {
-        value = store.state;
-      }
-
-      if (!value && isObject(store.data)) {
-        value = store.data;
-      }
+      if (!value && isObject(store.state)) value = store.state;
+      if (!value && isObject(store.data)) value = store.data;
     }
 
     return safeClone(asObject(value));
@@ -281,6 +323,7 @@
     var store = getStore();
     var success = false;
     var method = "none";
+    var source = asString(settings.source, "travel-sync");
 
     if (!store) {
       return {
@@ -290,7 +333,20 @@
       };
     }
 
+    if (
+      settings.explicitFullReplace !== true &&
+      settings.remote !== true &&
+      settings.restore !== true
+    ) {
+      return {
+        success: false,
+        method: method,
+        error: new Error("Full Store replacement requires explicit authorization.")
+      };
+    }
+
     runtime.applyingRemoteState = true;
+    runtime.suppressStoreEventsUntil = Date.now() + 1000;
 
     try {
       if (typeof store.replaceState === "function") {
@@ -298,8 +354,10 @@
           safeCall(store.replaceState, false, store, [
             safeClone(nextState),
             {
-              source: asString(settings.source, "travel-sync"),
-              silent: settings.silent === true
+              source: source,
+              silent: settings.silent === true,
+              remote: settings.remote === true,
+              explicitFullReplace: true
             }
           ])
         );
@@ -311,8 +369,10 @@
           safeCall(store.setState, false, store, [
             safeClone(nextState),
             {
-              source: asString(settings.source, "travel-sync"),
-              silent: settings.silent === true
+              source: source,
+              silent: settings.silent === true,
+              remote: settings.remote === true,
+              explicitFullReplace: true
             }
           ])
         );
@@ -324,7 +384,9 @@
           safeCall(store.restore, false, store, [
             safeClone(nextState),
             {
-              source: asString(settings.source, "travel-sync")
+              source: source,
+              remote: settings.remote === true,
+              explicitFullReplace: true
             }
           ])
         );
@@ -336,7 +398,9 @@
           safeCall(store.importData, false, store, [
             safeClone(nextState),
             {
-              source: asString(settings.source, "travel-sync")
+              source: source,
+              remote: settings.remote === true,
+              explicitFullReplace: true
             }
           ])
         );
@@ -344,17 +408,18 @@
       }
 
       if (!success && typeof store.dispatch === "function") {
-        success = Boolean(
-          safeCall(store.dispatch, false, store, [{
-            type: "SYNC_REPLACE_STATE",
-            payload: safeClone(nextState),
-            meta: {
-              source: asString(settings.source, "travel-sync"),
-              remote: settings.remote === true
-            }
-          }])
-        );
-        method = "dispatch";
+        var dispatchResult = safeCall(store.dispatch, undefined, store, [{
+          type: "SYNC_REPLACE_STATE",
+          payload: safeClone(nextState),
+          meta: {
+            source: source,
+            remote: settings.remote === true,
+            explicitFullReplace: true
+          }
+        }]);
+
+        success = dispatchResult !== false && dispatchResult !== undefined;
+        method = "dispatch:SYNC_REPLACE_STATE";
       }
 
       if (!success && settings.allowDirectState === true) {
@@ -377,7 +442,9 @@
         }
       }
     } finally {
-      runtime.applyingRemoteState = false;
+      global.setTimeout(function releaseRemoteGuard() {
+        runtime.applyingRemoteState = false;
+      }, 0);
     }
 
     return {
@@ -393,12 +460,25 @@
     var storage = getStorage();
 
     if (storage) {
-      var value =
-        safeCall(storage.get, undefined, storage, [key]) ||
-        safeCall(storage.read, undefined, storage, [key]) ||
-        safeCall(storage.load, undefined, storage, [key]);
+      var value = safeCall(storage.get, undefined, storage, [key]);
+
+      if (value === undefined) {
+        value = safeCall(storage.read, undefined, storage, [key]);
+      }
+
+      if (value === undefined) {
+        value = safeCall(storage.load, undefined, storage, [key]);
+      }
 
       if (value !== undefined && value !== null) {
+        if (typeof value === "string") {
+          try {
+            return JSON.parse(value);
+          } catch (error) {
+            return value;
+          }
+        }
+
         return value;
       }
     }
@@ -419,12 +499,17 @@
     var storage = getStorage();
 
     if (storage) {
-      var stored =
-        safeCall(storage.set, false, storage, [key, value]) ||
-        safeCall(storage.write, false, storage, [key, value]) ||
-        safeCall(storage.save, false, storage, [key, value]);
+      var stored = safeCall(storage.set, undefined, storage, [key, value]);
 
-      if (stored) {
+      if (stored === undefined) {
+        stored = safeCall(storage.write, undefined, storage, [key, value]);
+      }
+
+      if (stored === undefined) {
+        stored = safeCall(storage.save, undefined, storage, [key, value]);
+      }
+
+      if (stored !== false && stored !== undefined) {
         return true;
       }
     }
@@ -445,11 +530,13 @@
     var storage = getStorage();
 
     if (storage) {
-      var removed =
-        safeCall(storage.remove, false, storage, [key]) ||
-        safeCall(storage.delete, false, storage, [key]);
+      var removed = safeCall(storage.remove, undefined, storage, [key]);
 
-      if (removed) {
+      if (removed === undefined) {
+        removed = safeCall(storage.delete, undefined, storage, [key]);
+      }
+
+      if (removed !== false && removed !== undefined) {
         return true;
       }
     }
@@ -468,16 +555,28 @@
 
   function emit(name, payload) {
     var events = getEvents();
+    var emitted = false;
 
-    if (!events) {
-      return false;
+    if (events) {
+      emitted = Boolean(
+        safeCall(events.emit, false, events, [name, payload]) ||
+        safeCall(events.publish, false, events, [name, payload]) ||
+        safeCall(events.dispatch, false, events, [name, payload])
+      );
     }
 
-    return Boolean(
-      safeCall(events.emit, false, events, [name, payload]) ||
-      safeCall(events.publish, false, events, [name, payload]) ||
-      safeCall(events.dispatch, false, events, [name, payload])
-    );
+    if (global.document && typeof global.CustomEvent === "function") {
+      try {
+        global.document.dispatchEvent(new global.CustomEvent(name, {
+          detail: safeClone(payload)
+        }));
+        emitted = true;
+      } catch (error) {
+        runtime.lastError = error;
+      }
+    }
+
+    return emitted;
   }
 
   function notify(reason, payload) {
@@ -486,7 +585,7 @@
     runtime.listeners.forEach(function notifyListener(listener) {
       try {
         listener(status, {
-          reason: reason,
+          reason: asString(reason, "update"),
           payload: safeClone(payload),
           generatedAt: nowIso()
         });
@@ -496,7 +595,7 @@
     });
 
     emit("travel-sync:updated", {
-      reason: reason,
+      reason: asString(reason, "update"),
       payload: safeClone(payload),
       status: {
         syncing: runtime.syncing,
@@ -512,7 +611,7 @@
   function addHistory(type, details) {
     runtime.history.push({
       id: createId("history"),
-      type: type,
+      type: asString(type, "event"),
       details: safeClone(details),
       createdAt: nowIso()
     });
@@ -526,7 +625,6 @@
     return storageSet(STORAGE_KEYS.META, {
       version: VERSION,
       deviceId: runtime.deviceId,
-      sessionId: runtime.sessionId,
       revision: runtime.revision,
       activeAdapter: runtime.activeAdapter,
       lastSyncAt: runtime.lastSyncAt,
@@ -534,6 +632,7 @@
       lastPullAt: runtime.lastPullAt,
       lastLocalChangeAt: runtime.lastLocalChangeAt,
       lastRemoteChangeAt: runtime.lastRemoteChangeAt,
+      lastAppliedChecksum: runtime.lastAppliedChecksum,
       history: runtime.history.slice(-MAX_HISTORY_SIZE),
       updatedAt: nowIso()
     });
@@ -544,16 +643,14 @@
 
     runtime.deviceId = asString(meta.deviceId, createId("device"));
     runtime.sessionId = createId("session");
-    runtime.revision = asNumber(meta.revision, 0);
-    runtime.activeAdapter = asString(
-      meta.activeAdapter,
-      DEFAULT_ADAPTER
-    );
+    runtime.revision = Math.max(0, asNumber(meta.revision, 0));
+    runtime.activeAdapter = asString(meta.activeAdapter, DEFAULT_ADAPTER);
     runtime.lastSyncAt = meta.lastSyncAt || null;
     runtime.lastPushAt = meta.lastPushAt || null;
     runtime.lastPullAt = meta.lastPullAt || null;
     runtime.lastLocalChangeAt = meta.lastLocalChangeAt || null;
     runtime.lastRemoteChangeAt = meta.lastRemoteChangeAt || null;
+    runtime.lastAppliedChecksum = asString(meta.lastAppliedChecksum);
     runtime.history = asArray(meta.history).slice(-MAX_HISTORY_SIZE);
 
     return meta;
@@ -569,14 +666,20 @@
 
   function restoreQueue() {
     var saved = asObject(storageGet(STORAGE_KEYS.QUEUE, {}));
-    runtime.queue = asArray(saved.queue).slice(-MAX_QUEUE_SIZE);
+
+    runtime.queue = asArray(saved.queue)
+      .filter(function validQueueItem(item) {
+        return isObject(item) && asString(item.id);
+      })
+      .slice(-MAX_QUEUE_SIZE);
+
     return runtime.queue;
   }
 
   function createSnapshot(options) {
     var settings = asObject(options);
-    var data = settings.state
-      ? safeClone(settings.state)
+    var data = settings.state !== undefined
+      ? safeClone(asObject(settings.state))
       : readStoreState();
 
     var snapshot = {
@@ -587,7 +690,7 @@
       id: createId("snapshot"),
       deviceId: runtime.deviceId,
       sessionId: runtime.sessionId,
-      revision: asNumber(settings.revision, runtime.revision),
+      revision: Math.max(0, asNumber(settings.revision, runtime.revision)),
       generatedAt: nowIso(),
       checksum: checksum(data),
       data: data,
@@ -615,7 +718,7 @@
     var errors = [];
     var warnings = [];
 
-    if (!source.data || !isObject(source.data)) {
+    if (!isObject(source.data)) {
       errors.push({
         code: "INVALID_DATA",
         message: "Snapshot data is missing or invalid."
@@ -653,6 +756,29 @@
     };
   }
 
+  function refreshIntelligence(reason) {
+    var brain = getBrain();
+    var assistant = getAssistant();
+
+    if (brain && typeof brain.refresh === "function") {
+      safeCall(brain.refresh, null, brain, [{
+        reason: reason || "travel-sync"
+      }]);
+    }
+
+    if (assistant && typeof assistant.refresh === "function") {
+      safeCall(assistant.refresh, null, assistant, [{
+        reason: reason || "travel-sync"
+      }]);
+    }
+
+    emit("store:updated", {
+      source: "travel-sync",
+      reason: reason || "refresh",
+      generatedAt: nowIso()
+    });
+  }
+
   function restoreSnapshot(snapshot, options) {
     var settings = asObject(options);
     var source = asObject(snapshot);
@@ -669,9 +795,26 @@
       });
     }
 
+    if (
+      source.checksum &&
+      source.checksum === runtime.lastAppliedChecksum &&
+      settings.force !== true
+    ) {
+      return Promise.resolve({
+        success: true,
+        unchanged: true,
+        validation: validation,
+        method: "checksum-skip",
+        revision: runtime.revision,
+        snapshotId: source.id || null
+      });
+    }
+
     var result = writeStoreState(source.data, {
       source: asString(settings.source, "travel-sync-restore"),
       remote: settings.remote === true,
+      restore: true,
+      explicitFullReplace: true,
       silent: settings.silent === true,
       allowDirectState: settings.allowDirectState === true
     });
@@ -692,23 +835,30 @@
       asNumber(source.revision, runtime.revision)
     );
 
+    runtime.lastAppliedChecksum = asString(
+      source.checksum,
+      checksum(source.data)
+    );
+
     if (settings.remote === true) {
       runtime.lastRemoteChangeAt = nowIso();
     } else {
       runtime.lastLocalChangeAt = nowIso();
     }
 
+    storageSet(STORAGE_KEYS.SNAPSHOT, source);
     persistMeta();
     refreshIntelligence("snapshot-restored");
 
     addHistory("snapshot-restored", {
-      snapshotId: source.id,
+      snapshotId: source.id || null,
       method: result.method,
-      remote: settings.remote === true
+      remote: settings.remote === true,
+      checksum: runtime.lastAppliedChecksum
     });
 
     notify("snapshot-restored", {
-      snapshotId: source.id,
+      snapshotId: source.id || null,
       method: result.method,
       revision: runtime.revision
     });
@@ -718,7 +868,7 @@
       validation: validation,
       method: result.method,
       revision: runtime.revision,
-      snapshotId: source.id
+      snapshotId: source.id || null
     });
   }
 
@@ -728,13 +878,11 @@
     return {
       id: asString(source.id, createId("change")),
       type: asString(source.type, "state-change"),
-      branch: asString(source.branch, ""),
-      entityId: asString(source.entityId, ""),
+      branch: asString(source.branch),
+      entityId: asString(source.entityId),
       operation: asString(source.operation, "update"),
-      payload: source.payload === undefined
-        ? null
-        : safeClone(source.payload),
-      revision: asNumber(source.revision, runtime.revision + 1),
+      payload: source.payload === undefined ? null : safeClone(source.payload),
+      revision: Math.max(0, asNumber(source.revision, runtime.revision + 1)),
       deviceId: asString(source.deviceId, runtime.deviceId),
       sessionId: asString(source.sessionId, runtime.sessionId),
       createdAt: asString(source.createdAt, nowIso()),
@@ -743,7 +891,7 @@
         checksum(source.payload === undefined ? source : source.payload)
       ),
       metadata: safeClone(asObject(source.metadata)),
-      attempts: asNumber(source.attempts, 0),
+      attempts: Math.max(0, asNumber(source.attempts, 0)),
       status: asString(source.status, "pending")
     };
   }
@@ -752,9 +900,23 @@
     var settings = asObject(options);
     var normalized = normalizeChange(change);
 
+    if (
+      runtime.applyingRemoteState ||
+      Date.now() < runtime.suppressStoreEventsUntil
+    ) {
+      return {
+        success: false,
+        suppressed: true,
+        duplicate: false,
+        change: safeClone(normalized),
+        queueSize: runtime.queue.length
+      };
+    }
+
     var duplicate = runtime.queue.some(function find(item) {
       return item.id === normalized.id ||
         (
+          item.status === "pending" &&
           item.checksum === normalized.checksum &&
           item.branch === normalized.branch &&
           item.entityId === normalized.entityId &&
@@ -766,16 +928,13 @@
       return {
         success: false,
         duplicate: true,
+        suppressed: false,
         change: safeClone(normalized),
         queueSize: runtime.queue.length
       };
     }
 
-    runtime.revision = Math.max(
-      runtime.revision + 1,
-      normalized.revision
-    );
-
+    runtime.revision = Math.max(runtime.revision + 1, normalized.revision);
     normalized.revision = runtime.revision;
     runtime.queue.push(normalized);
 
@@ -808,6 +967,7 @@
     return {
       success: true,
       duplicate: false,
+      suppressed: false,
       change: safeClone(normalized),
       queueSize: runtime.queue.length
     };
@@ -815,17 +975,17 @@
 
   function clearQueue(options) {
     var settings = asObject(options);
-    var removed = runtime.queue.length;
+    var before = runtime.queue.length;
 
     if (settings.status) {
       runtime.queue = runtime.queue.filter(function retain(change) {
         return change.status !== settings.status;
       });
-      removed -= runtime.queue.length;
     } else {
       runtime.queue = [];
     }
 
+    var removed = before - runtime.queue.length;
     persistQueue();
 
     addHistory("queue-cleared", {
@@ -857,10 +1017,8 @@
       });
     }
 
-    if (settings.limit) {
-      queue = queue.slice(
-        -Math.max(0, asNumber(settings.limit, queue.length))
-      );
+    if (settings.limit !== undefined) {
+      queue = queue.slice(-Math.max(0, asNumber(settings.limit, queue.length)));
     }
 
     return safeClone(queue);
@@ -919,9 +1077,7 @@
       typeof adapter.push !== "function" &&
       typeof adapter.pull !== "function"
     ) {
-      throw new TypeError(
-        "Sync adapter must provide push() or pull()."
-      );
+      throw new TypeError("Sync adapter must provide push() or pull().");
     }
 
     runtime.adapters.set(adapterName, Object.assign({
@@ -943,16 +1099,11 @@
   function unregisterAdapter(name) {
     var adapterName = asString(name);
 
-    if (adapterName === DEFAULT_ADAPTER) {
-      return false;
-    }
+    if (adapterName === DEFAULT_ADAPTER) return false;
 
     var removed = runtime.adapters.delete(adapterName);
 
-    if (
-      removed &&
-      runtime.activeAdapter === adapterName
-    ) {
+    if (removed && runtime.activeAdapter === adapterName) {
       runtime.activeAdapter = DEFAULT_ADAPTER;
       persistMeta();
     }
@@ -974,9 +1125,7 @@
   function setActiveAdapter(name) {
     var adapterName = asString(name);
 
-    if (!runtime.adapters.has(adapterName)) {
-      return false;
-    }
+    if (!runtime.adapters.has(adapterName)) return false;
 
     runtime.activeAdapter = adapterName;
     persistMeta();
@@ -999,9 +1148,7 @@
         active: name === runtime.activeAdapter,
         canPush: typeof adapter.push === "function",
         canPull: typeof adapter.pull === "function",
-        available: Boolean(
-          safeCall(adapter.isAvailable, true, adapter)
-        )
+        available: Boolean(safeCall(adapter.isAvailable, true, adapter))
       };
     });
   }
@@ -1039,8 +1186,7 @@
 
     var localRevision = asNumber(local.revision, 0);
     var remoteRevision = asNumber(remote.revision, 0);
-    var sameChecksum =
-      asString(local.checksum) === asString(remote.checksum);
+    var sameChecksum = asString(local.checksum) === asString(remote.checksum);
 
     if (sameChecksum) {
       return {
@@ -1077,19 +1223,29 @@
     };
   }
 
+  function recordKey(item) {
+    var record = asObject(item);
+    return asString(
+      record.id,
+      [
+        asString(record.title, record.name),
+        asString(record.startDate, record.date),
+        checksum(record)
+      ].join("|")
+    );
+  }
+
   function mergeArrays(existing, incoming) {
     var result = asArray(existing).map(safeClone);
     var index = new Map();
 
     result.forEach(function indexItem(item, position) {
-      var record = asObject(item);
-      var key = asString(record.id, checksum(record));
-      index.set(key, position);
+      index.set(recordKey(item), position);
     });
 
     asArray(incoming).forEach(function mergeItem(item) {
       var record = asObject(item);
-      var key = asString(record.id, checksum(record));
+      var key = recordKey(record);
 
       if (!index.has(key)) {
         result.push(safeClone(record));
@@ -1099,16 +1255,12 @@
 
       var position = index.get(key);
       var existingRecord = asObject(result[position]);
-      var existingUpdated = new Date(
-        existingRecord.updatedAt ||
-        existingRecord.createdAt ||
-        0
-      ).getTime();
-      var incomingUpdated = new Date(
-        record.updatedAt ||
-        record.createdAt ||
-        0
-      ).getTime();
+      var existingUpdated = parseTime(
+        existingRecord.updatedAt || existingRecord.createdAt
+      );
+      var incomingUpdated = parseTime(
+        record.updatedAt || record.createdAt
+      );
 
       result[position] = incomingUpdated >= existingUpdated
         ? Object.assign({}, existingRecord, safeClone(record))
@@ -1122,9 +1274,7 @@
     var local = asObject(localState);
     var remote = asObject(remoteState);
     var merged = {};
-    var keys = new Set(
-      Object.keys(local).concat(Object.keys(remote))
-    );
+    var keys = new Set(Object.keys(local).concat(Object.keys(remote)));
 
     keys.forEach(function mergeKey(key) {
       var localValue = local[key];
@@ -1149,23 +1299,14 @@
   }
 
   function resolveConflict(localSnapshot, remoteSnapshot, strategy) {
-    var mode = asString(
-      strategy,
-      DEFAULT_CONFLICT_STRATEGY
-    );
+    var mode = asString(strategy, DEFAULT_CONFLICT_STRATEGY);
 
     if (mode === "local") {
-      return {
-        strategy: mode,
-        snapshot: localSnapshot
-      };
+      return { strategy: mode, snapshot: localSnapshot };
     }
 
     if (mode === "remote") {
-      return {
-        strategy: mode,
-        snapshot: remoteSnapshot
-      };
+      return { strategy: mode, snapshot: remoteSnapshot };
     }
 
     if (mode === "merge") {
@@ -1189,18 +1330,12 @@
       };
     }
 
-    var localTime = new Date(
-      asObject(localSnapshot).generatedAt || 0
-    ).getTime();
-    var remoteTime = new Date(
-      asObject(remoteSnapshot).generatedAt || 0
-    ).getTime();
+    var localTime = parseTime(asObject(localSnapshot).generatedAt);
+    var remoteTime = parseTime(asObject(remoteSnapshot).generatedAt);
 
     return {
       strategy: "latest",
-      snapshot: remoteTime >= localTime
-        ? remoteSnapshot
-        : localSnapshot
+      snapshot: remoteTime >= localTime ? remoteSnapshot : localSnapshot
     };
   }
 
@@ -1228,7 +1363,8 @@
 
   function push(options) {
     var settings = asObject(options);
-    var adapter = getAdapter(settings.adapter);
+    var adapterName = asString(settings.adapter, runtime.activeAdapter);
+    var adapter = getAdapter(adapterName);
 
     if (!adapter || typeof adapter.push !== "function") {
       return Promise.resolve({
@@ -1259,7 +1395,7 @@
       source: "local",
       persist: settings.persistSnapshot !== false,
       metadata: {
-        adapter: asString(settings.adapter, runtime.activeAdapter)
+        adapter: adapterName
       }
     });
 
@@ -1281,9 +1417,7 @@
         var result = asObject(response);
 
         if (result.success === false) {
-          throw new Error(
-            asString(result.message, "Sync push failed.")
-          );
+          throw new Error(asString(result.message, "Sync push failed."));
         }
 
         runtime.lastPushAt = nowIso();
@@ -1294,18 +1428,17 @@
         );
 
         var syncedChanges = markQueueSynced(runtime.revision);
-
         persistMeta();
 
         addHistory("push-completed", {
-          adapter: runtime.activeAdapter,
+          adapter: adapterName,
           revision: runtime.revision,
           syncedChanges: syncedChanges,
           snapshotId: snapshot.id
         });
 
         emit("travel-sync:pushed", {
-          adapter: runtime.activeAdapter,
+          adapter: adapterName,
           revision: runtime.revision,
           syncedChanges: syncedChanges,
           snapshotId: snapshot.id,
@@ -1319,7 +1452,7 @@
 
         return {
           success: true,
-          adapter: runtime.activeAdapter,
+          adapter: adapterName,
           revision: runtime.revision,
           syncedChanges: syncedChanges,
           snapshot: snapshot,
@@ -1339,7 +1472,7 @@
         persistQueue();
 
         addHistory("push-failed", {
-          adapter: runtime.activeAdapter,
+          adapter: adapterName,
           message: error.message
         });
 
@@ -1349,7 +1482,7 @@
 
         return {
           success: false,
-          adapter: runtime.activeAdapter,
+          adapter: adapterName,
           error: {
             name: error.name,
             message: error.message
@@ -1360,7 +1493,8 @@
 
   function pull(options) {
     var settings = asObject(options);
-    var adapter = getAdapter(settings.adapter);
+    var adapterName = asString(settings.adapter, runtime.activeAdapter);
+    var adapter = getAdapter(adapterName);
 
     if (!adapter || typeof adapter.pull !== "function") {
       return Promise.resolve({
@@ -1407,7 +1541,7 @@
           return {
             success: true,
             empty: true,
-            adapter: runtime.activeAdapter
+            adapter: adapterName
           };
         }
 
@@ -1423,11 +1557,7 @@
           persist: false
         });
 
-        var comparison = compareSnapshots(
-          localSnapshot,
-          remoteSnapshot
-        );
-
+        var comparison = compareSnapshots(localSnapshot, remoteSnapshot);
         var selectedSnapshot = null;
         var conflictResolution = null;
 
@@ -1436,19 +1566,14 @@
           comparison.relation === "remote-newer"
         ) {
           selectedSnapshot = remoteSnapshot;
-        } else if (
-          comparison.relation === "conflict"
-        ) {
+        } else if (comparison.relation === "conflict") {
           conflictResolution = resolveConflict(
             localSnapshot,
             remoteSnapshot,
-            settings.conflictStrategy ||
-              runtime.options.conflictStrategy
+            settings.conflictStrategy || runtime.options.conflictStrategy
           );
           selectedSnapshot = conflictResolution.snapshot;
-        } else if (
-          comparison.relation === "same"
-        ) {
+        } else if (comparison.relation === "same") {
           runtime.lastSyncAt = runtime.lastPullAt;
           runtime.revision = Math.max(
             runtime.revision,
@@ -1461,7 +1586,7 @@
             empty: false,
             unchanged: true,
             comparison: comparison,
-            adapter: runtime.activeAdapter
+            adapter: adapterName
           };
         } else {
           return {
@@ -1469,7 +1594,7 @@
             empty: false,
             localNewer: true,
             comparison: comparison,
-            adapter: runtime.activeAdapter
+            adapter: adapterName
           };
         }
 
@@ -1494,7 +1619,7 @@
           persistMeta();
 
           addHistory("pull-completed", {
-            adapter: runtime.activeAdapter,
+            adapter: adapterName,
             revision: runtime.revision,
             snapshotId: selectedSnapshot.id,
             relation: comparison.relation,
@@ -1509,7 +1634,7 @@
           });
 
           emit("travel-sync:pulled", {
-            adapter: runtime.activeAdapter,
+            adapter: adapterName,
             revision: runtime.revision,
             snapshotId: selectedSnapshot.id,
             comparison: comparison,
@@ -1524,8 +1649,9 @@
           return {
             success: true,
             empty: false,
-            applied: true,
-            adapter: runtime.activeAdapter,
+            applied: !restored.unchanged,
+            unchanged: restored.unchanged === true,
+            adapter: adapterName,
             snapshot: safeClone(selectedSnapshot),
             comparison: comparison,
             conflictResolution: conflictResolution
@@ -1538,7 +1664,7 @@
         runtime.lastError = error;
 
         addHistory("pull-failed", {
-          adapter: runtime.activeAdapter,
+          adapter: adapterName,
           message: error.message
         });
 
@@ -1548,7 +1674,7 @@
 
         return {
           success: false,
-          adapter: runtime.activeAdapter,
+          adapter: adapterName,
           error: {
             name: error.name,
             message: error.message
@@ -1569,13 +1695,18 @@
     }
 
     runtime.syncing = true;
-    notify("sync-started", {
-      adapter: asString(settings.adapter, runtime.activeAdapter)
-    });
+    runtime.activeSyncId = createId("sync");
 
+    var syncId = runtime.activeSyncId;
     var direction = asString(settings.direction, "both");
     var pullResult = null;
     var pushResult = null;
+
+    notify("sync-started", {
+      syncId: syncId,
+      adapter: asString(settings.adapter, runtime.activeAdapter),
+      direction: direction
+    });
 
     var chain = Promise.resolve();
 
@@ -1595,11 +1726,12 @@
           pullResult.success === false &&
           settings.pushAfterPullFailure !== true
         ) {
-          return {
+          pushResult = {
             success: false,
             skipped: true,
             message: "Push skipped because pull failed."
           };
+          return pushResult;
         }
 
         return push(settings).then(function savePush(result) {
@@ -1619,6 +1751,7 @@
           (!pushResult || pushResult.success !== false);
 
         addHistory("sync-completed", {
+          syncId: syncId,
           success: success,
           direction: direction,
           pull: pullResult,
@@ -1626,16 +1759,14 @@
         });
 
         notify("sync-completed", {
+          syncId: syncId,
           success: success,
           direction: direction
         });
 
         var interfaceApi = getUI();
 
-        if (
-          interfaceApi &&
-          settings.showToast === true
-        ) {
+        if (interfaceApi && settings.showToast === true) {
           safeCall(interfaceApi.toast, null, interfaceApi, [
             success
               ? "تمت مزامنة بيانات السفر."
@@ -1646,6 +1777,7 @@
 
         return {
           success: success,
+          syncId: syncId,
           direction: direction,
           pull: pullResult,
           push: pushResult,
@@ -1656,16 +1788,19 @@
         runtime.lastError = error;
 
         addHistory("sync-failed", {
+          syncId: syncId,
           direction: direction,
           message: error.message
         });
 
         notify("sync-failed", {
+          syncId: syncId,
           message: error.message
         });
 
         return {
           success: false,
+          syncId: syncId,
           direction: direction,
           error: {
             name: error.name,
@@ -1674,15 +1809,15 @@
         };
       })
       .finally(function releaseSync() {
-        runtime.syncing = false;
+        if (runtime.activeSyncId === syncId) {
+          runtime.syncing = false;
+          runtime.activeSyncId = null;
+        }
       });
   }
 
   function scheduleSync(reason) {
-    if (
-      runtime.options.autoSync === false ||
-      runtime.destroyed
-    ) {
+    if (runtime.options.autoSync === false || runtime.destroyed) {
       return false;
     }
 
@@ -1693,18 +1828,15 @@
     runtime.debounceTimer = global.setTimeout(function runScheduledSync() {
       runtime.debounceTimer = null;
 
-      if (
-        runtime.online ||
-        runtime.activeAdapter === DEFAULT_ADAPTER
-      ) {
+      if (runtime.online || runtime.activeAdapter === DEFAULT_ADAPTER) {
         sync({
           reason: reason || "scheduled",
           showToast: false
         });
       }
-    }, asNumber(
-      runtime.options.debounceMs,
-      DEFAULT_DEBOUNCE_MS
+    }, Math.max(
+      0,
+      asNumber(runtime.options.debounceMs, DEFAULT_DEBOUNCE_MS)
     ));
 
     return true;
@@ -1713,26 +1845,19 @@
   function startInterval() {
     stopInterval();
 
-    if (runtime.options.autoSync === false) {
-      return;
-    }
+    if (runtime.options.autoSync === false) return;
 
     var interval = asNumber(
       runtime.options.syncIntervalMs,
       DEFAULT_SYNC_INTERVAL_MS
     );
 
-    if (interval <= 0) {
-      return;
-    }
+    if (interval <= 0) return;
 
     runtime.syncTimer = global.setInterval(function periodicSync() {
       if (
         !runtime.syncing &&
-        (
-          runtime.online ||
-          runtime.activeAdapter === DEFAULT_ADAPTER
-        )
+        (runtime.online || runtime.activeAdapter === DEFAULT_ADAPTER)
       ) {
         sync({
           reason: "interval",
@@ -1749,6 +1874,27 @@
     }
   }
 
+  function rememberMessage(message) {
+    var id = asString(asObject(message).id);
+
+    if (!id) return true;
+    if (runtime.seenMessages.has(id)) return false;
+
+    runtime.seenMessages.set(id, Date.now());
+
+    if (runtime.seenMessages.size > MAX_SEEN_MESSAGES) {
+      var oldest = Array.from(runtime.seenMessages.entries())
+        .sort(function sort(a, b) { return a[1] - b[1]; })
+        .slice(0, runtime.seenMessages.size - MAX_SEEN_MESSAGES);
+
+      oldest.forEach(function remove(entry) {
+        runtime.seenMessages.delete(entry[0]);
+      });
+    }
+
+    return true;
+  }
+
   function broadcast(payload) {
     var message = Object.assign({
       id: createId("broadcast"),
@@ -1758,22 +1904,23 @@
       sentAt: nowIso()
     }, asObject(payload));
 
+    runtime.lastBroadcastId = message.id;
+    rememberMessage(message);
+
     if (runtime.channel) {
       safeCall(runtime.channel.postMessage, null, runtime.channel, [message]);
     }
 
     storageSet(STORAGE_KEYS.BROADCAST, message);
-    return message;
+    return safeClone(message);
   }
 
   function handleBroadcast(message) {
     var payload = asObject(message);
 
-    if (
-      payload.sessionId === runtime.sessionId ||
-      payload.deviceId === runtime.deviceId &&
-      payload.sessionId === runtime.sessionId
-    ) {
+    if (!rememberMessage(payload)) return;
+
+    if (payload.sessionId === runtime.sessionId) {
       return;
     }
 
@@ -1790,20 +1937,14 @@
       }
     }
 
-    if (
-      payload.type === "snapshot-applied" &&
-      payload.snapshot
-    ) {
+    if (payload.type === "snapshot-applied" && payload.snapshot) {
       var remoteSnapshot = payload.snapshot;
       var localSnapshot = createSnapshot({
         source: "broadcast-compare",
         persist: false
       });
 
-      var comparison = compareSnapshots(
-        localSnapshot,
-        remoteSnapshot
-      );
+      var comparison = compareSnapshots(localSnapshot, remoteSnapshot);
 
       if (
         comparison.relation === "remote-newer" ||
@@ -1813,8 +1954,7 @@
           remote: true,
           source: "broadcast-channel",
           silent: true,
-          allowDirectState:
-            runtime.options.allowDirectState === true
+          allowDirectState: runtime.options.allowDirectState === true
         });
       }
     }
@@ -1874,50 +2014,35 @@
     notify("offline", null);
   }
 
-  function refreshIntelligence(reason) {
-    var brain = getBrain();
-
-    if (brain && typeof brain.refresh === "function") {
-      safeCall(brain.refresh, null, brain, [reason || "travel-sync"]);
-    }
-
-    emit("store:updated", {
-      source: "travel-sync",
-      reason: reason || "refresh",
-      generatedAt: nowIso()
-    });
-  }
-
   function handleStoreChange(payload, sourceName) {
     if (
       runtime.applyingRemoteState ||
-      runtime.destroyed
+      runtime.destroyed ||
+      Date.now() < runtime.suppressStoreEventsUntil
     ) {
       return;
     }
 
     var source = asObject(payload);
-    var change = {
+
+    if (
+      asString(source.source) === "travel-sync" ||
+      asString(asObject(source.meta).source) === "travel-sync"
+    ) {
+      return;
+    }
+
+    queueChange({
       type: asString(source.type, "store-change"),
-      branch: asString(
-        source.branch,
-        asString(source.collection, "")
-      ),
-      entityId: asString(
-        source.entityId,
-        asString(source.id, "")
-      ),
+      branch: asString(source.branch, asString(source.collection)),
+      entityId: asString(source.entityId, asString(source.id)),
       operation: asString(source.operation, "update"),
-      payload: source.payload !== undefined
-        ? source.payload
-        : source,
+      payload: source.payload !== undefined ? source.payload : source,
       metadata: {
         event: sourceName || "store",
         source: asString(source.source, "store")
       }
-    };
-
-    queueChange(change);
+    });
   }
 
   function bindStore() {
@@ -1929,9 +2054,12 @@
         null,
         store,
         [function onStoreUpdate(nextState, meta) {
+          var metadata = asObject(meta);
+
           if (
             runtime.applyingRemoteState ||
-            asObject(meta).source === "travel-sync"
+            Date.now() < runtime.suppressStoreEventsUntil ||
+            asString(metadata.source) === "travel-sync"
           ) {
             return;
           }
@@ -1942,10 +2070,7 @@
             operation: "replace",
             payload: nextState,
             metadata: {
-              source: asString(
-                asObject(meta).source,
-                "store-subscription"
-              )
+              source: asString(metadata.source, "store-subscription")
             }
           });
         }]
@@ -1953,14 +2078,27 @@
     }
   }
 
-  function bindEvents() {
-    var events = getEvents();
-
-    if (!events) {
+  function bindDomEvent(name, handler) {
+    if (
+      !global.document ||
+      typeof global.document.addEventListener !== "function"
+    ) {
       return;
     }
 
-    [
+    var wrapped = function wrappedDomEvent(event) {
+      handler(event && event.detail);
+    };
+
+    global.document.addEventListener(name, wrapped);
+
+    runtime.domUnsubscribers.push(function removeDomEvent() {
+      global.document.removeEventListener(name, wrapped);
+    });
+  }
+
+  function bindEvents() {
+    var eventNames = [
       "store:updated",
       "trip:created",
       "trip:updated",
@@ -1978,43 +2116,49 @@
       "wishlist:updated",
       "annual-plan:updated",
       "travel-import:completed"
-    ].forEach(function bindEvent(name) {
-      var handler = function eventHandler(payload) {
-        if (
-          asObject(payload).source === "travel-sync"
-        ) {
-          return;
-        }
+    ];
 
+    var events = getEvents();
+
+    eventNames.forEach(function bindEvent(name) {
+      var handler = function eventHandler(payload) {
         handleStoreChange(payload, name);
       };
 
-      var unsubscribe =
-        safeCall(events.on, null, events, [name, handler]) ||
-        safeCall(events.subscribe, null, events, [name, handler]);
+      if (events) {
+        var unsubscribe =
+          safeCall(events.on, null, events, [name, handler]) ||
+          safeCall(events.subscribe, null, events, [name, handler]);
 
-      if (typeof unsubscribe === "function") {
-        runtime.eventUnsubscribers.push(unsubscribe);
+        if (typeof unsubscribe === "function") {
+          runtime.eventUnsubscribers.push(unsubscribe);
+        }
       }
+
+      bindDomEvent(name, handler);
     });
 
     var syncRequestHandler = function syncRequest(payload) {
       sync(asObject(payload));
     };
 
-    var syncRequestUnsubscribe =
-      safeCall(events.on, null, events, [
-        "travel-sync:request",
-        syncRequestHandler
-      ]) ||
-      safeCall(events.subscribe, null, events, [
-        "travel-sync:request",
-        syncRequestHandler
-      ]);
+    if (events) {
+      var syncRequestUnsubscribe =
+        safeCall(events.on, null, events, [
+          "travel-sync:request",
+          syncRequestHandler
+        ]) ||
+        safeCall(events.subscribe, null, events, [
+          "travel-sync:request",
+          syncRequestHandler
+        ]);
 
-    if (typeof syncRequestUnsubscribe === "function") {
-      runtime.eventUnsubscribers.push(syncRequestUnsubscribe);
+      if (typeof syncRequestUnsubscribe === "function") {
+        runtime.eventUnsubscribers.push(syncRequestUnsubscribe);
+      }
     }
+
+    bindDomEvent("travel-sync:request", syncRequestHandler);
   }
 
   function requestSyncAcrossTabs() {
@@ -2038,17 +2182,27 @@
       exportedAt: nowIso(),
       deviceId: runtime.deviceId,
       snapshot: snapshot,
-      queue: settings.includeQueue === true
-        ? getQueue()
-        : [],
+      queue: settings.includeQueue === true ? getQueue() : [],
       metadata: safeClone(asObject(settings.metadata))
     };
   }
 
   function importSyncPackage(input, options) {
-    var source = typeof input === "string"
-      ? safeCall(JSON.parse, null, JSON, [input])
-      : input;
+    var source = input;
+
+    if (typeof input === "string") {
+      try {
+        source = JSON.parse(input);
+      } catch (error) {
+        return Promise.resolve({
+          success: false,
+          error: {
+            name: "SyncPackageParseError",
+            message: error.message
+          }
+        });
+      }
+    }
 
     var packageData = asObject(source);
     var snapshot = packageData.snapshot || packageData;
@@ -2069,7 +2223,7 @@
       });
     }
 
-    if (settings.limit) {
+    if (settings.limit !== undefined) {
       history = history.slice(
         -Math.max(0, asNumber(settings.limit, history.length))
       );
@@ -2112,6 +2266,7 @@
       initialized: runtime.initialized,
       destroyed: runtime.destroyed,
       syncing: runtime.syncing,
+      activeSyncId: runtime.activeSyncId,
       online: runtime.online,
       deviceId: runtime.deviceId,
       sessionId: runtime.sessionId,
@@ -2127,6 +2282,7 @@
       lastPullAt: runtime.lastPullAt,
       lastLocalChangeAt: runtime.lastLocalChangeAt,
       lastRemoteChangeAt: runtime.lastRemoteChangeAt,
+      lastAppliedChecksum: runtime.lastAppliedChecksum || null,
       options: safeClone(runtime.options),
       generatedAt: nowIso()
     };
@@ -2142,9 +2298,11 @@
       initialized: runtime.initialized,
       destroyed: runtime.destroyed,
       syncing: runtime.syncing,
+      activeSyncId: runtime.activeSyncId,
       online: runtime.online,
       integrations: {
         store: Boolean(store),
+        storeVersion: store ? asString(store.version) : null,
         storeRead: Boolean(
           store && (
             typeof store.getState === "function" ||
@@ -2163,18 +2321,19 @@
             typeof store.dispatch === "function"
           )
         ),
-        storage: Boolean(
-          getStorage() || global.localStorage
-        ),
+        storage: Boolean(getStorage() || global.localStorage),
         events: Boolean(getEvents()),
+        domEvents: Boolean(global.document),
         ui: Boolean(getUI()),
         brain: Boolean(getBrain()),
         assistant: Boolean(getAssistant()),
+        importEngine: Boolean(getImportEngine()),
         broadcastChannel: Boolean(runtime.channel),
         localAdapter: Boolean(local)
       },
       queueSize: runtime.queue.length,
       adapterCount: runtime.adapters.size,
+      seenMessageCount: runtime.seenMessages.size,
       lastError: runtime.lastError
         ? {
           name: runtime.lastError.name,
@@ -2285,8 +2444,13 @@
       safeCall(fn, null);
     });
 
+    runtime.domUnsubscribers.forEach(function unsubscribeDom(fn) {
+      safeCall(fn, null);
+    });
+
     runtime.storeUnsubscribe = null;
     runtime.eventUnsubscribers = [];
+    runtime.domUnsubscribers = [];
 
     if (global.removeEventListener) {
       global.removeEventListener("storage", handleStorageEvent);
@@ -2297,7 +2461,10 @@
     closeBroadcastChannel();
 
     runtime.listeners.clear();
+    runtime.seenMessages.clear();
     runtime.syncing = false;
+    runtime.activeSyncId = null;
+    runtime.applyingRemoteState = false;
     runtime.initialized = false;
     runtime.destroyed = true;
 
@@ -2347,27 +2514,32 @@
     getState: getStatus,
     getHealth: getHealth,
     updateOptions: updateOptions,
-    subscribe: subscribe
+    subscribe: subscribe,
+
+    utils: Object.freeze({
+      checksum: checksum,
+      compareSnapshots: compareSnapshots,
+      mergeStates: mergeStates
+    })
   };
 
-  global.TravelSync = Object.freeze(api);
+  var frozenApi = Object.freeze(api);
+
+  global.TravelSync = frozenApi;
+  global.TIC.TravelSync = frozenApi;
 
   if (global.document) {
     if (global.document.readyState === "loading") {
       global.document.addEventListener(
         "DOMContentLoaded",
         function autoInitOnReady() {
-          if (!runtime.initialized && !runtime.destroyed) {
-            init();
-          }
+          if (!runtime.initialized && !runtime.destroyed) init();
         },
         { once: true }
       );
     } else {
       global.setTimeout(function autoInit() {
-        if (!runtime.initialized && !runtime.destroyed) {
-          init();
-        }
+        if (!runtime.initialized && !runtime.destroyed) init();
       }, 0);
     }
   }
