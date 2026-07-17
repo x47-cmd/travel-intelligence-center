@@ -1,7 +1,8 @@
 /* =========================================================
    Travel Intelligence Center
-   Trips Page Module V3.6.0
-   Guide & Passport Country-Code Integration Edition
+   Trips Page Module V3.7.0
+   Intelligence, Sync & Store V2.5 Integration Edition
+   Part 1 / Core, Guards, Integrations & Scoped Styles
 
    File Path:
    js/pages/trips.js
@@ -17,6 +18,10 @@
    - Persists ISO countryCode for historical and duplicated trips.
    - Lets users open the matching country guide from Passport.
    - Keeps Guide visited-country statistics synchronized with Passport.
+   - Integrates TravelBrain, TravelAssistant, TravelImport and TravelSync.
+   - Integrates Store V2.5.0 and App V4.2.0 without hard dependency.
+   - Prevents duplicate listeners, duplicate refreshes and render loops.
+   - Defers refresh while scrolling, swiping, typing or editing forms.
    - Preserves Store / Router / UI / Trip Form integrations.
    - Injects all scoped styles from this file.
 
@@ -28,6 +33,11 @@
    - js/data/world-data.js
    - js/features/guide-engine.js
    - js/features/trip-form.js
+   - js/features/travel-brain.js
+   - js/features/travel-assistant.js
+   - js/features/travel-import.js
+   - js/features/travel-sync.js
+   - js/app.js
 
    Global APIs:
    - window.TIC.Pages.trips
@@ -38,12 +48,16 @@
   "use strict";
 
   const PAGE_ID = "trips";
-  const PAGE_VERSION = "3.6.0";
-  const STYLE_ID = "tic-trips-v360-styles";
+  const PAGE_VERSION = "3.7.0";
+  const STYLE_ID = "tic-trips-v370-styles";
+  const RENDER_IDLE_DELAY = 120;
+  const INTERACTION_RELEASE_DELAY = 280;
+  const MAX_REFRESH_WAIT = 1800;
 
   const state = {
     initialized: false,
     mounted: false,
+    destroyed: false,
     container: null,
     activeView: "hub",
     activeTab: "upcoming",
@@ -58,10 +72,31 @@
     },
     memoryDraft: null,
     unsubscribeStore: null,
+    unsubscribeSync: null,
+    unsubscribeBrain: null,
+    unsubscribeAssistant: null,
     actionUnsubscribers: [],
+    integrationUnsubscribers: [],
     subscribers: new Set(),
     lastSnapshot: null,
-    refreshQueued: false
+    lastSnapshotSignature: "",
+    lastRenderedSignature: "",
+    lastRefreshReason: "",
+    refreshQueued: false,
+    refreshRequestedAt: 0,
+    refreshTimer: null,
+    renderTimer: null,
+    interactionTimer: null,
+    scrollTimer: null,
+    isRendering: false,
+    isRefreshing: false,
+    isUserInteracting: false,
+    isScrolling: false,
+    isTouching: false,
+    isTyping: false,
+    isFormOpen: false,
+    pendingRefreshReason: "",
+    mountedAt: 0
   };
 
   const STATUS_LABELS = Object.freeze({
@@ -170,6 +205,77 @@
       .replace(/\s+/g, " ")
       .trim();
 
+  const stableStringify = (value) => {
+    const seen = new WeakSet();
+
+    const normalize = (entry) => {
+      if (Array.isArray(entry)) {
+        return entry.map(normalize);
+      }
+
+      if (isObject(entry)) {
+        if (seen.has(entry)) return "[Circular]";
+        seen.add(entry);
+
+        return Object.keys(entry)
+          .sort()
+          .reduce((result, key) => {
+            const current = entry[key];
+
+            if (
+              typeof current !== "function" &&
+              current !== undefined
+            ) {
+              result[key] = normalize(current);
+            }
+
+            return result;
+          }, {});
+      }
+
+      return entry;
+    };
+
+    try {
+      return JSON.stringify(normalize(value));
+    } catch (_) {
+      return "";
+    }
+  };
+
+  const createSignature = (value) => {
+    const source = stableStringify(value);
+    let hash = 2166136261;
+
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    return `${source.length}:${(hash >>> 0).toString(36)}`;
+  };
+
+  const callSafely = (target, methodNames, ...args) => {
+    if (!target) return undefined;
+
+    for (const methodName of methodNames) {
+      const method = target?.[methodName];
+
+      if (typeof method === "function") {
+        try {
+          return method.apply(target, args);
+        } catch (error) {
+          console.warn(
+            `TIC Trips integration method failed: ${methodName}`,
+            error
+          );
+        }
+      }
+    }
+
+    return undefined;
+  };
+
   const getStore = () =>
     window.TIC?.Store ||
     window.TICStore ||
@@ -194,12 +300,58 @@
 
   const getGuideEngine = () =>
     window.GuideEngine ||
+    window.TIC?.Features?.GuideEngine ||
     null;
 
   const getWorldGuideData = () =>
     window.WorldGuideData ||
     window.WorldData ||
+    window.TIC?.Data?.WorldGuideData ||
     null;
+
+  const getTravelBrain = () =>
+    window.TIC?.Features?.TravelBrain ||
+    window.TravelBrain ||
+    window.TICTravelBrain ||
+    null;
+
+  const getTravelAssistant = () =>
+    window.TIC?.Features?.TravelAssistant ||
+    window.TravelAssistant ||
+    window.TICTravelAssistant ||
+    null;
+
+  const getTravelImport = () =>
+    window.TIC?.Features?.TravelImport ||
+    window.TravelImport ||
+    window.TICTravelImport ||
+    null;
+
+  const getTravelSync = () =>
+    window.TIC?.Features?.TravelSync ||
+    window.TravelSync ||
+    window.TICTravelSync ||
+    null;
+
+  const getApp = () =>
+    window.TIC?.App ||
+    window.TICApp ||
+    window.App ||
+    null;
+
+  const getIntegrationRegistry = () => ({
+    store: getStore(),
+    router: getRouter(),
+    ui: getUI(),
+    tripForm: getTripForm(),
+    guideEngine: getGuideEngine(),
+    worldGuideData: getWorldGuideData(),
+    travelBrain: getTravelBrain(),
+    travelAssistant: getTravelAssistant(),
+    travelImport: getTravelImport(),
+    travelSync: getTravelSync(),
+    app: getApp()
+  });
 
   const resolveCountryRecord = (value, explicitCode = "") => {
     const guide = getGuideEngine();
@@ -305,6 +457,400 @@
     return payload;
   };
 
+  const isEditableTarget = (target) => {
+    if (!(target instanceof window.Element)) return false;
+
+    return Boolean(
+      target.closest(
+        [
+          "input",
+          "textarea",
+          "select",
+          "[contenteditable='true']",
+          "[data-trips-form]",
+          ".trips-modal",
+          ".country-sheet"
+        ].join(",")
+      )
+    );
+  };
+
+  const hasOpenOverlay = () =>
+    Boolean(
+      document.querySelector(
+        [
+          ".trips-modal-backdrop",
+          "[data-trip-form-modal]",
+          "[data-modal-open='true']"
+        ].join(",")
+      )
+    );
+
+  const isInteractionLocked = () =>
+    state.isRendering ||
+    state.isRefreshing ||
+    state.isUserInteracting ||
+    state.isScrolling ||
+    state.isTouching ||
+    state.isTyping ||
+    state.isFormOpen ||
+    hasOpenOverlay();
+
+  const clearTimer = (key) => {
+    if (!state[key]) return;
+    window.clearTimeout(state[key]);
+    state[key] = null;
+  };
+
+  const releaseInteractionLater = (
+    delay = INTERACTION_RELEASE_DELAY
+  ) => {
+    clearTimer("interactionTimer");
+
+    state.interactionTimer = window.setTimeout(() => {
+      state.isUserInteracting = false;
+      state.isTyping = false;
+      state.isTouching = false;
+      state.isFormOpen = hasOpenOverlay();
+
+      if (state.refreshQueued) {
+        requestDeferredRefresh(
+          state.pendingRefreshReason || "interaction-released",
+          { forceAfterWait: true }
+        );
+      }
+    }, delay);
+  };
+
+  const markInteraction = (kind = "interaction", target = null) => {
+    state.isUserInteracting = true;
+
+    if (kind === "scroll") state.isScrolling = true;
+    if (kind === "touch") state.isTouching = true;
+    if (kind === "typing" || isEditableTarget(target)) {
+      state.isTyping = true;
+    }
+
+    state.isFormOpen = hasOpenOverlay();
+    releaseInteractionLater();
+  };
+
+  const requestDeferredRefresh = (
+    reason = "unknown",
+    options = {}
+  ) => {
+    const {
+      force = false,
+      forceAfterWait = false,
+      delay = RENDER_IDLE_DELAY
+    } = options;
+
+    if (!state.mounted || state.destroyed) return false;
+
+    const now = Date.now();
+
+    if (!state.refreshRequestedAt) {
+      state.refreshRequestedAt = now;
+    }
+
+    state.refreshQueued = true;
+    state.pendingRefreshReason = text(reason, "unknown");
+
+    const waited = now - state.refreshRequestedAt;
+    const canForceAfterWait =
+      forceAfterWait && waited >= MAX_REFRESH_WAIT;
+
+    if (!force && !canForceAfterWait && isInteractionLocked()) {
+      releaseInteractionLater();
+      return false;
+    }
+
+    clearTimer("refreshTimer");
+
+    state.refreshTimer = window.setTimeout(() => {
+      if (
+        !force &&
+        !canForceAfterWait &&
+        isInteractionLocked()
+      ) {
+        requestDeferredRefresh(reason, {
+          forceAfterWait: true,
+          delay
+        });
+        return;
+      }
+
+      state.refreshQueued = false;
+      state.refreshRequestedAt = 0;
+      state.lastRefreshReason = text(reason, "unknown");
+      state.pendingRefreshReason = "";
+
+      emit("refresh-requested", {
+        reason: state.lastRefreshReason
+      });
+    }, Math.max(0, number(delay, RENDER_IDLE_DELAY)));
+
+    return true;
+  };
+
+  const attachInteractionGuards = () => {
+    const target = state.container || document;
+
+    const onPointerDown = (event) =>
+      markInteraction("touch", event.target);
+
+    const onPointerUp = () =>
+      releaseInteractionLater(180);
+
+    const onInput = (event) =>
+      markInteraction("typing", event.target);
+
+    const onFocusIn = (event) => {
+      if (isEditableTarget(event.target)) {
+        state.isTyping = true;
+        state.isFormOpen = hasOpenOverlay();
+      }
+    };
+
+    const onFocusOut = () =>
+      releaseInteractionLater(220);
+
+    const onScroll = () => {
+      state.isScrolling = true;
+      state.isUserInteracting = true;
+      clearTimer("scrollTimer");
+
+      state.scrollTimer = window.setTimeout(() => {
+        state.isScrolling = false;
+        releaseInteractionLater(160);
+      }, 140);
+    };
+
+    target.addEventListener("pointerdown", onPointerDown, {
+      passive: true
+    });
+    target.addEventListener("touchstart", onPointerDown, {
+      passive: true
+    });
+    target.addEventListener("pointerup", onPointerUp, {
+      passive: true
+    });
+    target.addEventListener("touchend", onPointerUp, {
+      passive: true
+    });
+    target.addEventListener("input", onInput, true);
+    target.addEventListener("change", onInput, true);
+    target.addEventListener("focusin", onFocusIn, true);
+    target.addEventListener("focusout", onFocusOut, true);
+    window.addEventListener("scroll", onScroll, {
+      passive: true
+    });
+
+    state.actionUnsubscribers.push(
+      () =>
+        target.removeEventListener(
+          "pointerdown",
+          onPointerDown
+        ),
+      () =>
+        target.removeEventListener(
+          "touchstart",
+          onPointerDown
+        ),
+      () =>
+        target.removeEventListener(
+          "pointerup",
+          onPointerUp
+        ),
+      () =>
+        target.removeEventListener(
+          "touchend",
+          onPointerUp
+        ),
+      () =>
+        target.removeEventListener("input", onInput, true),
+      () =>
+        target.removeEventListener("change", onInput, true),
+      () =>
+        target.removeEventListener(
+          "focusin",
+          onFocusIn,
+          true
+        ),
+      () =>
+        target.removeEventListener(
+          "focusout",
+          onFocusOut,
+          true
+        ),
+      () => window.removeEventListener("scroll", onScroll)
+    );
+  };
+
+  const subscribeIntegration = (
+    target,
+    eventNames,
+    handler
+  ) => {
+    if (!target || typeof handler !== "function") {
+      return null;
+    }
+
+    const names = Array.isArray(eventNames)
+      ? eventNames
+      : [eventNames];
+
+    for (const name of names) {
+      const result = callSafely(
+        target,
+        ["subscribe", "on", "addListener"],
+        name,
+        handler
+      );
+
+      if (typeof result === "function") {
+        return result;
+      }
+
+      if (
+        result &&
+        typeof result.unsubscribe === "function"
+      ) {
+        return () => result.unsubscribe();
+      }
+    }
+
+    return null;
+  };
+
+  const notifyIntelligenceLayer = (
+    eventName,
+    detail = {}
+  ) => {
+    const registry = getIntegrationRegistry();
+    const payload = {
+      source: PAGE_ID,
+      pageVersion: PAGE_VERSION,
+      event: eventName,
+      timestamp: new Date().toISOString(),
+      ...clone(detail)
+    };
+
+    callSafely(
+      registry.travelBrain,
+      [
+        "ingest",
+        "observe",
+        "track",
+        "handleEvent",
+        "dispatch"
+      ],
+      eventName,
+      payload
+    );
+
+    callSafely(
+      registry.travelAssistant,
+      [
+        "observe",
+        "track",
+        "handleEvent",
+        "dispatch"
+      ],
+      eventName,
+      payload
+    );
+
+    callSafely(
+      registry.travelSync,
+      [
+        "queue",
+        "enqueue",
+        "markDirty",
+        "notify",
+        "dispatch"
+      ],
+      eventName,
+      payload
+    );
+
+    callSafely(
+      registry.app,
+      ["emit", "dispatch", "notify"],
+      `trips:${eventName}`,
+      payload
+    );
+
+    return payload;
+  };
+
+  const registerIntegrationListeners = () => {
+    state.integrationUnsubscribers.splice(0).forEach(
+      (unsubscribe) => {
+        try {
+          unsubscribe?.();
+        } catch (_) {
+          // Ignore stale integration listeners.
+        }
+      }
+    );
+
+    const registry = getIntegrationRegistry();
+
+    const onExternalChange = (payload = {}) => {
+      const source = text(
+        payload?.source ||
+        payload?.detail?.source
+      ).toLowerCase();
+
+      if (
+        source === PAGE_ID ||
+        source === "tic-trips-page"
+      ) {
+        return;
+      }
+
+      requestDeferredRefresh(
+        payload?.reason ||
+        payload?.type ||
+        "external-integration-change",
+        { forceAfterWait: true }
+      );
+    };
+
+    [
+      subscribeIntegration(
+        registry.travelSync,
+        ["change", "synced", "remote-change", "updated"],
+        onExternalChange
+      ),
+      subscribeIntegration(
+        registry.travelImport,
+        ["imported", "completed", "change"],
+        onExternalChange
+      ),
+      subscribeIntegration(
+        registry.travelBrain,
+        ["recommendation", "insight", "change"],
+        onExternalChange
+      ),
+      subscribeIntegration(
+        registry.travelAssistant,
+        ["action", "change", "updated"],
+        onExternalChange
+      ),
+      subscribeIntegration(
+        registry.app,
+        ["statechange", "change", "updated"],
+        onExternalChange
+      )
+    ]
+      .filter(Boolean)
+      .forEach((unsubscribe) =>
+        state.integrationUnsubscribers.push(unsubscribe)
+      );
+  };
+
   /* =========================================================
      Styles
   ========================================================= */
@@ -315,7 +861,7 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      [data-page="trips"][data-page-version="3.6.0"] {
+      [data-page="trips"][data-page-version="3.7.0"] {
         --trips-navy: #061b38;
         --trips-teal: #0f8f83;
         --trips-teal-dark: #08756d;
@@ -326,10 +872,19 @@
         --trips-shadow: 0 18px 45px rgba(16, 40, 70, .09);
         color: var(--trips-navy);
         padding-bottom: 30px;
+        overscroll-behavior: contain;
+        -webkit-tap-highlight-color: transparent;
       }
 
       [data-page="trips"] * {
         box-sizing: border-box;
+      }
+
+      [data-page="trips"] input,
+      [data-page="trips"] select,
+      [data-page="trips"] textarea,
+      [data-page="trips"] button {
+        touch-action: manipulation;
       }
 
       .trips-shell {
@@ -692,6 +1247,8 @@
         border-radius: 19px;
         background: rgba(255,255,255,.92);
         scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-inline: contain;
       }
 
       .trips-tabs::-webkit-scrollbar {
@@ -1270,17 +1827,22 @@
         padding: 18px;
         background: rgba(4,14,32,.52);
         backdrop-filter: blur(9px);
+        -webkit-backdrop-filter: blur(9px);
+        overscroll-behavior: contain;
       }
 
       .trips-modal,
       .country-sheet {
         width: min(760px, 100%);
         max-height: calc(100vh - 36px);
+        max-height: calc(100dvh - 36px);
         margin-inline: auto;
         overflow: auto;
         border-radius: 32px 32px 22px 22px;
         background: #fff;
         box-shadow: 0 35px 90px rgba(0,0,0,.25);
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
       }
 
       .trips-modal__header {
@@ -1509,8 +2071,8 @@
 
     document.head.appendChild(style);
   };
-
-  /* =========================================================
+  
+    /* =========================================================
      Store helpers
   ========================================================= */
 
@@ -1520,36 +2082,145 @@
     if (!store) return {};
 
     if (typeof store.getState === "function") {
-      return clone(store.getState()) || {};
+      try {
+        return clone(store.getState()) || {};
+      } catch (error) {
+        console.warn("TIC Trips: failed to read Store state.", error);
+        return {};
+      }
     }
 
     if (typeof store.get === "function") {
-      return {
-        profile: store.get("profile"),
-        trips: store.get("trips"),
-        documents: store.get("documents"),
-        packing: store.get("packing"),
-        budgets: store.get("budgets"),
-        memories: store.get("memories"),
-        notifications: store.get("notifications")
-      };
+      try {
+        return {
+          profile: store.get("profile"),
+          trips: store.get("trips"),
+          plannedTrips: store.get("plannedTrips"),
+          annualPlans: store.get("annualPlans"),
+          documents: store.get("documents"),
+          packing: store.get("packing"),
+          budgets: store.get("budgets"),
+          memories: store.get("memories"),
+          notifications: store.get("notifications"),
+          guideIntelligence: store.get("guideIntelligence"),
+          settings: store.get("settings")
+        };
+      } catch (error) {
+        console.warn("TIC Trips: failed to read Store keys.", error);
+      }
     }
 
     return {};
+  };
+
+  const normalizeTripRecord = (trip = {}) => {
+    const now = new Date().toISOString();
+    const countryCode = resolveCountryCode(trip);
+    const country = resolveCountryName(trip);
+
+    return {
+      ...clone(trip),
+      id: text(trip.id) || createId(),
+      title:
+        text(trip.title) ||
+        text(trip.name) ||
+        text(trip.destination) ||
+        "رحلة بدون اسم",
+      destination:
+        text(trip.destination) ||
+        text(trip.city) ||
+        country,
+      country,
+      countryCode,
+      guideCountryCode:
+        text(trip.guideCountryCode).toUpperCase() ||
+        countryCode,
+      status: text(trip.status, "planning").toLowerCase(),
+      planningStatus:
+        text(trip.planningStatus) ||
+        (text(trip.status).toLowerCase() === "completed"
+          ? "completed"
+          : "planned"),
+      tripType:
+        text(trip.tripType || trip.type, "family").toLowerCase(),
+      budget: number(trip.budget),
+      spent: number(trip.spent),
+      travelers: Math.max(1, number(trip.travelers, 1)),
+      cities: normalizeCities(trip),
+      checklist: isObject(trip.checklist)
+        ? clone(trip.checklist)
+        : {},
+      createdAt:
+        text(trip.createdAt) ||
+        text(trip.dateCreated) ||
+        now,
+      updatedAt:
+        text(trip.updatedAt) ||
+        text(trip.dateUpdated) ||
+        now
+    };
+  };
+
+  const mergeTripCollections = (...collections) => {
+    const map = new Map();
+
+    collections
+      .flatMap((collection) =>
+        Array.isArray(collection) ? collection : []
+      )
+      .forEach((rawTrip) => {
+        if (!isObject(rawTrip)) return;
+
+        const trip = normalizeTripRecord(rawTrip);
+        const key = String(trip.id);
+
+        if (!map.has(key)) {
+          map.set(key, trip);
+          return;
+        }
+
+        const existing = map.get(key);
+        const existingUpdated =
+          toDate(existing.updatedAt)?.getTime() || 0;
+        const incomingUpdated =
+          toDate(trip.updatedAt)?.getTime() || 0;
+
+        map.set(
+          key,
+          incomingUpdated >= existingUpdated
+            ? { ...existing, ...trip }
+            : { ...trip, ...existing }
+        );
+      });
+
+    return [...map.values()];
   };
 
   const getTrips = () => {
     const store = getStore();
 
     if (typeof store?.getTrips === "function") {
-      return store.getTrips({ includeArchived: true });
+      try {
+        const result = store.getTrips({
+          includeArchived: true,
+          includeCompleted: true,
+          includePlanned: true
+        });
+
+        if (Array.isArray(result)) {
+          return result.map(normalizeTripRecord);
+        }
+      } catch (error) {
+        console.warn("TIC Trips: Store.getTrips failed.", error);
+      }
     }
 
     const snapshot = getStoreState();
 
-    return Array.isArray(snapshot.trips)
-      ? clone(snapshot.trips)
-      : [];
+    return mergeTripCollections(
+      snapshot.trips,
+      snapshot.plannedTrips
+    );
   };
 
   const findTrip = (tripId) =>
@@ -1557,24 +2228,96 @@
       (trip) => String(trip.id) === String(tripId)
     ) || null;
 
-  const saveTrips = (trips) => {
+  const commitStoreMutation = (
+    eventName,
+    payload = {},
+    options = {}
+  ) => {
+    const {
+      refresh = true,
+      sync = true,
+      notify = true
+    } = options;
+
+    const eventPayload = {
+      source: PAGE_ID,
+      pageVersion: PAGE_VERSION,
+      eventName,
+      timestamp: new Date().toISOString(),
+      ...clone(payload)
+    };
+
+    if (notify) {
+      emit(eventName, eventPayload);
+    }
+
+    if (sync) {
+      notifyIntelligenceLayer(eventName, eventPayload);
+    }
+
+    if (refresh) {
+      requestDeferredRefresh(eventName, {
+        forceAfterWait: true
+      });
+    }
+
+    return eventPayload;
+  };
+
+  const saveTrips = (trips, metadata = {}) => {
     const store = getStore();
 
     if (!store) {
       throw new Error("TIC Trips Error: store is unavailable.");
     }
 
+    const normalizedTrips = mergeTripCollections(trips);
+    const mutationMeta = {
+      source: PAGE_ID,
+      pageVersion: PAGE_VERSION,
+      reason: text(metadata.reason, "trips-save"),
+      immediate: true,
+      silent: Boolean(metadata.silent)
+    };
+
     if (typeof store.set === "function") {
-      store.set("trips", clone(trips), { immediate: true });
+      store.set("trips", clone(normalizedTrips), mutationMeta);
+
+      commitStoreMutation("trips-saved", {
+        reason: mutationMeta.reason,
+        count: normalizedTrips.length
+      });
+
       return true;
     }
 
     if (typeof store.update === "function") {
-      store.update((currentState) => ({
-        ...currentState,
-        trips: clone(trips)
-      }), {
-        immediate: true
+      store.update(
+        (currentState = {}) => ({
+          ...currentState,
+          trips: clone(normalizedTrips)
+        }),
+        mutationMeta
+      );
+
+      commitStoreMutation("trips-saved", {
+        reason: mutationMeta.reason,
+        count: normalizedTrips.length
+      });
+
+      return true;
+    }
+
+    if (typeof store.dispatch === "function") {
+      store.dispatch({
+        type: "TRIPS_REPLACE_ALL",
+        payload: clone(normalizedTrips),
+        meta: mutationMeta
+      });
+
+      commitStoreMutation("trips-saved", {
+        reason: mutationMeta.reason,
+        count: normalizedTrips.length
       });
 
       return true;
@@ -1585,24 +2328,53 @@
 
   const addTripToStore = async (trip) => {
     const store = getStore();
+    const normalized = normalizeTripRecord(trip);
+
+    let savedTrip = normalized;
 
     if (typeof store?.addTrip === "function") {
-      return (await store.addTrip(trip)) || trip;
+      savedTrip =
+        (await store.addTrip(normalized, {
+          source: PAGE_ID,
+          immediate: true
+        })) || normalized;
+    } else if (typeof store?.createTrip === "function") {
+      savedTrip =
+        (await store.createTrip(normalized, {
+          source: PAGE_ID,
+          immediate: true
+        })) || normalized;
+    } else if (typeof store?.upsertTrip === "function") {
+      savedTrip =
+        (await store.upsertTrip(normalized, {
+          source: PAGE_ID,
+          immediate: true
+        })) || normalized;
+    } else {
+      const trips = getTrips();
+
+      if (
+        !trips.some(
+          (item) => String(item.id) === String(normalized.id)
+        )
+      ) {
+        trips.unshift(normalized);
+      }
+
+      saveTrips(trips, {
+        reason: "trip-created",
+        silent: true
+      });
     }
 
-    if (typeof store?.createTrip === "function") {
-      return (await store.createTrip(trip)) || trip;
-    }
+    const finalTrip = normalizeTripRecord(savedTrip);
 
-    if (typeof store?.upsertTrip === "function") {
-      return (await store.upsertTrip(trip)) || trip;
-    }
+    commitStoreMutation("trip-created", {
+      trip: finalTrip,
+      tripId: finalTrip.id
+    });
 
-    const trips = getTrips();
-    trips.unshift(clone(trip));
-    saveTrips(trips);
-
-    return trip;
+    return finalTrip;
   };
 
   const updateTrip = async (tripId, patch) => {
@@ -1611,47 +2383,89 @@
 
     if (!existing) return null;
 
-    const updated = {
+    const updated = normalizeTripRecord({
       ...existing,
       ...clone(patch),
       id: existing.id,
       updatedAt: new Date().toISOString()
-    };
+    });
+
+    let savedTrip = updated;
 
     if (typeof store?.updateTrip === "function") {
-      return (await store.updateTrip(tripId, updated)) || updated;
+      savedTrip =
+        (await store.updateTrip(
+          tripId,
+          updated,
+          {
+            source: PAGE_ID,
+            immediate: true
+          }
+        )) || updated;
+    } else if (typeof store?.upsertTrip === "function") {
+      savedTrip =
+        (await store.upsertTrip(updated, {
+          source: PAGE_ID,
+          immediate: true
+        })) || updated;
+    } else {
+      const trips = getTrips();
+      const index = trips.findIndex(
+        (trip) => String(trip.id) === String(tripId)
+      );
+
+      if (index >= 0) {
+        trips[index] = updated;
+        saveTrips(trips, {
+          reason: "trip-updated",
+          silent: true
+        });
+      }
     }
 
-    if (typeof store?.upsertTrip === "function") {
-      return (await store.upsertTrip(updated)) || updated;
-    }
+    const finalTrip = normalizeTripRecord(savedTrip);
 
-    const trips = getTrips();
-    const index = trips.findIndex(
-      (trip) => String(trip.id) === String(tripId)
-    );
+    commitStoreMutation("trip-updated", {
+      trip: finalTrip,
+      tripId: finalTrip.id,
+      patch: clone(patch)
+    });
 
-    if (index >= 0) {
-      trips[index] = updated;
-      saveTrips(trips);
-    }
-
-    return updated;
+    return finalTrip;
   };
 
   const deleteTripFromStore = async (tripId) => {
     const store = getStore();
+    const existing = findTrip(tripId);
+
+    if (!existing) return false;
 
     if (typeof store?.deleteTrip === "function") {
-      await store.deleteTrip(tripId);
-      return true;
+      await store.deleteTrip(tripId, {
+        source: PAGE_ID,
+        immediate: true
+      });
+    } else if (typeof store?.removeTrip === "function") {
+      await store.removeTrip(tripId, {
+        source: PAGE_ID,
+        immediate: true
+      });
+    } else {
+      saveTrips(
+        getTrips().filter(
+          (trip) => String(trip.id) !== String(tripId)
+        ),
+        {
+          reason: "trip-deleted",
+          silent: true
+        }
+      );
     }
 
-    saveTrips(
-      getTrips().filter(
-        (trip) => String(trip.id) !== String(tripId)
-      )
-    );
+    commitStoreMutation("trip-deleted", {
+      tripId,
+      trip: existing
+    });
 
     return true;
   };
@@ -1663,10 +2477,14 @@
     const now = new Date().toISOString();
     const countryCode = resolveCountryCode(original);
 
-    const duplicate = {
+    const duplicate = normalizeTripRecord({
       ...clone(original),
       id: createId(),
-      title: `${original.title || original.destination || "رحلة"} - نسخة`,
+      title: `${
+        original.title ||
+        original.destination ||
+        "رحلة"
+      } - نسخة`,
       status: "planning",
       planningStatus: "planned",
       countryCode,
@@ -1686,16 +2504,30 @@
       featured: false,
       createdAt: now,
       updatedAt: now
-    };
+    });
 
-    return addTripToStore(duplicate);
+    const saved = await addTripToStore(duplicate);
+
+    commitStoreMutation(
+      "trip-duplicated",
+      {
+        sourceTripId: original.id,
+        tripId: saved.id,
+        trip: saved
+      },
+      {
+        refresh: false
+      }
+    );
+
+    return saved;
   };
 
   /* =========================================================
      Trip calculations
   ========================================================= */
 
-  const durationDays = (trip) => {
+  const durationDays = (trip = {}) => {
     if (number(trip.durationDays) > 0) {
       return number(trip.durationDays);
     }
@@ -1707,13 +2539,14 @@
 
     return (
       Math.floor(
-        (startOfDay(end).getTime() - startOfDay(start).getTime()) /
+        (startOfDay(end).getTime() -
+          startOfDay(start).getTime()) /
           86400000
       ) + 1
     );
   };
 
-  const daysUntil = (trip) => {
+  const daysUntil = (trip = {}) => {
     const start = toDate(trip.startDate);
     if (!start) return null;
 
@@ -1724,7 +2557,7 @@
     );
   };
 
-  const tripStatus = (trip) => {
+  const tripStatus = (trip = {}) => {
     const raw = text(trip.status).toLowerCase();
 
     if (["cancelled", "archived"].includes(raw)) return raw;
@@ -1742,18 +2575,21 @@
       return "ongoing";
     }
 
-    if (end && startOfDay(end) < today) return "completed";
+    if (end && startOfDay(end) < today) {
+      return "completed";
+    }
+
     if (raw === "active") return "ongoing";
 
     return raw || "planning";
   };
 
-  const isPassportTrip = (trip) =>
+  const isPassportTrip = (trip = {}) =>
     trip.isMemory === true ||
     trip.memorySource === "manual-history" ||
     tripStatus(trip) === "completed";
 
-  const isUpcomingTrip = (trip) =>
+  const isUpcomingTrip = (trip = {}) =>
     [
       "draft",
       "planning",
@@ -1782,10 +2618,22 @@
     const ui = getUI();
 
     if (typeof ui?.currency === "function") {
-      return ui.currency(number(value));
+      try {
+        return ui.currency(number(value));
+      } catch (_) {
+        // Continue with local formatter.
+      }
     }
 
-    return `${number(value).toLocaleString("ar-AE")} د.إ`;
+    try {
+      return new Intl.NumberFormat("ar-AE", {
+        style: "currency",
+        currency: "AED",
+        maximumFractionDigits: 0
+      }).format(number(value));
+    } catch (_) {
+      return `${number(value).toLocaleString("ar-AE")} د.إ`;
+    }
   };
 
   const countryFlag = (country, countryCode = "") => {
@@ -1847,7 +2695,7 @@
     return flags[normalized] || "🌍";
   };
 
-  const normalizeCities = (trip) => {
+  const normalizeCities = (trip = {}) => {
     const cities = [];
 
     if (Array.isArray(trip.cities)) {
@@ -1856,14 +2704,24 @@
 
     if (trip.city) cities.push(trip.city);
 
-    if (trip.destination && !trip.country) {
+    if (
+      trip.destination &&
+      !trip.country &&
+      !trip.destinationCountry
+    ) {
       cities.push(trip.destination);
     }
 
-    return [...new Set(cities.map(text).filter(Boolean))];
+    return [
+      ...new Set(
+        cities
+          .map((city) => text(city))
+          .filter(Boolean)
+      )
+    ];
   };
 
-  const buildCountries = (trips) => {
+  const buildCountries = (trips = []) => {
     const map = new Map();
 
     trips
@@ -1871,15 +2729,25 @@
       .forEach((trip) => {
         const countryCode = resolveCountryCode(trip);
         const country = resolveCountryName(trip);
-        const key = countryCode || normalizeCountryKey(country);
+        const key =
+          countryCode ||
+          normalizeCountryKey(country) ||
+          "unknown";
 
         if (!map.has(key)) {
-          const record = resolveCountryRecord(country, countryCode);
+          const record = resolveCountryRecord(
+            country,
+            countryCode
+          );
 
           map.set(key, {
             key,
-            countryCode: countryCode || text(record?.code).toUpperCase(),
-            country: text(record?.nameAr) || country,
+            countryCode:
+              countryCode ||
+              text(record?.code).toUpperCase(),
+            country:
+              text(record?.nameAr) ||
+              country,
             countryNameEn: text(record?.nameEn),
             flag:
               text(record?.flag) ||
@@ -1901,24 +2769,37 @@
           toDate(trip.createdAt);
 
         item.visits += 1;
-        item.totalDays += Math.max(0, durationDays(trip));
+        item.totalDays += Math.max(
+          0,
+          durationDays(trip)
+        );
 
-        item.trips.push({
-          ...clone(trip),
-          countryCode: resolveCountryCode(trip) || item.countryCode,
-          country: resolveCountryName(trip)
-        });
+        item.trips.push(
+          normalizeTripRecord({
+            ...clone(trip),
+            countryCode:
+              resolveCountryCode(trip) ||
+              item.countryCode,
+            country: resolveCountryName(trip)
+          })
+        );
 
         normalizeCities(trip).forEach((city) =>
           item.cities.add(city)
         );
 
         if (date) {
-          if (!item.firstVisit || date < item.firstVisit) {
+          if (
+            !item.firstVisit ||
+            date < item.firstVisit
+          ) {
             item.firstVisit = date;
           }
 
-          if (!item.lastVisit || date > item.lastVisit) {
+          if (
+            !item.lastVisit ||
+            date > item.lastVisit
+          ) {
             item.lastVisit = date;
           }
         }
@@ -1960,35 +2841,51 @@
   });
 
   const filteredTripsFrom = (trips) => {
-    const search = text(state.filters.search).toLowerCase();
+    const search = text(
+      state.filters.search
+    ).toLowerCase();
 
     const byTab = trips.filter((trip) => {
       const status = tripStatus(trip);
 
-      if (["archived", "completed"].includes(status)) {
+      if (
+        ["archived", "completed"].includes(status)
+      ) {
         return false;
       }
 
-      if (state.activeTab === "upcoming") return isUpcomingTrip(trip);
-      if (state.activeTab === "ongoing") return status === "ongoing";
+      if (state.activeTab === "upcoming") {
+        return isUpcomingTrip(trip);
+      }
+
+      if (state.activeTab === "ongoing") {
+        return status === "ongoing";
+      }
 
       return status !== "archived";
     });
 
     const result = byTab.filter((trip) => {
       const status = tripStatus(trip);
-      const type = text(trip.tripType).toLowerCase();
+      const type = text(
+        trip.tripType
+      ).toLowerCase();
 
       const searchable = [
         trip.title,
         trip.destination,
         trip.country,
         resolveCountryName(trip),
+        trip.countryCode,
         trip.city,
-        ...(Array.isArray(trip.cities) ? trip.cities : []),
+        ...(Array.isArray(trip.cities)
+          ? trip.cities
+          : []),
         trip.accommodation,
+        trip.hotelName,
         trip.airline,
-        trip.notes
+        trip.notes,
+        trip.bookingReference
       ]
         .filter(Boolean)
         .join(" ")
@@ -2052,21 +2949,47 @@
       filteredTrips: filteredTripsFrom(trips),
       activeTrip: state.activeTripId
         ? trips.find(
-            (trip) => String(trip.id) === String(state.activeTripId)
+            (trip) =>
+              String(trip.id) ===
+              String(state.activeTripId)
           ) || null
         : null,
       activeCountry: state.activeCountryKey
         ? countries.find(
-            (country) => country.key === state.activeCountryKey
+            (country) =>
+              country.key ===
+              state.activeCountryKey
           ) || null
         : null,
-      statistics: statisticsFrom(trips, countries),
+      statistics: statisticsFrom(
+        trips,
+        countries
+      ),
       filters: clone(state.filters),
       activeView: state.activeView,
       activeTab: state.activeTab
     };
 
+    const signature = createSignature({
+      trips: snapshot.trips,
+      countries: snapshot.countries,
+      filteredTripIds:
+        snapshot.filteredTrips.map(
+          (trip) => trip.id
+        ),
+      activeTripId:
+        snapshot.activeTrip?.id || null,
+      activeCountryKey:
+        snapshot.activeCountry?.key || null,
+      statistics: snapshot.statistics,
+      filters: snapshot.filters,
+      activeView: snapshot.activeView,
+      activeTab: snapshot.activeTab
+    });
+
     state.lastSnapshot = snapshot;
+    state.lastSnapshotSignature = signature;
+
     return snapshot;
   };
 
@@ -2088,10 +3011,26 @@
 
   const renderOverview = (statistics) => {
     const items = [
-      { icon: "✈", value: statistics.upcoming, label: "رحلات قادمة" },
-      { icon: "◎", value: statistics.ongoing, label: "رحلات جارية" },
-      { icon: "◈", value: statistics.countries, label: "دول زرتها" },
-      { icon: "♡", value: statistics.memories, label: "رحلات سابقة" }
+      {
+        icon: "✈",
+        value: statistics.upcoming,
+        label: "رحلات قادمة"
+      },
+      {
+        icon: "◎",
+        value: statistics.ongoing,
+        label: "رحلات جارية"
+      },
+      {
+        icon: "◈",
+        value: statistics.countries,
+        label: "دول زرتها"
+      },
+      {
+        icon: "♡",
+        value: statistics.memories,
+        label: "رحلات سابقة"
+      }
     ];
 
     return `
@@ -2127,12 +3066,16 @@
       {
         icon: "▣",
         label: "التأشيرة",
-        value: trip.visaRequired ? "مطلوبة" : "غير مطلوبة"
+        value: trip.visaRequired
+          ? "مطلوبة"
+          : "غير مطلوبة"
       },
       {
         icon: "✓",
         label: "التأمين",
-        value: trip.insuranceRequired ? "مطلوب" : "اختياري"
+        value: trip.insuranceRequired
+          ? "مطلوب"
+          : "اختياري"
       },
       {
         icon: "◈",
@@ -2142,7 +3085,9 @@
       {
         icon: "✈",
         label: "المطار",
-        value: trip.departureAirport || "غير محدد"
+        value:
+          trip.departureAirport ||
+          "غير محدد"
       }
     ];
 
@@ -2206,10 +3151,18 @@
           ([value, label]) => `
             <button
               type="button"
-              class="trips-tab ${state.activeTab === value ? "is-active" : ""}"
+              class="trips-tab ${
+                state.activeTab === value
+                  ? "is-active"
+                  : ""
+              }"
               data-trips-tab="${escapeHTML(value)}"
               role="tab"
-              aria-selected="${state.activeTab === value ? "true" : "false"}"
+              aria-selected="${
+                state.activeTab === value
+                  ? "true"
+                  : "false"
+              }"
             >
               ${escapeHTML(label)}
             </button>
@@ -2233,6 +3186,8 @@
             data-trips-search
             value="${escapeHTML(state.filters.search)}"
             placeholder="ابحث باسم الرحلة أو الدولة أو المدينة..."
+            autocomplete="off"
+            enterkeyhint="search"
           >
         </label>
 
@@ -2253,18 +3208,31 @@
               <div class="trips-field">
                 <label>الحالة</label>
                 <select data-trips-filter-status>
-                  <option value="all" ${selected("all", state.filters.status)}>
+                  <option
+                    value="all"
+                    ${selected(
+                      "all",
+                      state.filters.status
+                    )}
+                  >
                     كل الحالات
                   </option>
+
                   ${Object.entries(STATUS_LABELS)
                     .filter(([value]) =>
-                      !["completed", "archived"].includes(value)
+                      ![
+                        "completed",
+                        "archived"
+                      ].includes(value)
                     )
                     .map(
                       ([value, label]) => `
                         <option
                           value="${escapeHTML(value)}"
-                          ${selected(value, state.filters.status)}
+                          ${selected(
+                            value,
+                            state.filters.status
+                          )}
                         >
                           ${escapeHTML(label)}
                         </option>
@@ -2277,15 +3245,25 @@
               <div class="trips-field">
                 <label>نوع الرحلة</label>
                 <select data-trips-filter-type>
-                  <option value="all" ${selected("all", state.filters.type)}>
+                  <option
+                    value="all"
+                    ${selected(
+                      "all",
+                      state.filters.type
+                    )}
+                  >
                     كل الأنواع
                   </option>
+
                   ${Object.entries(TYPE_LABELS)
                     .map(
                       ([value, label]) => `
                         <option
                           value="${escapeHTML(value)}"
-                          ${selected(value, state.filters.type)}
+                          ${selected(
+                            value,
+                            state.filters.type
+                          )}
                         >
                           ${escapeHTML(label)}
                         </option>
@@ -2302,7 +3280,10 @@
                     (option) => `
                       <option
                         value="${escapeHTML(option.value)}"
-                        ${selected(option.value, state.filters.sort)}
+                        ${selected(
+                          option.value,
+                          state.filters.sort
+                        )}
                       >
                         ${escapeHTML(option.label)}
                       </option>
@@ -2334,7 +3315,12 @@
       budget > 0
         ? Math.min(
             100,
-            Math.max(0, Math.round((spent / budget) * 100))
+            Math.max(
+              0,
+              Math.round(
+                (spent / budget) * 100
+              )
+            )
           )
         : 0;
 
@@ -2360,13 +3346,19 @@
       "وجهة غير محددة";
 
     return `
-      <article class="trip-card-v3" data-trip-card="${escapeHTML(trip.id)}">
+      <article
+        class="trip-card-v3"
+        data-trip-card="${escapeHTML(trip.id)}"
+      >
         <div class="trip-card-v3__cover">
           <span class="trip-card-v3__emoji">
             ${escapeHTML(
               trip.emoji ||
               trip.icon ||
-              countryFlag(countryName, countryCode)
+              countryFlag(
+                countryName,
+                countryCode
+              )
             )}
           </span>
 
@@ -2385,6 +3377,7 @@
                   "رحلة بدون اسم"
                 )}
               </h3>
+
               <p class="trip-card-v3__destination">
                 ${escapeHTML(location)}
               </p>
@@ -2394,27 +3387,41 @@
               class="trip-status-v3"
               data-status="${escapeHTML(status)}"
             >
-              ${escapeHTML(STATUS_LABELS[status] || status)}
+              ${escapeHTML(
+                STATUS_LABELS[status] ||
+                status
+              )}
             </span>
           </div>
 
           <div class="trip-card-v3__meta">
             <div class="trip-card-v3__meta-item">
               <small>التاريخ</small>
-              <strong>${escapeHTML(formatDate(trip.startDate))}</strong>
+              <strong>
+                ${escapeHTML(
+                  formatDate(trip.startDate)
+                )}
+              </strong>
             </div>
 
             <div class="trip-card-v3__meta-item">
               <small>المدة</small>
               <strong>
-                ${durationDays(trip) ? `${durationDays(trip)} يوم` : "—"}
+                ${
+                  durationDays(trip)
+                    ? `${durationDays(trip)} يوم`
+                    : "—"
+                }
               </strong>
             </div>
 
             <div class="trip-card-v3__meta-item">
               <small>النوع</small>
               <strong>
-                ${escapeHTML(TYPE_LABELS[trip.tripType] || "رحلة")}
+                ${escapeHTML(
+                  TYPE_LABELS[trip.tripType] ||
+                  "رحلة"
+                )}
               </strong>
             </div>
           </div>
@@ -2428,7 +3435,13 @@
                     <strong>${usage}%</strong>
                   </div>
 
-                  <div class="trip-card-v3__bar">
+                  <div
+                    class="trip-card-v3__bar"
+                    role="progressbar"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="${usage}"
+                  >
                     <span style="width:${usage}%"></span>
                   </div>
                 </div>
@@ -2451,6 +3464,7 @@
               class="trip-card-v3__menu"
               data-action="trips-card-menu"
               data-trip-id="${escapeHTML(trip.id)}"
+              aria-label="إجراءات الرحلة"
             >
               •••
             </button>
@@ -2467,6 +3481,7 @@
       tabindex="0"
       data-action="trips-open-country"
       data-country-key="${escapeHTML(country.key)}"
+      aria-label="فتح سجل ${escapeHTML(country.country)}"
     >
       <span class="country-magnet__count">
         ${escapeHTML(country.visits)}
@@ -2482,7 +3497,9 @@
       <p>
         ${
           country.cities.length
-            ? escapeHTML(country.cities.join("، "))
+            ? escapeHTML(
+                country.cities.join("، ")
+              )
             : "لم تُسجل المدن بعد"
         }
       </p>
@@ -2490,12 +3507,16 @@
       <div class="country-magnet__stats">
         <span>
           <small>المدن</small>
-          <strong>${escapeHTML(country.cities.length)}</strong>
+          <strong>
+            ${escapeHTML(country.cities.length)}
+          </strong>
         </span>
 
         <span>
           <small>الأيام</small>
-          <strong>${escapeHTML(country.totalDays || 0)}</strong>
+          <strong>
+            ${escapeHTML(country.totalDays || 0)}
+          </strong>
         </span>
 
         <span>
@@ -2503,7 +3524,9 @@
           <strong>
             ${
               country.lastVisit
-                ? escapeHTML(country.lastVisit.getFullYear())
+                ? escapeHTML(
+                    country.lastVisit.getFullYear()
+                  )
                 : "—"
             }
           </strong>
@@ -2525,7 +3548,10 @@
     action
   }) => `
     <div class="trips-empty">
-      <div class="trips-empty__icon">${escapeHTML(icon)}</div>
+      <div class="trips-empty__icon">
+        ${escapeHTML(icon)}
+      </div>
+
       <h3>${escapeHTML(title)}</h3>
       <p>${escapeHTML(message)}</p>
 
@@ -2572,12 +3598,17 @@
         }
       };
 
-      return renderEmpty(emptyByTab[state.activeTab] || emptyByTab.all);
+      return renderEmpty(
+        emptyByTab[state.activeTab] ||
+        emptyByTab.all
+      );
     }
 
     return `
       <div class="trips-grid">
-        ${snapshot.filteredTrips.map(renderTripCard).join("")}
+        ${snapshot.filteredTrips
+          .map(renderTripCard)
+          .join("")}
       </div>
     `;
   };
@@ -2586,8 +3617,12 @@
     <section class="passport-section">
       <div class="passport-head">
         <div>
-          <span class="passport-kicker">MY TRAVEL PASSPORT</span>
+          <span class="passport-kicker">
+            MY TRAVEL PASSPORT
+          </span>
+
           <h2>الدول التي زرتها</h2>
+
           <p>
             جواز سفرك يجمع الدول والرحلات السابقة في مكان واحد،
             ومربوط مباشرة مع صفحة الدليل.
@@ -2607,7 +3642,9 @@
         </button>
 
         <span class="passport-count">
-          ${escapeHTML(snapshot.statistics.memories)} رحلة
+          ${escapeHTML(
+            snapshot.statistics.memories
+          )} رحلة
         </span>
       </div>
 
@@ -2615,13 +3652,16 @@
         snapshot.countries.length
           ? `
             <div class="country-grid">
-              ${snapshot.countries.map(renderCountryCard).join("")}
+              ${snapshot.countries
+                .map(renderCountryCard)
+                .join("")}
             </div>
           `
           : `
             <div class="passport-empty">
               <div class="passport-empty__icon">🌍</div>
               <h3>جواز سفرك ما زال فارغاً</h3>
+
               <p>
                 أضف رحلة سابقة، والرحلات الحالية ستنضم تلقائياً
                 بعد انتهاء تاريخها.
@@ -2644,11 +3684,14 @@
     <div class="trips-shell">
       <section class="trips-hero">
         <div class="trips-hero__top">
-          <span class="trips-hero__eyebrow">TRIPS CENTER</span>
+          <span class="trips-hero__eyebrow">
+            TRIPS CENTER
+          </span>
         </div>
 
         <div class="trips-hero__content">
           <h1>رحلاتي</h1>
+
           <p>
             نظّم رحلاتك القادمة، وبعد اكتمالها تنضم تلقائياً
             إلى جواز سفرك والدليل الذكي.
@@ -2678,8 +3721,12 @@
         <section class="trips-section">
           <div class="trips-section__header">
             <div>
-              <p class="trips-section__eyebrow">QUICK OVERVIEW</p>
+              <p class="trips-section__eyebrow">
+                QUICK OVERVIEW
+              </p>
+
               <h2>ملخص سفراتك</h2>
+
               <p class="trips-section__subtitle">
                 أرقام مباشرة من جميع الرحلات المحفوظة.
               </p>
@@ -2695,6 +3742,7 @@
       <section class="trips-zone trips-zone--journeys">
         <div class="trips-zone__marker">
           <span class="trips-zone__marker-icon">✈</span>
+
           <div class="trips-zone__marker-copy">
             <small>JOURNEY OPERATIONS</small>
             <strong>منطقة الرحلات النشطة</strong>
@@ -2705,8 +3753,17 @@
         <section class="trips-section">
           <div class="trips-section__header">
             <div>
-              <p class="trips-section__eyebrow">ACTIVE JOURNEYS</p>
-              <h2>${escapeHTML(TAB_LABELS[state.activeTab] || "رحلاتك")}</h2>
+              <p class="trips-section__eyebrow">
+                ACTIVE JOURNEYS
+              </p>
+
+              <h2>
+                ${escapeHTML(
+                  TAB_LABELS[state.activeTab] ||
+                  "رحلاتك"
+                )}
+              </h2>
+
               <p class="trips-section__subtitle">
                 الرحلات المكتملة تنتقل إلى جواز السفر تلقائياً.
               </p>
@@ -2734,15 +3791,18 @@
       return renderEmpty({
         icon: "!",
         title: "تعذر العثور على الرحلة",
-        message: "قد تكون الرحلة حُذفت أو لم تعد متوفرة.",
+        message:
+          "قد تكون الرحلة حُذفت أو لم تعد متوفرة.",
         actionLabel: "العودة إلى رحلاتي",
         action: "trips-back-to-hub"
       });
     }
 
     const status = tripStatus(trip);
-    const countryName = resolveCountryName(trip);
-    const countryCode = resolveCountryCode(trip);
+    const countryName =
+      resolveCountryName(trip);
+    const countryCode =
+      resolveCountryCode(trip);
 
     const fields = [
       ["الدولة", countryName || "—"],
@@ -2767,15 +3827,24 @@
           ? currency(trip.spent)
           : "غير مسجل"
       ],
-      ["شركة الطيران", trip.airline || "—"],
-      ["رقم الرحلة", trip.flightNumber || "—"],
+      [
+        "شركة الطيران",
+        trip.airline || "—"
+      ],
+      [
+        "رقم الرحلة",
+        trip.flightNumber || "—"
+      ],
       [
         "الفندق",
         typeof trip.accommodation === "string"
           ? trip.accommodation || "—"
           : trip.hotelName || "—"
       ],
-      ["رقم الحجز", trip.bookingReference || "—"],
+      [
+        "رقم الحجز",
+        trip.bookingReference || "—"
+      ],
       [
         "التقييم",
         number(trip.rating) > 0
@@ -2817,11 +3886,17 @@
               class="trip-status-v3"
               data-status="${escapeHTML(status)}"
             >
-              ${escapeHTML(STATUS_LABELS[status] || status)}
+              ${escapeHTML(
+                STATUS_LABELS[status] ||
+                status
+              )}
             </span>
 
             <span class="trip-status-v3">
-              ${escapeHTML(TYPE_LABELS[trip.tripType] || "رحلة")}
+              ${escapeHTML(
+                TYPE_LABELS[trip.tripType] ||
+                "رحلة"
+              )}
             </span>
           </div>
 
@@ -2864,7 +3939,10 @@
         <section class="trips-section">
           <div class="trips-section__header">
             <div>
-              <p class="trips-section__eyebrow">JOURNEY DETAILS</p>
+              <p class="trips-section__eyebrow">
+                JOURNEY DETAILS
+              </p>
+
               <h2>تفاصيل الرحلة</h2>
             </div>
           </div>
@@ -2874,8 +3952,13 @@
               .map(
                 ([label, value]) => `
                   <article class="trips-detail-box">
-                    <small>${escapeHTML(label)}</small>
-                    <strong>${escapeHTML(value)}</strong>
+                    <small>
+                      ${escapeHTML(label)}
+                    </small>
+
+                    <strong>
+                      ${escapeHTML(value)}
+                    </strong>
                   </article>
                 `
               )
@@ -2889,7 +3972,10 @@
               <section class="trips-section">
                 <div class="trips-section__header">
                   <div>
-                    <p class="trips-section__eyebrow">MEMORIES</p>
+                    <p class="trips-section__eyebrow">
+                      MEMORIES
+                    </p>
+
                     <h2>ذكريات وملاحظات</h2>
                   </div>
                 </div>
@@ -2900,7 +3986,11 @@
                       ? `
                         <article class="trips-detail-box">
                           <small>أجمل ذكرى</small>
-                          <strong>${escapeHTML(trip.bestMemory)}</strong>
+                          <strong>
+                            ${escapeHTML(
+                              trip.bestMemory
+                            )}
+                          </strong>
                         </article>
                       `
                       : ""
@@ -2911,7 +4001,11 @@
                       ? `
                         <article class="trips-detail-box">
                           <small>ملاحظات الرحلة</small>
-                          <strong>${escapeHTML(trip.notes)}</strong>
+                          <strong>
+                            ${escapeHTML(
+                              trip.notes
+                            )}
+                          </strong>
                         </article>
                       `
                       : ""
@@ -2931,6 +4025,9 @@
       data-page="trips"
       data-view="${escapeHTML(state.activeView)}"
       data-page-version="${PAGE_VERSION}"
+      data-render-signature="${escapeHTML(
+        state.lastSnapshotSignature
+      )}"
     >
       ${
         state.activeView === "details"
@@ -2940,16 +4037,60 @@
     </div>
   `;
 
+
   /* =========================================================
      Passport modal
   ========================================================= */
+
+  const lockDocumentScroll = () => {
+    if (!document.body) return;
+
+    if (!document.body.dataset.tripsPreviousOverflow) {
+      document.body.dataset.tripsPreviousOverflow =
+        document.body.style.overflow || "";
+    }
+
+    document.body.style.overflow = "hidden";
+    state.isFormOpen = true;
+    state.isUserInteracting = true;
+  };
+
+  const unlockDocumentScroll = () => {
+    if (!document.body) return;
+
+    if (
+      document.querySelector(
+        "[data-trips-modal], [data-country-sheet]"
+      )
+    ) {
+      return;
+    }
+
+    document.body.style.overflow =
+      document.body.dataset.tripsPreviousOverflow || "";
+
+    delete document.body.dataset.tripsPreviousOverflow;
+
+    state.isFormOpen = false;
+    releaseInteractionLater(180);
+  };
 
   const renderMemoryModal = () => {
     const draft = state.memoryDraft || {};
 
     return `
-      <div class="trips-modal-backdrop" data-trips-modal>
-        <form class="trips-modal" data-memory-form>
+      <div
+        class="trips-modal-backdrop"
+        data-trips-modal
+        data-modal-open="true"
+        role="presentation"
+      >
+        <form
+          class="trips-modal"
+          data-memory-form
+          novalidate
+          aria-label="إضافة رحلة سابقة"
+        >
           <div class="trips-modal__header">
             <div>
               <h3>إضافة رحلة سابقة</h3>
@@ -2962,6 +4103,7 @@
               type="button"
               class="trips-modal__close"
               data-action="trips-close-modal"
+              aria-label="إغلاق"
             >
               ×
             </button>
@@ -2974,6 +4116,7 @@
                 <input
                   name="title"
                   required
+                  autocomplete="off"
                   value="${escapeHTML(draft.title || "")}"
                   placeholder="مثال: رحلة المالديف"
                 >
@@ -2984,6 +4127,7 @@
                 <input
                   name="country"
                   required
+                  autocomplete="country-name"
                   value="${escapeHTML(draft.country || "")}"
                   placeholder="مثال: المالديف"
                 >
@@ -2993,6 +4137,7 @@
                 <label>المدينة أو الجزيرة</label>
                 <input
                   name="city"
+                  autocomplete="address-level2"
                   value="${escapeHTML(draft.city || "")}"
                   placeholder="مثال: جنوب ماليه"
                 >
@@ -3003,6 +4148,7 @@
                 <input
                   name="travelYear"
                   type="number"
+                  inputmode="numeric"
                   min="1950"
                   max="2100"
                   value="${escapeHTML(
@@ -3053,6 +4199,7 @@
                 <label>من سافر معك؟</label>
                 <input
                   name="travelCompanions"
+                  autocomplete="off"
                   value="${escapeHTML(draft.travelCompanions || "")}"
                 >
               </div>
@@ -3061,6 +4208,7 @@
                 <label>الفندق أو السكن</label>
                 <input
                   name="accommodation"
+                  autocomplete="off"
                   value="${escapeHTML(
                     typeof draft.accommodation === "string"
                       ? draft.accommodation
@@ -3093,6 +4241,7 @@
               <label>المدن أو الأماكن التي زرتها</label>
               <input
                 name="cities"
+                autocomplete="off"
                 value="${escapeHTML(
                   Array.isArray(draft.cities)
                     ? draft.cities.join("، ")
@@ -3148,8 +4297,18 @@
     if (!country) return "";
 
     return `
-      <div class="trips-modal-backdrop" data-country-sheet>
-        <section class="country-sheet">
+      <div
+        class="trips-modal-backdrop"
+        data-country-sheet
+        data-modal-open="true"
+        role="presentation"
+      >
+        <section
+          class="country-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label="سجل ${escapeHTML(country.country)}"
+        >
           <div class="country-sheet__hero">
             <div class="country-sheet__hero-top">
               <span class="country-sheet__flag">
@@ -3160,6 +4319,7 @@
                 type="button"
                 class="trips-modal__close"
                 data-action="trips-close-country"
+                aria-label="إغلاق"
               >
                 ×
               </button>
@@ -3294,11 +4454,31 @@
     `;
   };
 
+  const bindOverlayKeyboard = (overlay, closeHandler) => {
+    if (!overlay) return;
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeHandler();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+
+    const cleanup = () =>
+      document.removeEventListener("keydown", onKeyDown);
+
+    overlay.__ticTripsCleanup = cleanup;
+  };
+
   const showMemoryModal = (draft = {}) => {
     closeModal();
     closeCountrySheet();
 
     state.memoryDraft = clone(draft);
+    state.isFormOpen = true;
+    state.isUserInteracting = true;
 
     const wrapper = document.createElement("div");
     wrapper.innerHTML = renderMemoryModal();
@@ -3307,19 +4487,40 @@
     if (!modal) return false;
 
     document.body.appendChild(modal);
-    document.body.style.overflow = "hidden";
+    lockDocumentScroll();
 
-    modal
-      .querySelector("[data-memory-form]")
-      ?.addEventListener("submit", handleMemorySubmit);
+    const form = modal.querySelector("[data-memory-form]");
+
+    form?.addEventListener("submit", handleMemorySubmit);
 
     modal.addEventListener("click", (event) => {
       if (
         event.target === modal ||
-        event.target.closest('[data-action="trips-close-modal"]')
+        event.target.closest(
+          '[data-action="trips-close-modal"]'
+        )
       ) {
         closeModal();
       }
+    });
+
+    modal.addEventListener(
+      "input",
+      (event) => markInteraction("typing", event.target),
+      true
+    );
+
+    bindOverlayKeyboard(modal, closeModal);
+
+    window.requestAnimationFrame(() => {
+      modal
+        .querySelector('input[name="title"]')
+        ?.focus({ preventScroll: true });
+    });
+
+    emit("passport-modal-opened", {
+      mode: draft?.id ? "edit" : "create",
+      tripId: draft?.id || null
     });
 
     return true;
@@ -3336,6 +4537,8 @@
     if (!country) return false;
 
     state.activeCountryKey = countryKey;
+    state.isFormOpen = true;
+    state.isUserInteracting = true;
 
     const wrapper = document.createElement("div");
     wrapper.innerHTML = renderCountrySheet(country);
@@ -3344,51 +4547,102 @@
     if (!sheet) return false;
 
     document.body.appendChild(sheet);
-    document.body.style.overflow = "hidden";
+    lockDocumentScroll();
 
     sheet.addEventListener("click", (event) => {
       if (
         event.target === sheet ||
-        event.target.closest('[data-action="trips-close-country"]')
+        event.target.closest(
+          '[data-action="trips-close-country"]'
+        )
       ) {
         closeCountrySheet();
       }
+    });
+
+    bindOverlayKeyboard(sheet, closeCountrySheet);
+
+    emit("passport-country-opened", {
+      countryKey,
+      countryCode: country.countryCode,
+      country: country.country
     });
 
     return true;
   };
 
   const closeModal = () => {
-    document.querySelector("[data-trips-modal]")?.remove();
+    const modal =
+      document.querySelector("[data-trips-modal]");
 
-    if (!document.querySelector("[data-country-sheet]")) {
-      document.body.style.overflow = "";
-    }
+    modal?.__ticTripsCleanup?.();
+    modal?.remove();
+
+    state.memoryDraft = null;
+    state.isFormOpen = Boolean(
+      document.querySelector("[data-country-sheet]")
+    );
+
+    unlockDocumentScroll();
+
+    emit("passport-modal-closed");
   };
 
   const closeCountrySheet = () => {
-    document.querySelector("[data-country-sheet]")?.remove();
-    state.activeCountryKey = null;
+    const sheet =
+      document.querySelector("[data-country-sheet]");
 
-    if (!document.querySelector("[data-trips-modal]")) {
-      document.body.style.overflow = "";
-    }
+    sheet?.__ticTripsCleanup?.();
+    sheet?.remove();
+
+    state.activeCountryKey = null;
+    state.isFormOpen = Boolean(
+      document.querySelector("[data-trips-modal]")
+    );
+
+    unlockDocumentScroll();
+
+    emit("passport-country-closed");
   };
 
   const handleMemorySubmit = async (event) => {
     event.preventDefault();
 
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const submitButton =
+      form.querySelector('[type="submit"]');
+
+    if (submitButton?.disabled) return false;
+
+    const formData = new FormData(form);
     const title = text(formData.get("title"));
-    const countryInput = text(formData.get("country"));
+    const countryInput = text(
+      formData.get("country")
+    );
 
     if (!title || !countryInput) {
-      getUI()?.toast?.("أدخل اسم الرحلة والدولة.", "error");
+      getUI()?.toast?.(
+        "أدخل اسم الرحلة والدولة.",
+        "error"
+      );
+
+      form
+        .querySelector(
+          !title
+            ? '[name="title"]'
+            : '[name="country"]'
+        )
+        ?.focus();
+
       return false;
     }
 
-    const countryRecord = resolveCountryRecord(countryInput);
-    const countryCode = text(countryRecord?.code).toUpperCase();
+    const countryRecord =
+      resolveCountryRecord(countryInput);
+
+    const countryCode =
+      text(countryRecord?.code).toUpperCase();
+
     const normalizedCountryName =
       text(countryRecord?.nameAr) ||
       countryInput;
@@ -3397,76 +4651,147 @@
       number(formData.get("travelYear")) ||
       new Date().getFullYear();
 
-    const rawStart = text(formData.get("startDate"));
-    const rawEnd = text(formData.get("endDate"));
-    const fallbackStart = `${travelYear}-01-01`;
+    const rawStart =
+      text(formData.get("startDate"));
+
+    const rawEnd =
+      text(formData.get("endDate"));
+
+    const fallbackStart =
+      `${travelYear}-01-01`;
+
+    const resolvedStart =
+      rawStart || fallbackStart;
+
+    const resolvedEnd =
+      rawEnd || rawStart || fallbackStart;
+
+    const startDate = toDate(resolvedStart);
+    const endDate = toDate(resolvedEnd);
+
+    if (
+      startDate &&
+      endDate &&
+      endDate < startDate
+    ) {
+      getUI()?.toast?.(
+        "تاريخ النهاية يجب أن يكون بعد تاريخ البداية.",
+        "error"
+      );
+
+      form
+        .querySelector('[name="endDate"]')
+        ?.focus();
+
+      return false;
+    }
+
     const now = new Date().toISOString();
 
     const cities = text(formData.get("cities"))
       .split(/[،,]/)
-      .map(text)
+      .map((city) => text(city))
       .filter(Boolean);
 
-    const existingId = state.memoryDraft?.id || null;
+    const existingId =
+      state.memoryDraft?.id || null;
 
-    const trip = {
-      ...(existingId ? clone(state.memoryDraft) : {}),
+    const trip = normalizeTripRecord({
+      ...(existingId
+        ? clone(state.memoryDraft)
+        : {}),
       id: existingId || createId("memory"),
       title,
       destination:
-        [text(formData.get("city")), normalizedCountryName]
+        [
+          text(formData.get("city")),
+          normalizedCountryName
+        ]
           .filter(Boolean)
           .join("، "),
       country: normalizedCountryName,
       countryCode,
       guideCountryCode: countryCode,
-      destinationCountry: normalizedCountryName,
-      destinationCountryCode: countryCode,
+      destinationCountry:
+        normalizedCountryName,
+      destinationCountryCode:
+        countryCode,
       city: text(formData.get("city")),
       cities,
-      countryFlag: countryFlag(normalizedCountryName, countryCode),
+      countryFlag: countryFlag(
+        normalizedCountryName,
+        countryCode
+      ),
       travelYear,
-      startDate: rawStart || fallbackStart,
-      endDate: rawEnd || rawStart || fallbackStart,
-      tripType: text(formData.get("tripType")) || "family",
-      travelCompanions: text(formData.get("travelCompanions")),
-      accommodation: text(formData.get("accommodation")),
+      startDate: resolvedStart,
+      endDate: resolvedEnd,
+      tripType:
+        text(formData.get("tripType")) ||
+        "family",
+      travelCompanions: text(
+        formData.get("travelCompanions")
+      ),
+      accommodation: text(
+        formData.get("accommodation")
+      ),
       rating: number(formData.get("rating")),
-      bestMemory: text(formData.get("bestMemory")),
+      bestMemory: text(
+        formData.get("bestMemory")
+      ),
       notes: text(formData.get("notes")),
       wouldVisitAgain:
-        formData.get("wouldVisitAgain") === "true",
+        formData.get("wouldVisitAgain") ===
+        "true",
       status: "completed",
       planningStatus: "completed",
       isMemory: true,
       memorySource: "manual-history",
       source: "passport",
-      budget: number(state.memoryDraft?.budget),
-      spent: number(state.memoryDraft?.spent),
-      createdAt: state.memoryDraft?.createdAt || now,
+      budget: number(
+        state.memoryDraft?.budget
+      ),
+      spent: number(
+        state.memoryDraft?.spent
+      ),
+      createdAt:
+        state.memoryDraft?.createdAt ||
+        now,
       updatedAt: now
-    };
+    });
 
     try {
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+
+      state.isRefreshing = true;
+
       getUI()?.showLoader?.(
         existingId
           ? "جاري تحديث الرحلة..."
           : "جاري حفظ الرحلة السابقة..."
       );
 
-      if (existingId) {
-        await updateTrip(existingId, trip);
-      } else {
-        await addTripToStore(trip);
-      }
+      const savedTrip = existingId
+        ? await updateTrip(existingId, trip)
+        : await addTripToStore(trip);
 
       closeModal();
 
       state.activeTab = "upcoming";
       state.activeView = "hub";
+      state.activeTripId = null;
       state.memoryDraft = null;
 
-      refresh();
+      requestDeferredRefresh(
+        existingId
+          ? "passport-trip-updated"
+          : "passport-trip-created",
+        {
+          force: true,
+          delay: 0
+        }
+      );
 
       getUI()?.toast?.(
         existingId
@@ -3475,23 +4800,41 @@
         "success"
       );
 
-      emit(
+      commitStoreMutation(
         existingId
           ? "passport-trip-updated"
           : "passport-trip-created",
         {
-          tripId: trip.id,
+          tripId: savedTrip?.id || trip.id,
+          trip: savedTrip || trip,
           country: trip.country,
           countryCode
+        },
+        {
+          refresh: false
         }
       );
 
       return true;
     } catch (error) {
-      console.error("TIC Trips passport trip save error:", error);
-      getUI()?.toast?.("تعذر حفظ الرحلة.", "error");
+      console.error(
+        "TIC Trips passport trip save error:",
+        error
+      );
+
+      getUI()?.toast?.(
+        "تعذر حفظ الرحلة.",
+        "error"
+      );
+
       return false;
     } finally {
+      state.isRefreshing = false;
+
+      if (submitButton?.isConnected) {
+        submitButton.disabled = false;
+      }
+
       getUI()?.hideLoader?.();
     }
   };
@@ -3508,7 +4851,11 @@
 
     const source =
       event?.target?.closest?.(
-        "[data-trip-id], [data-country-key], [data-country-code]"
+        [
+          "[data-trip-id]",
+          "[data-country-key]",
+          "[data-country-code]"
+        ].join(",")
       ) ||
       null;
 
@@ -3521,11 +4868,15 @@
         null,
       countryKey:
         payload.params?.countryKey ||
-        source?.getAttribute("data-country-key") ||
+        source?.getAttribute(
+          "data-country-key"
+        ) ||
         null,
       countryCode:
         payload.params?.countryCode ||
-        source?.getAttribute("data-country-code") ||
+        source?.getAttribute(
+          "data-country-code"
+        ) ||
         null
     };
   };
@@ -3536,435 +4887,785 @@
     state.container
       .querySelectorAll("[data-trips-tab]")
       .forEach((button) => {
-        button.addEventListener("click", () => {
-          state.activeTab =
-            button.getAttribute("data-trips-tab") ||
-            "upcoming";
+        button.addEventListener(
+          "click",
+          () => {
+            state.activeTab =
+              button.getAttribute(
+                "data-trips-tab"
+              ) ||
+              "upcoming";
 
-          state.filters.search = "";
-          state.filters.status = "all";
-          state.filters.type = "all";
+            state.filters.search = "";
+            state.filters.status = "all";
+            state.filters.type = "all";
 
-          refresh();
-        });
+            refresh({
+              reason: "tab-changed",
+              force: true
+            });
+          },
+          { once: true }
+        );
       });
 
     state.container
       .querySelectorAll("[data-country-key]")
       .forEach((card) => {
-        card.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
+        card.addEventListener(
+          "keydown",
+          (event) => {
+            if (
+              event.key === "Enter" ||
+              event.key === " "
+            ) {
+              event.preventDefault();
 
-            showCountrySheet(
-              card.getAttribute("data-country-key")
-            );
-          }
-        });
+              showCountrySheet(
+                card.getAttribute(
+                  "data-country-key"
+                )
+              );
+            }
+          },
+          { once: true }
+        );
       });
 
     const searchInput =
-      state.container.querySelector("[data-trips-search]");
+      state.container.querySelector(
+        "[data-trips-search]"
+      );
 
-    searchInput?.addEventListener("input", (event) => {
-      state.filters.search = event.target.value;
-      refresh({ preserveFocus: true });
-    });
+    searchInput?.addEventListener(
+      "input",
+      (event) => {
+        state.filters.search =
+          event.target.value;
+
+        state.isTyping = true;
+        markInteraction(
+          "typing",
+          event.target
+        );
+
+        refresh({
+          preserveFocus: true,
+          reason: "search-input",
+          force: true
+        });
+      }
+    );
 
     state.container
-      .querySelector("[data-trips-filter-status]")
-      ?.addEventListener("change", (event) => {
-        state.filters.status = event.target.value;
-        refresh();
-      });
+      .querySelector(
+        "[data-trips-filter-status]"
+      )
+      ?.addEventListener(
+        "change",
+        (event) => {
+          state.filters.status =
+            event.target.value;
+
+          refresh({
+            reason: "status-filter",
+            force: true
+          });
+        },
+        { once: true }
+      );
 
     state.container
-      .querySelector("[data-trips-filter-type]")
-      ?.addEventListener("change", (event) => {
-        state.filters.type = event.target.value;
-        refresh();
-      });
+      .querySelector(
+        "[data-trips-filter-type]"
+      )
+      ?.addEventListener(
+        "change",
+        (event) => {
+          state.filters.type =
+            event.target.value;
+
+          refresh({
+            reason: "type-filter",
+            force: true
+          });
+        },
+        { once: true }
+      );
 
     state.container
       .querySelector("[data-trips-sort]")
-      ?.addEventListener("change", (event) => {
-        state.filters.sort = event.target.value;
-        refresh();
-      });
+      ?.addEventListener(
+        "change",
+        (event) => {
+          state.filters.sort =
+            event.target.value;
+
+          refresh({
+            reason: "sort-changed",
+            force: true
+          });
+        },
+        { once: true }
+      );
   };
 
   const refresh = (options = {}) => {
-    if (!state.container || !state.mounted) return false;
+    if (
+      !state.container ||
+      !state.mounted ||
+      state.destroyed
+    ) {
+      return false;
+    }
 
-    const activeElement = document.activeElement;
+    if (
+      !options.force &&
+      isInteractionLocked()
+    ) {
+      return requestDeferredRefresh(
+        options.reason ||
+        "refresh-during-interaction",
+        {
+          forceAfterWait: true
+        }
+      );
+    }
+
+    if (state.isRendering) {
+      return requestDeferredRefresh(
+        options.reason ||
+        "refresh-during-render",
+        {
+          forceAfterWait: true
+        }
+      );
+    }
+
+    const activeElement =
+      document.activeElement;
 
     const preserveSearch =
       options.preserveFocus === true &&
-      activeElement?.matches?.("[data-trips-search]");
+      activeElement?.matches?.(
+        "[data-trips-search]"
+      );
 
     const cursor =
       preserveSearch &&
-      typeof activeElement.selectionStart === "number"
+      typeof activeElement.selectionStart ===
+        "number"
         ? activeElement.selectionStart
         : null;
 
-    const snapshot = buildSnapshot();
+    const scrollX =
+      window.scrollX ||
+      document.documentElement.scrollLeft ||
+      0;
 
-    state.container.innerHTML = renderPage(snapshot);
-    applyInputBindings();
+    const scrollY =
+      window.scrollY ||
+      document.documentElement.scrollTop ||
+      0;
 
-    if (preserveSearch) {
-      const input =
-        state.container.querySelector("[data-trips-search]");
+    state.isRendering = true;
 
-      if (input) {
-        input.focus();
-
-        if (cursor !== null) {
-          input.setSelectionRange(cursor, cursor);
-        }
-      }
-    }
-
-    emit("refreshed", {
-      view: state.activeView,
-      tab: state.activeTab,
-      tripCount: snapshot.filteredTrips.length,
-      passportTripCount: snapshot.statistics.memories,
-      countryCount: snapshot.statistics.countries,
-      activeTripId: state.activeTripId
-    });
-
-    return true;
-  };
-
-  const scheduleSafeRefresh = () => {
-    if (state.refreshQueued || !state.mounted) return;
-
-    state.refreshQueued = true;
-
-    window.requestAnimationFrame(() => {
-      state.refreshQueued = false;
+    try {
+      const snapshot = buildSnapshot();
+      const signature =
+        state.lastSnapshotSignature;
 
       if (
-        document.querySelector(
-          "[data-trips-modal], [data-country-sheet]"
-        )
+        !options.force &&
+        signature &&
+        signature ===
+          state.lastRenderedSignature
       ) {
-        return;
+        return false;
       }
 
-      refresh();
-    });
+      state.container.innerHTML =
+        renderPage(snapshot);
+
+      state.lastRenderedSignature =
+        signature;
+
+      applyInputBindings();
+
+      if (preserveSearch) {
+        const input =
+          state.container.querySelector(
+            "[data-trips-search]"
+          );
+
+        if (input) {
+          input.focus({
+            preventScroll: true
+          });
+
+          if (cursor !== null) {
+            input.setSelectionRange(
+              cursor,
+              cursor
+            );
+          }
+        }
+      }
+
+      if (
+        options.preserveScroll !== false &&
+        !options.scrollTop
+      ) {
+        window.scrollTo(scrollX, scrollY);
+      }
+
+      if (options.scrollTop === true) {
+        window.scrollTo({
+          top: 0,
+          behavior:
+            options.smooth === false
+              ? "auto"
+              : "smooth"
+        });
+      }
+
+      emit("refreshed", {
+        reason:
+          options.reason ||
+          state.lastRefreshReason ||
+          "manual",
+        view: state.activeView,
+        tab: state.activeTab,
+        tripCount:
+          snapshot.filteredTrips.length,
+        passportTripCount:
+          snapshot.statistics.memories,
+        countryCount:
+          snapshot.statistics.countries,
+        activeTripId:
+          state.activeTripId,
+        signature
+      });
+
+      return true;
+    } finally {
+      state.isRendering = false;
+      state.isRefreshing = false;
+    }
+  };
+
+  const scheduleSafeRefresh = (
+    reason = "store-change"
+  ) => {
+    if (
+      !state.mounted ||
+      state.destroyed
+    ) {
+      return false;
+    }
+
+    return requestDeferredRefresh(
+      reason,
+      {
+        forceAfterWait: true,
+        delay: RENDER_IDLE_DELAY
+      }
+    );
   };
 
   const registerActions = () => {
     const ui = getUI();
 
-    if (!ui || typeof ui.registerAction !== "function") {
+    if (
+      !ui ||
+      typeof ui.registerAction !==
+        "function"
+    ) {
       return;
     }
 
     const register = (name, handler) => {
       if (ui.hasAction?.(name)) return;
 
-      const unsubscribe = ui.registerAction(name, handler);
+      const unsubscribe =
+        ui.registerAction(name, handler);
 
-      if (typeof unsubscribe === "function") {
-        state.actionUnsubscribers.push(unsubscribe);
+      if (
+        typeof unsubscribe ===
+        "function"
+      ) {
+        state.actionUnsubscribers.push(
+          unsubscribe
+        );
       }
     };
 
     register("trips-new", () => {
       const tripForm = getTripForm();
 
+      state.isFormOpen = true;
+
       if (tripForm?.openCreate) {
-        return tripForm.openCreate();
-      }
-
-      return getRouter()?.go?.("trip-form", {
-        params: { mode: "create" },
-        source: "trips-new"
-      });
-    });
-
-    register("trips-add-memory", () =>
-      showMemoryModal({})
-    );
-
-    register("trips-open-country", (payload) => {
-      const { countryKey } = readActionParams(payload);
-
-      if (!countryKey) return false;
-
-      return showCountrySheet(countryKey);
-    });
-
-    register("trips-open-country-guide", (payload) => {
-      const { countryCode } = readActionParams(payload);
-
-      if (!countryCode) return false;
-
-      closeCountrySheet();
-
-      const router = getRouter();
-
-      if (typeof router?.go === "function") {
-        return router.go("guide", {
-          params: {
-            country: countryCode
-          },
-          query: {
-            country: countryCode
-          },
-          source: "trips-passport-country"
+        return tripForm.openCreate({
+          source: PAGE_ID
         });
       }
 
-      return false;
+      return getRouter()?.go?.(
+        "trip-form",
+        {
+          params: {
+            mode: "create"
+          },
+          source: "trips-new"
+        }
+      );
     });
 
-    register("trips-close-country", () => {
-      closeCountrySheet();
-      return true;
-    });
+    register(
+      "trips-add-memory",
+      () => showMemoryModal({})
+    );
 
-    register("trips-open-country-trip", (payload) => {
-      const { tripId } = readActionParams(payload);
+    register(
+      "trips-open-country",
+      (payload) => {
+        const { countryKey } =
+          readActionParams(payload);
 
-      if (!tripId || !findTrip(tripId)) return false;
+        if (!countryKey) return false;
 
-      closeCountrySheet();
-
-      state.activeTripId = tripId;
-      state.activeView = "details";
-
-      refresh();
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth"
-      });
-
-      return true;
-    });
-
-    register("trips-close-modal", () => {
-      closeModal();
-      return true;
-    });
-
-    register("trips-toggle-filters", () => {
-      state.filtersOpen = !state.filtersOpen;
-      refresh();
-      return true;
-    });
-
-    register("trips-clear-filters", () => {
-      state.filters = {
-        search: "",
-        status: "all",
-        type: "all",
-        sort: "start-asc"
-      };
-
-      refresh();
-      return true;
-    });
-
-    register("trips-view-details", (payload) => {
-      const { tripId } = readActionParams(payload);
-
-      if (!tripId || !findTrip(tripId)) return false;
-
-      state.activeTripId = tripId;
-      state.activeView = "details";
-
-      refresh();
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth"
-      });
-
-      return true;
-    });
-
-    register("trips-back-to-hub", () => {
-      state.activeView = "hub";
-      state.activeTripId = null;
-
-      refresh();
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth"
-      });
-
-      return true;
-    });
-
-    register("trips-edit", (payload) => {
-      const { tripId } = readActionParams(payload);
-
-      if (!tripId) return false;
-
-      const trip = findTrip(tripId);
-      if (!trip) return false;
-
-      if (isPassportTrip(trip)) {
-        return showMemoryModal(trip);
+        return showCountrySheet(
+          countryKey
+        );
       }
+    );
 
-      const tripForm = getTripForm();
+    register(
+      "trips-open-country-guide",
+      (payload) => {
+        const { countryCode } =
+          readActionParams(payload);
 
-      if (tripForm?.openEdit) {
-        return tripForm.openEdit(tripId);
-      }
+        if (!countryCode) return false;
 
-      return getRouter()?.go?.("trip-form", {
-        params: {
-          mode: "edit",
-          tripId
-        },
-        source: "trips-edit"
-      });
-    });
+        closeCountrySheet();
 
-    register("trips-card-menu", async (payload) => {
-      const { tripId } = readActionParams(payload);
-      const trip = findTrip(tripId);
+        const router = getRouter();
 
-      if (!trip) {
-        ui.toast?.("تعذر العثور على الرحلة.", "error");
+        notifyIntelligenceLayer(
+          "country-guide-opened",
+          {
+            countryCode,
+            source: "passport"
+          }
+        );
+
+        if (
+          typeof router?.go ===
+          "function"
+        ) {
+          return router.go("guide", {
+            params: {
+              country: countryCode
+            },
+            query: {
+              country: countryCode
+            },
+            source:
+              "trips-passport-country"
+          });
+        }
+
         return false;
       }
+    );
 
-      const choice =
-        typeof ui.dialog === "function"
-          ? await ui.dialog({
-              title: "إجراءات الرحلة",
-              message:
-                trip.title ||
-                trip.destination ||
-                "الرحلة",
-              icon: "✈",
-              actions: [
-                { label: "إلغاء", result: "cancel" },
-                { label: "تعديل", result: "edit", primary: true },
-                { label: "نسخ", result: "duplicate" },
-                { label: "حذف", result: "delete", danger: true }
-              ]
-            })
-          : window.prompt(
-              "اكتب: edit أو duplicate أو delete"
-            );
+    register(
+      "trips-close-country",
+      () => {
+        closeCountrySheet();
+        return true;
+      }
+    );
 
-      if (choice === "edit") {
+    register(
+      "trips-open-country-trip",
+      (payload) => {
+        const { tripId } =
+          readActionParams(payload);
+
+        if (
+          !tripId ||
+          !findTrip(tripId)
+        ) {
+          return false;
+        }
+
+        closeCountrySheet();
+
+        state.activeTripId = tripId;
+        state.activeView = "details";
+
+        refresh({
+          reason:
+            "country-trip-opened",
+          force: true,
+          scrollTop: true
+        });
+
+        return true;
+      }
+    );
+
+    register(
+      "trips-close-modal",
+      () => {
+        closeModal();
+        return true;
+      }
+    );
+
+    register(
+      "trips-toggle-filters",
+      () => {
+        state.filtersOpen =
+          !state.filtersOpen;
+
+        refresh({
+          reason:
+            "filters-toggled",
+          force: true
+        });
+
+        return true;
+      }
+    );
+
+    register(
+      "trips-clear-filters",
+      () => {
+        state.filters = {
+          search: "",
+          status: "all",
+          type: "all",
+          sort: "start-asc"
+        };
+
+        refresh({
+          reason:
+            "filters-cleared",
+          force: true
+        });
+
+        return true;
+      }
+    );
+
+    register(
+      "trips-view-details",
+      (payload) => {
+        const { tripId } =
+          readActionParams(payload);
+
+        if (
+          !tripId ||
+          !findTrip(tripId)
+        ) {
+          return false;
+        }
+
+        state.activeTripId = tripId;
+        state.activeView = "details";
+
+        refresh({
+          reason:
+            "trip-details-opened",
+          force: true,
+          scrollTop: true
+        });
+
+        notifyIntelligenceLayer(
+          "trip-opened",
+          {
+            tripId
+          }
+        );
+
+        return true;
+      }
+    );
+
+    register(
+      "trips-back-to-hub",
+      () => {
+        state.activeView = "hub";
+        state.activeTripId = null;
+
+        refresh({
+          reason:
+            "back-to-hub",
+          force: true,
+          scrollTop: true
+        });
+
+        return true;
+      }
+    );
+
+    register(
+      "trips-edit",
+      (payload) => {
+        const { tripId } =
+          readActionParams(payload);
+
+        if (!tripId) return false;
+
+        const trip =
+          findTrip(tripId);
+
+        if (!trip) return false;
+
         if (isPassportTrip(trip)) {
           return showMemoryModal(trip);
         }
 
-        const tripForm = getTripForm();
+        const tripForm =
+          getTripForm();
+
+        state.isFormOpen = true;
 
         if (tripForm?.openEdit) {
-          return tripForm.openEdit(tripId);
+          return tripForm.openEdit(
+            tripId,
+            {
+              source: PAGE_ID
+            }
+          );
         }
 
-        return getRouter()?.go?.("trip-form", {
-          params: {
-            mode: "edit",
-            tripId
-          },
-          source: "trips-card-menu-edit"
-        });
+        return getRouter()?.go?.(
+          "trip-form",
+          {
+            params: {
+              mode: "edit",
+              tripId
+            },
+            source: "trips-edit"
+          }
+        );
       }
+    );
 
-      if (choice === "duplicate") {
-        const confirmed =
-          typeof ui.confirm === "function"
-            ? await ui.confirm({
-                title: "تكرار الرحلة",
-                message:
-                  `سيتم إنشاء نسخة جديدة من "${
-                    trip.title ||
-                    trip.destination
-                  }".`,
-                confirmLabel: "إنشاء نسخة",
-                cancelLabel: "إلغاء"
-              })
-            : window.confirm(
-                "هل تريد إنشاء نسخة من هذه الرحلة؟"
-              );
+    register(
+      "trips-card-menu",
+      async (payload) => {
+        const { tripId } =
+          readActionParams(payload);
 
-        if (confirmed !== true) return false;
+        const trip =
+          findTrip(tripId);
 
-        try {
-          ui.showLoader?.("جاري إنشاء نسخة...");
-
-          const duplicate =
-            await duplicateTripInStore(tripId);
-
-          state.activeView = "hub";
-          state.activeTab = "upcoming";
-          state.activeTripId = null;
-
-          refresh();
-
+        if (!trip) {
           ui.toast?.(
-            "تم إنشاء نسخة جديدة.",
-            "success"
+            "تعذر العثور على الرحلة.",
+            "error"
           );
 
-          return duplicate;
-        } finally {
-          ui.hideLoader?.();
+          return false;
         }
-      }
 
-      if (choice === "delete") {
-        const confirmed =
-          typeof ui.confirm === "function"
-            ? await ui.confirm({
-                title: "حذف الرحلة",
+        const choice =
+          typeof ui.dialog ===
+          "function"
+            ? await ui.dialog({
+                title:
+                  "إجراءات الرحلة",
                 message:
-                  `سيتم حذف "${
-                    trip.title ||
-                    trip.destination
-                  }" نهائياً.`,
-                confirmLabel: "حذف",
-                cancelLabel: "إلغاء",
-                danger: true
+                  trip.title ||
+                  trip.destination ||
+                  "الرحلة",
+                icon: "✈",
+                actions: [
+                  {
+                    label: "إلغاء",
+                    result: "cancel"
+                  },
+                  {
+                    label: "تعديل",
+                    result: "edit",
+                    primary: true
+                  },
+                  {
+                    label: "نسخ",
+                    result: "duplicate"
+                  },
+                  {
+                    label: "حذف",
+                    result: "delete",
+                    danger: true
+                  }
+                ]
               })
-            : window.confirm(
-                "هل تريد حذف هذه الرحلة نهائياً؟"
+            : window.prompt(
+                "اكتب: edit أو duplicate أو delete"
               );
 
-        if (confirmed !== true) return false;
+        if (choice === "edit") {
+          if (isPassportTrip(trip)) {
+            return showMemoryModal(
+              trip
+            );
+          }
 
-        try {
-          ui.showLoader?.("جاري حذف الرحلة...");
+          const tripForm =
+            getTripForm();
 
-          await deleteTripFromStore(tripId);
+          state.isFormOpen = true;
 
-          state.activeView = "hub";
-          state.activeTripId = null;
+          if (tripForm?.openEdit) {
+            return tripForm.openEdit(
+              tripId,
+              {
+                source: PAGE_ID
+              }
+            );
+          }
 
-          refresh();
-
-          ui.toast?.(
-            "تم حذف الرحلة.",
-            "success"
+          return getRouter()?.go?.(
+            "trip-form",
+            {
+              params: {
+                mode: "edit",
+                tripId
+              },
+              source:
+                "trips-card-menu-edit"
+            }
           );
-
-          return true;
-        } finally {
-          ui.hideLoader?.();
         }
-      }
 
-      return false;
-    });
+        if (
+          choice === "duplicate"
+        ) {
+          const confirmed =
+            typeof ui.confirm ===
+            "function"
+              ? await ui.confirm({
+                  title:
+                    "تكرار الرحلة",
+                  message:
+                    `سيتم إنشاء نسخة جديدة من "${
+                      trip.title ||
+                      trip.destination
+                    }".`,
+                  confirmLabel:
+                    "إنشاء نسخة",
+                  cancelLabel:
+                    "إلغاء"
+                })
+              : window.confirm(
+                  "هل تريد إنشاء نسخة من هذه الرحلة؟"
+                );
+
+          if (confirmed !== true) {
+            return false;
+          }
+
+          try {
+            state.isRefreshing = true;
+
+            ui.showLoader?.(
+              "جاري إنشاء نسخة..."
+            );
+
+            const duplicate =
+              await duplicateTripInStore(
+                tripId
+              );
+
+            state.activeView = "hub";
+            state.activeTab =
+              "upcoming";
+            state.activeTripId = null;
+
+            refresh({
+              reason:
+                "trip-duplicated",
+              force: true
+            });
+
+            ui.toast?.(
+              "تم إنشاء نسخة جديدة.",
+              "success"
+            );
+
+            return duplicate;
+          } finally {
+            state.isRefreshing = false;
+            ui.hideLoader?.();
+          }
+        }
+
+        if (choice === "delete") {
+          const confirmed =
+            typeof ui.confirm ===
+            "function"
+              ? await ui.confirm({
+                  title:
+                    "حذف الرحلة",
+                  message:
+                    `سيتم حذف "${
+                      trip.title ||
+                      trip.destination
+                    }" نهائياً.`,
+                  confirmLabel: "حذف",
+                  cancelLabel: "إلغاء",
+                  danger: true
+                })
+              : window.confirm(
+                  "هل تريد حذف هذه الرحلة نهائياً؟"
+                );
+
+          if (confirmed !== true) {
+            return false;
+          }
+
+          try {
+            state.isRefreshing = true;
+
+            ui.showLoader?.(
+              "جاري حذف الرحلة..."
+            );
+
+            await deleteTripFromStore(
+              tripId
+            );
+
+            state.activeView = "hub";
+            state.activeTripId = null;
+
+            refresh({
+              reason:
+                "trip-deleted",
+              force: true
+            });
+
+            ui.toast?.(
+              "تم حذف الرحلة.",
+              "success"
+            );
+
+            return true;
+          } finally {
+            state.isRefreshing = false;
+            ui.hideLoader?.();
+          }
+        }
+
+        return false;
+      }
+    );
   };
 
   const subscribeToStore = () => {
@@ -3972,384 +5673,77 @@
 
     if (
       !store ||
-      typeof store.subscribe !== "function" ||
+      typeof store.subscribe !==
+        "function" ||
       state.unsubscribeStore
     ) {
       return;
     }
 
-    state.unsubscribeStore =
-      store.subscribe(() => {
-        scheduleSafeRefresh();
-      });
+    const handleStoreChange = (
+      change = {}
+    ) => {
+      const source = text(
+        change?.source ||
+        change?.meta?.source ||
+        change?.detail?.source
+      ).toLowerCase();
+
+      const reason =
+        change?.reason ||
+        change?.type ||
+        change?.action?.type ||
+        "store-change";
+
+      if (
+        source === PAGE_ID &&
+        state.isRefreshing
+      ) {
+        return;
+      }
+
+      scheduleSafeRefresh(reason);
+    };
+
+    const unsubscribe =
+      store.subscribe(
+        handleStoreChange
+      );
+
+    if (
+      typeof unsubscribe ===
+      "function"
+    ) {
+      state.unsubscribeStore =
+        unsubscribe;
+    } else if (
+      unsubscribe &&
+      typeof unsubscribe.unsubscribe ===
+        "function"
+    ) {
+      state.unsubscribeStore =
+        () => unsubscribe.unsubscribe();
+    } else {
+      state.unsubscribeStore =
+        () => {};
+    }
   };
+
 
   /* =========================================================
-     Public page API
+     Planned Trips integration
   ========================================================= */
 
-  const TripsPage = {
-    id: PAGE_ID,
-    title: "رحلاتي",
-    icon: "✈",
-    version: PAGE_VERSION,
+  const PLANNED_STYLE_ID =
+    "tic-planned-trips-integration-styles";
 
-    init() {
-      if (state.initialized) {
-        return this.diagnostics();
-      }
+  const PLANNED_SECTION_SELECTOR =
+    "[data-planned-trips-section]";
 
-      ensureStyles();
-      registerActions();
-      subscribeToStore();
-
-      state.initialized = true;
-
-      emit("initialized", {
-        version: PAGE_VERSION
-      });
-
-      return this.diagnostics();
-    },
-
-    render(context = {}) {
-      this.init();
-
-      const params = context.params || {};
-
-      if (params.tripId) {
-        state.activeTripId = params.tripId;
-      }
-
-      state.activeView =
-        params.view === "details" &&
-        params.tripId
-          ? "details"
-          : "hub";
-
-      if (params.tab && TAB_LABELS[params.tab]) {
-        state.activeTab = params.tab;
-      }
-
-      return renderPage(buildSnapshot());
-    },
-
-    mount(context = {}) {
-      this.init();
-
-      const container = resolveContainer(context.container);
-
-      if (!container) {
-        throw new Error(
-          "TIC Trips Error: route container not found."
-        );
-      }
-
-      const params = context.params || {};
-
-      state.activeView =
-        params.view === "details" &&
-        params.tripId
-          ? "details"
-          : "hub";
-
-      state.activeTripId = params.tripId || null;
-
-      if (params.tab && TAB_LABELS[params.tab]) {
-        state.activeTab = params.tab;
-      }
-
-      state.container = container;
-      state.mounted = true;
-
-      const snapshot = buildSnapshot();
-
-      container.innerHTML = renderPage(snapshot);
-      applyInputBindings();
-
-      emit("mounted", {
-        view: state.activeView,
-        tab: state.activeTab,
-        activeTripId: state.activeTripId,
-        tripCount: snapshot.trips.length,
-        passportTripCount:
-          snapshot.statistics.memories
-      });
-
-      return container;
-    },
-
-    afterEnter(context = {}) {
-      const container = resolveContainer(context.container);
-
-      if (container) {
-        state.container = container;
-        state.mounted = true;
-      }
-
-      applyInputBindings();
-      return true;
-    },
-
-    unmount() {
-      closeModal();
-      closeCountrySheet();
-
-      state.mounted = false;
-      state.container = null;
-
-      emit("unmounted", {
-        view: state.activeView,
-        tab: state.activeTab,
-        activeTripId: state.activeTripId
-      });
-
-      return true;
-    },
-
-    refresh,
-
-    openTrip(tripId) {
-      if (!findTrip(tripId)) return false;
-
-      state.activeTripId = tripId;
-      state.activeView = "details";
-
-      return refresh();
-    },
-
-    openHub(tab = "upcoming") {
-      state.activeTripId = null;
-      state.activeView = "hub";
-
-      if (TAB_LABELS[tab]) {
-        state.activeTab = tab;
-      }
-
-      return refresh();
-    },
-
-    openList() {
-      return this.openHub("all");
-    },
-
-    openMemories() {
-      return this.openCountries();
-    },
-
-    openCountries() {
-      state.activeView = "hub";
-      state.activeTab = "upcoming";
-
-      const result = refresh();
-
-      window.requestAnimationFrame(() => {
-        state.container
-          ?.querySelector(".passport-section")
-          ?.scrollIntoView({
-            behavior: "smooth",
-            block: "start"
-          });
-      });
-
-      return result;
-    },
-
-    openCountry(countryKey) {
-      return showCountrySheet(
-        normalizeCountryKey(countryKey)
-      );
-    },
-
-    addPastTrip() {
-      return showMemoryModal({});
-    },
-
-    setFilters(filters = {}) {
-      state.filters = {
-        ...state.filters,
-        ...clone(filters)
-      };
-
-      refresh();
-
-      return clone(state.filters);
-    },
-
-    getFilters() {
-      return clone(state.filters);
-    },
-
-    getSnapshot() {
-      return clone(
-        state.lastSnapshot ||
-        buildSnapshot()
-      );
-    },
-
-    subscribe(listener) {
-      if (typeof listener !== "function") {
-        throw new TypeError(
-          "TIC Trips subscriber must be a function."
-        );
-      }
-
-      state.subscribers.add(listener);
-
-      return () =>
-        state.subscribers.delete(listener);
-    },
-
-    destroy() {
-      this.unmount();
-
-      if (typeof state.unsubscribeStore === "function") {
-        state.unsubscribeStore();
-      }
-
-      state.actionUnsubscribers.forEach((unsubscribe) => {
-        try {
-          unsubscribe?.();
-        } catch (_) {
-          // Ignore cleanup errors.
-        }
-      });
-
-      document.getElementById(STYLE_ID)?.remove();
-
-      state.unsubscribeStore = null;
-      state.actionUnsubscribers = [];
-      state.subscribers.clear();
-      state.lastSnapshot = null;
-      state.activeView = "hub";
-      state.activeTab = "upcoming";
-      state.activeTripId = null;
-      state.activeCountryKey = null;
-      state.initialized = false;
-
-      return true;
-    },
-
-    diagnostics() {
-      return {
-        id: this.id,
-        title: this.title,
-        version: this.version,
-        initialized: state.initialized,
-        mounted: state.mounted,
-        activeView: state.activeView,
-        activeTab: state.activeTab,
-        activeTripId: state.activeTripId,
-        activeCountryKey: state.activeCountryKey,
-        filters: clone(state.filters),
-        filtersOpen: state.filtersOpen,
-        hasContainer: Boolean(state.container),
-        storeAvailable: Boolean(getStore()),
-        routerAvailable: Boolean(getRouter()),
-        uiAvailable: Boolean(getUI()),
-        tripFormAvailable: Boolean(getTripForm()),
-        guideEngineAvailable: Boolean(getGuideEngine()),
-        worldGuideDataAvailable: Boolean(getWorldGuideData()),
-        actionCount: state.actionUnsubscribers.length,
-        subscriberCount: state.subscribers.size,
-        hasSnapshot: Boolean(state.lastSnapshot)
-      };
-    }
-  };
-
-  window.TIC = window.TIC || {};
-  window.TIC.Pages = window.TIC.Pages || {};
-  window.TIC.Pages.trips = TripsPage;
-  window.TICTripsPage = TripsPage;
-
-  const router = getRouter();
-
-  if (
-    router &&
-    typeof router.register === "function"
-  ) {
-    if (!router.has?.("trips")) {
-      router.register("trips", {
-        id: "trips",
-        title: "رحلاتي",
-        module: "trips",
-        icon: "✈",
-        visible: true,
-        order: 2
-      });
-    }
-
-    router.registerPage?.(
-      "trips",
-      TripsPage
-    );
-  }
-
-  TripsPage.init();
-})(window, document);
-
-/* =========================================================
-   Travel Intelligence Center
-   Planned Trips Integration for Trips Page V1.0.0
-
-   File Path:
-   js/pages/trips.js
-
-   Installation:
-   - Keep Trips Page V3.6.0 exactly as it is.
-   - Append this block AFTER the existing final line:
-     })(window, document);
-
-   Purpose:
-   - Adds a separate "الرحلات المخطط لها" area.
-   - Reads plannedTrips from Central Store V2.3.0.
-   - Shows booking checklist and readiness percentage.
-   - Updates flight/hotel checklist directly in Store.
-   - Automatically promotes a planned trip to a ready trip
-     when flightBooked and hotelBooked are both complete.
-   - Preserves every current Trips, Passport, Guide and UI feature.
-========================================================= */
-
-(function plannedTripsPageIntegrationFactory(window, document) {
-  "use strict";
-
-  const VERSION = "1.0.0";
-  const STYLE_ID = "tic-planned-trips-integration-styles";
-  const PAGE_SELECTOR = '[data-page="trips"]';
-  const SECTION_SELECTOR = "[data-planned-trips-section]";
-
-  const runtime = {
-    initialized: false,
-    observer: null,
-    clickBound: false,
-    eventBindings: [],
-    patchApplied: false,
+  const plannedRuntime = {
     rendering: false,
-    lastSignature: ""
-  };
-
-  const clone = (value) => {
-    if (value === undefined) return undefined;
-
-    if (typeof structuredClone === "function") {
-      try {
-        return structuredClone(value);
-      } catch (_) {}
-    }
-
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch (_) {
-      return value;
-    }
-  };
-
-  const text = (value, fallback = "") =>
-    String(value === undefined || value === null ? fallback : value).trim();
-
-  const number = (value, fallback = 0) => {
-    const result = Number(value);
-    return Number.isFinite(result) ? result : fallback;
+    lastSignature: "",
+    pendingActionIds: new Set()
   };
 
   const nonNegative = (value, fallback = 0) =>
@@ -4357,31 +5751,6 @@
 
   const asArray = (value) =>
     Array.isArray(value) ? clone(value) : [];
-
-  const escapeHTML = (value) =>
-    text(value)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-
-  const getStore = () =>
-    window.TIC?.Store ||
-    window.TICStore ||
-    window.Store ||
-    window.TravelStore ||
-    null;
-
-  const getRouter = () =>
-    window.TIC?.Router ||
-    window.TICRouter ||
-    null;
-
-  const getUI = () =>
-    window.TIC?.UI ||
-    window.TICUI ||
-    null;
 
   const notify = (message, tone = "info") => {
     const ui = getUI();
@@ -4398,73 +5767,69 @@
       return ui.showToast(message, tone);
     }
 
-    console.log(`[PlannedTrips:${tone}] ${message}`);
+    console.log(`[Trips:${tone}] ${message}`);
     return null;
-  };
-
-  const getStoreState = () => {
-    const store = getStore();
-
-    if (!store) return {};
-
-    try {
-      if (typeof store.getState === "function") {
-        return clone(store.getState()) || {};
-      }
-
-      if (typeof store.get === "function") {
-        const fullState = store.get();
-
-        if (fullState && typeof fullState === "object") {
-          return clone(fullState);
-        }
-
-        return {
-          profile: store.get("profile"),
-          plannedTrips: store.get("plannedTrips"),
-          trips: store.get("trips"),
-          budgetTravelIntelligence: store.get("budgetTravelIntelligence")
-        };
-      }
-    } catch (error) {
-      console.warn("Planned Trips: Store read failed.", error);
-    }
-
-    return {};
   };
 
   const getPlannedTrips = () => {
     const store = getStore();
 
     try {
-      if (typeof store?.getPlannedTrips === "function") {
+      if (
+        typeof store?.getPlannedTrips ===
+        "function"
+      ) {
         return asArray(
           store.getPlannedTrips({
             includeArchived: false,
             includeConverted: false
           })
+        ).filter(
+          (trip) =>
+            ![
+              "archived",
+              "cancelled",
+              "converted"
+            ].includes(
+              text(trip.status).toLowerCase()
+            )
         );
       }
 
-      return asArray(getStoreState().plannedTrips).filter(
+      return asArray(
+        getStoreState().plannedTrips
+      ).filter(
         (trip) =>
-          !["archived", "cancelled", "converted"].includes(
+          ![
+            "archived",
+            "cancelled",
+            "converted"
+          ].includes(
             text(trip.status).toLowerCase()
           )
       );
     } catch (error) {
-      console.warn("Planned Trips: failed to list planned trips.", error);
+      console.warn(
+        "TIC Trips: failed to list planned trips.",
+        error
+      );
+
       return [];
     }
   };
 
   const findPlannedTrip = (plannedTripId) =>
     getPlannedTrips().find(
-      (trip) => String(trip.id) === String(plannedTripId)
+      (trip) =>
+        String(trip.id) ===
+        String(plannedTripId)
     ) || null;
 
-  const calculateReadiness = (trip) => {
-    const checklist = trip?.checklist || {};
+  const calculateReadiness = (trip = {}) => {
+    const checklist =
+      isObject(trip.checklist)
+        ? trip.checklist
+        : {};
 
     const primary = [
       checklist.flightBooked === true,
@@ -4481,34 +5846,54 @@
       checklist.packingReady === true
     ];
 
-    const allSteps = [...primary, ...secondary];
-    const completed = allSteps.filter(Boolean).length;
-    const total = allSteps.length;
+    const allSteps = [
+      ...primary,
+      ...secondary
+    ];
+
+    const completed =
+      allSteps.filter(Boolean).length;
+
+    const total =
+      allSteps.length;
 
     return {
       completed,
       total,
       percent: total
-        ? Math.round((completed / total) * 100)
+        ? Math.round(
+            (completed / total) * 100
+          )
         : 0,
-      flightBooked: checklist.flightBooked === true,
-      hotelBooked: checklist.hotelBooked === true,
+      flightBooked:
+        checklist.flightBooked === true,
+      hotelBooked:
+        checklist.hotelBooked === true,
       readyForPromotion:
         checklist.flightBooked === true &&
         checklist.hotelBooked === true
     };
   };
 
-  const formatCurrency = (value, currency = "AED") => {
+  const formatPlannedCurrency = (
+    value,
+    currencyCode = "AED"
+  ) => {
     try {
-      return new Intl.NumberFormat("ar-AE", {
-        style: "currency",
-        currency: currency || "AED",
-        maximumFractionDigits: 0
-      }).format(number(value));
+      return new Intl.NumberFormat(
+        "ar-AE",
+        {
+          style: "currency",
+          currency:
+            currencyCode || "AED",
+          maximumFractionDigits: 0
+        }
+      ).format(number(value));
     } catch (_) {
-      return `${Math.round(number(value)).toLocaleString("ar-AE")} ${
-        currency || "AED"
+      return `${Math.round(
+        number(value)
+      ).toLocaleString("ar-AE")} ${
+        currencyCode || "AED"
       }`;
     }
   };
@@ -4530,14 +5915,26 @@
       "ديسمبر"
     ];
 
-    return labels[number(month)] || "التاريخ لاحقاً";
+    return (
+      labels[number(month)] ||
+      "التاريخ لاحقاً"
+    );
   };
 
-  const ensureStyles = () => {
-    if (document.getElementById(STYLE_ID)) return;
+  const ensurePlannedTripsStyles = () => {
+    if (
+      document.getElementById(
+        PLANNED_STYLE_ID
+      )
+    ) {
+      return;
+    }
 
-    const style = document.createElement("style");
-    style.id = STYLE_ID;
+    const style =
+      document.createElement("style");
+
+    style.id = PLANNED_STYLE_ID;
+
     style.textContent = `
       .planned-trips-section {
         display: grid;
@@ -4743,6 +6140,12 @@
         cursor: pointer;
       }
 
+      .planned-trip-check:disabled,
+      .planned-trip-btn:disabled {
+        cursor: not-allowed;
+        opacity: .58;
+      }
+
       .planned-trip-check.is-complete {
         border-color: #bfe5d7;
         background: #effaf6;
@@ -4867,31 +6270,50 @@
   };
 
   const renderPlannedTripCard = (trip) => {
-    const readiness = calculateReadiness(trip);
-    const currency =
+    const readiness =
+      calculateReadiness(trip);
+
+    const storeState =
+      getStoreState();
+
+    const currencyCode =
       trip.currency ||
-      getStoreState().profile?.currency ||
+      storeState.profile?.currency ||
       "AED";
 
     const title =
       trip.title ||
-      `رحلة ${trip.city || trip.country || "مخطط لها"}`;
+      `رحلة ${
+        trip.city ||
+        trip.country ||
+        "مخطط لها"
+      }`;
 
     const location = [
       trip.city,
       trip.country
-    ].filter(Boolean).join("، ");
+    ]
+      .filter(Boolean)
+      .join("، ");
 
-    const budget = nonNegative(
-      trip.estimatedBudget ??
-      trip.budget ??
-      trip.totalCost
-    );
+    const budget =
+      nonNegative(
+        trip.estimatedBudget ??
+        trip.budget ??
+        trip.totalCost
+      );
 
     const month =
       trip.startDate
         ? text(trip.startDate).slice(0, 10)
-        : monthLabel(trip.suggestedMonth);
+        : monthLabel(
+            trip.suggestedMonth
+          );
+
+    const pending =
+      plannedRuntime.pendingActionIds.has(
+        String(trip.id)
+      );
 
     return `
       <article
@@ -4903,9 +6325,14 @@
             <span class="planned-trip-card__chip">
               PLANNED JOURNEY
             </span>
+
             <h3>${escapeHTML(title)}</h3>
+
             <p>
-              ${escapeHTML(location || "الوجهة محددة من الاقتراح الذكي")}
+              ${escapeHTML(
+                location ||
+                "الوجهة محددة من الاقتراح الذكي"
+              )}
             </p>
           </div>
 
@@ -4919,15 +6346,31 @@
           <div class="planned-trip-card__facts">
             <div>
               <small>الميزانية المتوقعة</small>
-              <strong>${escapeHTML(formatCurrency(budget, currency))}</strong>
+              <strong>
+                ${escapeHTML(
+                  formatPlannedCurrency(
+                    budget,
+                    currencyCode
+                  )
+                )}
+              </strong>
             </div>
+
             <div>
               <small>المدة</small>
-              <strong>${number(trip.durationDays, 5)} أيام</strong>
+              <strong>
+                ${number(
+                  trip.durationDays,
+                  5
+                )} أيام
+              </strong>
             </div>
+
             <div>
               <small>التوقيت المقترح</small>
-              <strong>${escapeHTML(month)}</strong>
+              <strong>
+                ${escapeHTML(month)}
+              </strong>
             </div>
           </div>
 
@@ -4935,11 +6378,22 @@
             <div class="planned-trip-progress__head">
               <span>تقدم التجهيز</span>
               <strong>
-                ${readiness.completed} من ${readiness.total}
+                ${readiness.completed}
+                من
+                ${readiness.total}
               </strong>
             </div>
-            <div class="planned-trip-progress__track">
-              <span style="width:${readiness.percent}%"></span>
+
+            <div
+              class="planned-trip-progress__track"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="${readiness.percent}"
+            >
+              <span
+                style="width:${readiness.percent}%"
+              ></span>
             </div>
           </div>
 
@@ -4947,16 +6401,28 @@
             <button
               type="button"
               class="planned-trip-check ${
-                readiness.flightBooked ? "is-complete" : ""
+                readiness.flightBooked
+                  ? "is-complete"
+                  : ""
               }"
               data-planned-action="toggle-check"
               data-planned-trip-id="${escapeHTML(trip.id)}"
               data-check-key="flightBooked"
-              aria-pressed="${readiness.flightBooked ? "true" : "false"}"
+              aria-pressed="${
+                readiness.flightBooked
+                  ? "true"
+                  : "false"
+              }"
+              ${pending ? "disabled" : ""}
             >
               <span class="planned-trip-check__icon">
-                ${readiness.flightBooked ? "✓" : "✈"}
+                ${
+                  readiness.flightBooked
+                    ? "✓"
+                    : "✈"
+                }
               </span>
+
               <span>
                 ${
                   readiness.flightBooked
@@ -4969,16 +6435,28 @@
             <button
               type="button"
               class="planned-trip-check ${
-                readiness.hotelBooked ? "is-complete" : ""
+                readiness.hotelBooked
+                  ? "is-complete"
+                  : ""
               }"
               data-planned-action="toggle-check"
               data-planned-trip-id="${escapeHTML(trip.id)}"
               data-check-key="hotelBooked"
-              aria-pressed="${readiness.hotelBooked ? "true" : "false"}"
+              aria-pressed="${
+                readiness.hotelBooked
+                  ? "true"
+                  : "false"
+              }"
+              ${pending ? "disabled" : ""}
             >
               <span class="planned-trip-check__icon">
-                ${readiness.hotelBooked ? "✓" : "⌂"}
+                ${
+                  readiness.hotelBooked
+                    ? "✓"
+                    : "⌂"
+                }
               </span>
+
               <span>
                 ${
                   readiness.hotelBooked
@@ -4994,7 +6472,12 @@
               type="button"
               class="planned-trip-btn planned-trip-btn--primary"
               data-planned-action="open-guide"
-              data-country-code="${escapeHTML(trip.countryCode || "")}"
+              data-country-code="${escapeHTML(
+                trip.countryCode ||
+                trip.guideCountryCode ||
+                ""
+              )}"
+              ${pending ? "disabled" : ""}
             >
               دليل الوجهة
             </button>
@@ -5004,7 +6487,12 @@
               class="planned-trip-btn planned-trip-btn--secondary"
               data-planned-action="promote"
               data-planned-trip-id="${escapeHTML(trip.id)}"
-              ${readiness.readyForPromotion ? "" : "disabled"}
+              ${
+                readiness.readyForPromotion &&
+                !pending
+                  ? ""
+                  : "disabled"
+              }
             >
               ${
                 readiness.readyForPromotion
@@ -5019,6 +6507,7 @@
               data-planned-action="delete"
               data-planned-trip-id="${escapeHTML(trip.id)}"
               aria-label="حذف الرحلة المخطط لها"
+              ${pending ? "disabled" : ""}
             >
               ×
             </button>
@@ -5028,18 +6517,22 @@
     `;
   };
 
-  const renderSection = (plannedTrips) => `
+  const renderPlannedTripsSection = (
+    plannedTrips
+  ) => `
     <section
       class="planned-trips-section"
       data-planned-trips-section
-      data-integration-version="${VERSION}"
+      data-integration-version="${PAGE_VERSION}"
     >
       <div class="planned-trips-section__head">
         <div>
           <span class="planned-trips-section__kicker">
             PLANNED TRIPS
           </span>
+
           <h2>الرحلات المخطط لها</h2>
+
           <p>
             أفكار رحلات وافقت عليها، وتتحول تلقائياً إلى رحلة جاهزة
             بعد شراء التذكرة وحجز الفندق.
@@ -5055,13 +6548,19 @@
         plannedTrips.length
           ? `
             <div class="planned-trips-list">
-              ${plannedTrips.map(renderPlannedTripCard).join("")}
+              ${plannedTrips
+                .map(renderPlannedTripCard)
+                .join("")}
             </div>
           `
           : `
             <div class="planned-trips-empty">
-              <div class="planned-trips-empty__icon">🧭</div>
+              <div class="planned-trips-empty__icon">
+                🧭
+              </div>
+
               <h3>لا توجد رحلات مخطط لها</h3>
+
               <p>
                 أضف اقتراحاً من مستشار السفر في صفحة الميزانية،
                 وسيظهر هنا مع خطوات التجهيز.
@@ -5072,285 +6571,537 @@
     </section>
   `;
 
-  const getInsertionTarget = (page) =>
-    page.querySelector(".trips-zone--journeys") ||
-    page.querySelector(".trips-passport-divider") ||
-    page.querySelector(".trips-shell");
-
-  const buildSignature = (plannedTrips) =>
-    JSON.stringify(
+  const buildPlannedTripsSignature = (
+    plannedTrips
+  ) =>
+    createSignature(
       plannedTrips.map((trip) => ({
         id: trip.id,
         status: trip.status,
         updatedAt: trip.updatedAt,
-        convertedTripId: trip.convertedTripId,
-        checklist: trip.checklist,
+        convertedTripId:
+          trip.convertedTripId,
+        checklist:
+          trip.checklist,
         budget:
           trip.estimatedBudget ??
           trip.budget,
-        startDate: trip.startDate,
-        suggestedMonth: trip.suggestedMonth
+        startDate:
+          trip.startDate,
+        suggestedMonth:
+          trip.suggestedMonth
       }))
     );
 
-  const inject = (force = false) => {
-    if (runtime.rendering) return false;
-
-    const page = document.querySelector(PAGE_SELECTOR);
-
+  const injectPlannedTrips = (
+    force = false
+  ) => {
     if (
-      !page ||
-      page.getAttribute("data-view") === "details"
+      plannedRuntime.rendering ||
+      !state.container ||
+      !state.mounted ||
+      state.activeView === "details"
     ) {
       return false;
     }
 
-    const target = getInsertionTarget(page);
+    const page =
+      state.container.querySelector(
+        '[data-page="trips"]'
+      );
+
+    if (!page) return false;
+
+    const target =
+      page.querySelector(
+        ".trips-zone--journeys"
+      ) ||
+      page.querySelector(
+        ".trips-passport-divider"
+      );
+
     if (!target) return false;
 
-    const plannedTrips = getPlannedTrips();
-    const signature = buildSignature(plannedTrips);
+    const plannedTrips =
+      getPlannedTrips();
 
-    if (!force && signature === runtime.lastSignature) {
+    const signature =
+      buildPlannedTripsSignature(
+        plannedTrips
+      );
+
+    if (
+      !force &&
+      signature ===
+        plannedRuntime.lastSignature &&
+      page.querySelector(
+        PLANNED_SECTION_SELECTOR
+      )
+    ) {
       return false;
     }
 
-    runtime.rendering = true;
+    plannedRuntime.rendering = true;
 
     try {
-      page.querySelector(SECTION_SELECTOR)?.remove();
+      page
+        .querySelector(
+          PLANNED_SECTION_SELECTOR
+        )
+        ?.remove();
 
       target.insertAdjacentHTML(
         "beforebegin",
-        renderSection(plannedTrips)
+        renderPlannedTripsSection(
+          plannedTrips
+        )
       );
 
-      runtime.lastSignature = signature;
+      plannedRuntime.lastSignature =
+        signature;
+
       return true;
     } finally {
-      runtime.rendering = false;
+      plannedRuntime.rendering = false;
+    }
+  };
+
+  const withPlannedActionLock = async (
+    plannedTripId,
+    operation
+  ) => {
+    const key =
+      String(plannedTripId);
+
+    if (
+      plannedRuntime.pendingActionIds.has(
+        key
+      )
+    ) {
+      return false;
+    }
+
+    plannedRuntime.pendingActionIds.add(
+      key
+    );
+
+    injectPlannedTrips(true);
+
+    try {
+      return await operation();
+    } finally {
+      plannedRuntime.pendingActionIds.delete(
+        key
+      );
+
+      plannedRuntime.lastSignature = "";
+
+      requestDeferredRefresh(
+        "planned-trip-action-complete",
+        {
+          force: true,
+          delay: 0
+        }
+      );
     }
   };
 
   const updateChecklist = async (
     plannedTripId,
     checkKey
-  ) => {
-    const store = getStore();
-    const trip = findPlannedTrip(plannedTripId);
+  ) =>
+    withPlannedActionLock(
+      plannedTripId,
+      async () => {
+        const store = getStore();
+        const trip =
+          findPlannedTrip(
+            plannedTripId
+          );
 
-    if (!store || !trip) {
-      notify("تعذر العثور على الرحلة المخطط لها.", "danger");
-      return false;
-    }
+        if (!store || !trip) {
+          notify(
+            "تعذر العثور على الرحلة المخطط لها.",
+            "danger"
+          );
 
-    const currentValue =
-      trip.checklist?.[checkKey] === true;
+          return false;
+        }
 
-    const changes = {
-      [checkKey]: !currentValue
-    };
+        const allowedKeys = [
+          "flightBooked",
+          "hotelBooked"
+        ];
 
-    try {
-      let updated = null;
+        if (
+          !allowedKeys.includes(
+            checkKey
+          )
+        ) {
+          return false;
+        }
+
+        const currentValue =
+          trip.checklist?.[checkKey] ===
+          true;
+
+        const changes = {
+          [checkKey]: !currentValue
+        };
+
+        try {
+          let updated = null;
+
+          if (
+            typeof store
+              .updatePlannedTripChecklist ===
+            "function"
+          ) {
+            updated =
+              await store
+                .updatePlannedTripChecklist(
+                  plannedTripId,
+                  changes,
+                  {
+                    autoPromote: false,
+                    source: PAGE_ID,
+                    immediate: true
+                  }
+                );
+          } else if (
+            typeof store
+              .updatePlannedTrip ===
+            "function"
+          ) {
+            updated =
+              await store
+                .updatePlannedTrip(
+                  plannedTripId,
+                  {
+                    checklist: {
+                      ...(trip.checklist ||
+                        {}),
+                      ...changes
+                    },
+                    updatedAt:
+                      new Date()
+                        .toISOString()
+                  },
+                  {
+                    source: PAGE_ID,
+                    immediate: true
+                  }
+                );
+          }
+
+          if (!updated) {
+            notify(
+              "تعذر تحديث التجهيز. تأكد من Store V2.5.0.",
+              "danger"
+            );
+
+            return false;
+          }
+
+          const finalTrip =
+            isObject(updated)
+              ? updated
+              : {
+                  ...trip,
+                  checklist: {
+                    ...(trip.checklist ||
+                      {}),
+                    ...changes
+                  }
+                };
+
+          const readiness =
+            calculateReadiness(
+              finalTrip
+            );
+
+          notify(
+            !currentValue
+              ? "تم تحديث خطوة التجهيز."
+              : "تم إلغاء علامة التجهيز.",
+            "success"
+          );
+
+          commitStoreMutation(
+            "planned-trip-checklist-updated",
+            {
+              plannedTripId,
+              checkKey,
+              value: !currentValue,
+              readiness
+            },
+            {
+              refresh: false
+            }
+          );
+
+          if (
+            readiness.readyForPromotion
+          ) {
+            return promotePlannedTrip(
+              plannedTripId,
+              true,
+              {
+                skipLock: true
+              }
+            );
+          }
+
+          return true;
+        } catch (error) {
+          console.error(
+            "TIC Trips planned checklist update failed.",
+            error
+          );
+
+          notify(
+            error?.message ||
+            "تعذر تحديث خطوة التجهيز.",
+            "danger"
+          );
+
+          return false;
+        }
+      }
+    );
+
+  const fallbackPromotePlannedTrip =
+    async (store, trip) => {
+      const now =
+        new Date().toISOString();
+
+      const countryCode =
+        resolveCountryCode(trip);
+
+      const readyTrip =
+        normalizeTripRecord({
+          ...clone(trip),
+          id:
+            trip.convertedTripId ||
+            createId("trip"),
+          plannedTripId:
+            trip.id,
+          status: "ready",
+          planningStatus: "ready",
+          countryCode,
+          guideCountryCode:
+            countryCode,
+          isMemory: false,
+          memorySource: "",
+          createdAt:
+            trip.createdAt || now,
+          updatedAt: now
+        });
+
+      const existingReady =
+        getTrips().find(
+          (item) =>
+            String(
+              item.plannedTripId
+            ) === String(trip.id)
+        );
+
+      const savedTrip =
+        existingReady ||
+        await addTripToStore(
+          readyTrip
+        );
 
       if (
-        typeof store.updatePlannedTripChecklist ===
+        typeof store
+          .updatePlannedTrip ===
         "function"
       ) {
-        updated =
-          store.updatePlannedTripChecklist(
-            plannedTripId,
-            changes,
-            {
-              autoPromote: true
-            }
-          );
-      } else if (
-        typeof store.updatePlannedTrip === "function"
-      ) {
-        updated =
-          store.updatePlannedTrip(
-            plannedTripId,
-            {
-              checklist: {
-                ...(trip.checklist || {}),
-                ...changes
-              }
-            }
-          );
+        await store.updatePlannedTrip(
+          trip.id,
+          {
+            status: "converted",
+            planningStatus:
+              "converted",
+            convertedTripId:
+              savedTrip.id,
+            convertedAt: now,
+            updatedAt: now
+          },
+          {
+            source: PAGE_ID,
+            immediate: true
+          }
+        );
       }
 
-      if (!updated) {
+      return savedTrip;
+    };
+
+  const promotePlannedTrip = async (
+    plannedTripId,
+    automatic = false,
+    options = {}
+  ) => {
+    const operation = async () => {
+      const store = getStore();
+      const trip =
+        findPlannedTrip(
+          plannedTripId
+        );
+
+      if (!store || !trip) {
         notify(
-          "تعذر تحديث التجهيز. تأكد من Store V2.3.0.",
+          "تعذر العثور على الرحلة المخطط لها.",
           "danger"
         );
+
         return false;
       }
 
       const readiness =
-        calculateReadiness(updated);
-
-      notify(
-        !currentValue
-          ? "تم تحديث خطوة التجهيز."
-          : "تم إلغاء علامة التجهيز.",
-        "success"
-      );
-
-      if (readiness.readyForPromotion) {
-        await promotePlannedTrip(
-          plannedTripId,
-          true
-        );
-      } else {
-        runtime.lastSignature = "";
-        inject(true);
-      }
-
-      return true;
-    } catch (error) {
-      console.error(
-        "Planned Trips checklist update failed.",
-        error
-      );
-
-      notify(
-        error?.message ||
-        "تعذر تحديث خطوة التجهيز.",
-        "danger"
-      );
-
-      return false;
-    }
-  };
-
-  const promotePlannedTrip = async (
-    plannedTripId,
-    automatic = false
-  ) => {
-    const store = getStore();
-    const trip = findPlannedTrip(plannedTripId);
-
-    if (!store || !trip) {
-      notify("تعذر العثور على الرحلة المخطط لها.", "danger");
-      return false;
-    }
-
-    const readiness = calculateReadiness(trip);
-
-    if (!readiness.readyForPromotion) {
-      notify(
-        "يجب شراء التذكرة وحجز الفندق أولاً.",
-        "warning"
-      );
-      return false;
-    }
-
-    try {
-      let result = null;
+        calculateReadiness(trip);
 
       if (
-        typeof store.promotePlannedTripToReady ===
-        "function"
+        !readiness.readyForPromotion
       ) {
-        result =
-          store.promotePlannedTripToReady(
-            plannedTripId,
-            {
-              automatic,
-              source: "trips-page"
-            }
-          );
-      } else if (
-        typeof store.convertPlannedTripToTrip ===
-        "function"
-      ) {
-        result =
-          store.convertPlannedTripToTrip(
-            plannedTripId,
-            {
-              status: "ready",
-              planningStatus: "ready"
-            }
-          );
-      }
-
-      if (!result) {
         notify(
-          "تعذر تحويل الرحلة. تأكد من Store V2.3.0.",
-          "danger"
+          "يجب شراء التذكرة وحجز الفندق أولاً.",
+          "warning"
         );
+
         return false;
       }
 
-      notify(
-        automatic
-          ? "اكتمل الحجز وتحولت الرحلة تلقائياً إلى رحلة جاهزة."
-          : "تم تحويل الرحلة إلى رحلة جاهزة.",
-        "success"
-      );
+      try {
+        let result = null;
 
-      window.dispatchEvent(
-        new CustomEvent(
-          "tic:planned-trip-promoted",
-          {
-            detail: {
-              plannedTripId,
-              result: clone(result),
-              automatic
-            }
-          }
-        )
-      );
-
-      runtime.lastSignature = "";
-
-      window.requestAnimationFrame(() => {
-        const page =
-          window.TIC?.Pages?.trips ||
-          window.TICTripsPage;
-
-        if (typeof page?.refresh === "function") {
-          page.refresh();
+        if (
+          typeof store
+            .promotePlannedTripToReady ===
+          "function"
+        ) {
+          result =
+            await store
+              .promotePlannedTripToReady(
+                plannedTripId,
+                {
+                  automatic,
+                  source: PAGE_ID,
+                  immediate: true,
+                  preventDuplicate: true
+                }
+              );
+        } else if (
+          typeof store
+            .convertPlannedTripToTrip ===
+          "function"
+        ) {
+          result =
+            await store
+              .convertPlannedTripToTrip(
+                plannedTripId,
+                {
+                  status: "ready",
+                  planningStatus:
+                    "ready",
+                  automatic,
+                  source: PAGE_ID,
+                  preventDuplicate: true
+                }
+              );
+        } else {
+          result =
+            await fallbackPromotePlannedTrip(
+              store,
+              trip
+            );
         }
 
-        inject(true);
-      });
+        if (!result) {
+          notify(
+            "تعذر تحويل الرحلة. تأكد من Store V2.5.0.",
+            "danger"
+          );
 
-      return true;
-    } catch (error) {
-      console.error(
-        "Planned Trips promotion failed.",
-        error
-      );
+          return false;
+        }
 
-      notify(
-        error?.message ||
-        "تعذر تحويل الرحلة إلى جاهزة.",
-        "danger"
-      );
+        notify(
+          automatic
+            ? "اكتمل الحجز وتحولت الرحلة تلقائياً إلى رحلة جاهزة."
+            : "تم تحويل الرحلة إلى رحلة جاهزة.",
+          "success"
+        );
 
-      return false;
+        commitStoreMutation(
+          "planned-trip-promoted",
+          {
+            plannedTripId,
+            result: clone(result),
+            automatic
+          },
+          {
+            refresh: false
+          }
+        );
+
+        state.activeView = "hub";
+        state.activeTab =
+          "upcoming";
+        state.activeTripId = null;
+
+        return result;
+      } catch (error) {
+        console.error(
+          "TIC Trips planned promotion failed.",
+          error
+        );
+
+        notify(
+          error?.message ||
+          "تعذر تحويل الرحلة إلى جاهزة.",
+          "danger"
+        );
+
+        return false;
+      }
+    };
+
+    if (options.skipLock) {
+      return operation();
     }
+
+    return withPlannedActionLock(
+      plannedTripId,
+      operation
+    );
   };
 
   const deletePlannedTrip = async (
     plannedTripId
   ) => {
     const store = getStore();
-    const trip = findPlannedTrip(plannedTripId);
+    const trip =
+      findPlannedTrip(
+        plannedTripId
+      );
 
     if (!store || !trip) {
-      notify("تعذر العثور على الرحلة.", "danger");
+      notify(
+        "تعذر العثور على الرحلة.",
+        "danger"
+      );
+
       return false;
     }
 
     const confirmed =
-      typeof getUI()?.confirm === "function"
+      typeof getUI()?.confirm ===
+      "function"
         ? await getUI().confirm({
-            title: "حذف الرحلة المخطط لها",
+            title:
+              "حذف الرحلة المخطط لها",
             message:
               `سيتم حذف "${
                 trip.title ||
@@ -5366,357 +7117,1001 @@
             "هل تريد حذف هذه الرحلة المخطط لها؟"
           );
 
-    if (confirmed !== true) return false;
-
-    try {
-      let result = null;
-
-      if (
-        typeof store.deletePlannedTrip === "function"
-      ) {
-        result =
-          store.deletePlannedTrip(plannedTripId);
-      } else if (
-        typeof store.removePlannedTrip === "function"
-      ) {
-        result =
-          store.removePlannedTrip(plannedTripId);
-      }
-
-      if (result === false || result === null) {
-        notify(
-          "تعذر حذف الرحلة المخطط لها.",
-          "danger"
-        );
-        return false;
-      }
-
-      notify(
-        "تم حذف الرحلة المخطط لها.",
-        "success"
-      );
-
-      runtime.lastSignature = "";
-      inject(true);
-
-      return true;
-    } catch (error) {
-      console.error(
-        "Planned Trips deletion failed.",
-        error
-      );
-
-      notify(
-        error?.message ||
-        "تعذر حذف الرحلة.",
-        "danger"
-      );
-
+    if (confirmed !== true) {
       return false;
     }
+
+    return withPlannedActionLock(
+      plannedTripId,
+      async () => {
+        try {
+          let result = null;
+
+          if (
+            typeof store
+              .deletePlannedTrip ===
+            "function"
+          ) {
+            result =
+              await store
+                .deletePlannedTrip(
+                  plannedTripId,
+                  {
+                    source: PAGE_ID,
+                    immediate: true
+                  }
+                );
+          } else if (
+            typeof store
+              .removePlannedTrip ===
+            "function"
+          ) {
+            result =
+              await store
+                .removePlannedTrip(
+                  plannedTripId,
+                  {
+                    source: PAGE_ID,
+                    immediate: true
+                  }
+                );
+          } else if (
+            typeof store.set ===
+            "function"
+          ) {
+            const plannedTrips =
+              getPlannedTrips().filter(
+                (item) =>
+                  String(item.id) !==
+                  String(
+                    plannedTripId
+                  )
+              );
+
+            store.set(
+              "plannedTrips",
+              plannedTrips,
+              {
+                source: PAGE_ID,
+                immediate: true
+              }
+            );
+
+            result = true;
+          }
+
+          if (
+            result === false ||
+            result === null
+          ) {
+            notify(
+              "تعذر حذف الرحلة المخطط لها.",
+              "danger"
+            );
+
+            return false;
+          }
+
+          notify(
+            "تم حذف الرحلة المخطط لها.",
+            "success"
+          );
+
+          commitStoreMutation(
+            "planned-trip-deleted",
+            {
+              plannedTripId,
+              trip
+            },
+            {
+              refresh: false
+            }
+          );
+
+          return true;
+        } catch (error) {
+          console.error(
+            "TIC Trips planned deletion failed.",
+            error
+          );
+
+          notify(
+            error?.message ||
+            "تعذر حذف الرحلة.",
+            "danger"
+          );
+
+          return false;
+        }
+      }
+    );
   };
 
-  const openGuide = (countryCode) => {
-    const router = getRouter();
+  const openPlannedGuide = (
+    countryCode
+  ) => {
+    const router =
+      getRouter();
 
-    if (typeof router?.go === "function") {
+    notifyIntelligenceLayer(
+      "planned-trip-guide-opened",
+      {
+        countryCode:
+          countryCode || null
+      }
+    );
+
+    if (
+      typeof router?.go ===
+      "function"
+    ) {
       router.go("guide", {
         params: {
-          country: countryCode
+          country:
+            countryCode || ""
         },
         query: {
-          country: countryCode
+          country:
+            countryCode || ""
         },
-        source: "planned-trips"
+        source:
+          "planned-trips"
       });
 
       return true;
     }
 
-    window.location.hash = countryCode
-      ? `#guide?country=${encodeURIComponent(countryCode)}`
-      : "#guide";
+    window.location.hash =
+      countryCode
+        ? `#guide?country=${encodeURIComponent(
+            countryCode
+          )}`
+        : "#guide";
 
     return true;
   };
 
-  const onClick = (event) => {
-    const target = event.target.closest(
-      "[data-planned-action]"
-    );
+  const handlePlannedTripsClick = (
+    event
+  ) => {
+    const target =
+      event.target.closest(
+        "[data-planned-action]"
+      );
 
-    if (!target) return;
+    if (
+      !target ||
+      !state.container?.contains(
+        target
+      )
+    ) {
+      return;
+    }
 
     event.preventDefault();
+
+    if (target.disabled) return;
 
     const action =
       target.dataset.plannedAction;
 
-    if (action === "toggle-check") {
+    if (
+      action === "toggle-check"
+    ) {
       updateChecklist(
-        target.dataset.plannedTripId,
+        target.dataset
+          .plannedTripId,
         target.dataset.checkKey
       );
+
       return;
     }
 
     if (action === "promote") {
       promotePlannedTrip(
-        target.dataset.plannedTripId,
+        target.dataset
+          .plannedTripId,
         false
       );
+
       return;
     }
 
     if (action === "delete") {
       deletePlannedTrip(
-        target.dataset.plannedTripId
+        target.dataset
+          .plannedTripId
       );
+
       return;
     }
 
     if (action === "open-guide") {
-      openGuide(
-        target.dataset.countryCode || ""
+      openPlannedGuide(
+        target.dataset
+          .countryCode || ""
       );
     }
   };
 
-  const observePage = () => {
-    if (runtime.observer) return;
+  const bindPlannedTripsEvents = () => {
+    if (
+      !state.container ||
+      state.plannedTripsClickBound
+    ) {
+      return;
+    }
 
-    runtime.observer = new MutationObserver(() => {
-      window.requestAnimationFrame(() => {
-        inject(false);
-      });
-    });
-
-    runtime.observer.observe(
-      document.documentElement,
-      {
-        childList: true,
-        subtree: true
-      }
+    state.container.addEventListener(
+      "click",
+      handlePlannedTripsClick
     );
+
+    state.plannedTripsClickBound =
+      true;
   };
 
-  const bindEvents = () => {
-    if (!runtime.clickBound) {
-      document.addEventListener("click", onClick);
-      runtime.clickBound = true;
+  const unbindPlannedTripsEvents = () => {
+    if (
+      !state.container ||
+      !state.plannedTripsClickBound
+    ) {
+      return;
     }
 
-    [
-      "tic:page:trips:mounted",
-      "tic:page:trips:refreshed",
-      "tic:planned-trips-changed",
-      "tic:budget-travel-planned-trip-created",
-      "tic:store-change",
-      "store:changed"
-    ].forEach((eventName) => {
-      const handler = () => {
-        runtime.lastSignature = "";
+    state.container.removeEventListener(
+      "click",
+      handlePlannedTripsClick
+    );
 
-        window.requestAnimationFrame(() => {
-          inject(true);
-        });
-      };
+    state.plannedTripsClickBound =
+      false;
+  };
 
-      window.addEventListener(eventName, handler);
+  /* =========================================================
+     Public page API
+  ========================================================= */
 
-      runtime.eventBindings.push({
-        eventName,
-        handler
+  const TripsPage = {
+    id: PAGE_ID,
+    title: "رحلاتي",
+    icon: "✈",
+    version: PAGE_VERSION,
+
+    init() {
+      if (state.initialized) {
+        return this.diagnostics();
+      }
+
+      ensureStyles();
+      ensurePlannedTripsStyles();
+      registerActions();
+      subscribeToStore();
+      bindIntegrationEvents?.();
+
+      state.initialized = true;
+      state.destroyed = false;
+
+      emit("initialized", {
+        version: PAGE_VERSION
       });
-    });
-  };
 
-  const patchTripsPage = () => {
-    const page =
-      window.TIC?.Pages?.trips ||
-      window.TICTripsPage;
+      notifyIntelligenceLayer(
+        "trips-page-initialized",
+        {
+          version: PAGE_VERSION
+        }
+      );
 
-    if (!page || page.__plannedTripsIntegrationPatched) {
-      return false;
-    }
+      return this.diagnostics();
+    },
 
-    ["mount", "afterEnter", "refresh", "openHub", "openList"].forEach(
-      (methodName) => {
-        if (typeof page[methodName] !== "function") return;
+    render(context = {}) {
+      this.init();
 
-        const original = page[methodName].bind(page);
+      const params =
+        context.params || {};
 
-        page[methodName] = function patchedTripsMethod(
-          ...args
+      if (params.tripId) {
+        state.activeTripId =
+          params.tripId;
+      }
+
+      state.activeView =
+        params.view === "details" &&
+        params.tripId
+          ? "details"
+          : "hub";
+
+      if (
+        params.tab &&
+        TAB_LABELS[params.tab]
+      ) {
+        state.activeTab =
+          params.tab;
+      }
+
+      return renderPage(
+        buildSnapshot()
+      );
+    },
+
+    mount(context = {}) {
+      this.init();
+
+      const container =
+        resolveContainer(
+          context.container
+        );
+
+      if (!container) {
+        throw new Error(
+          "TIC Trips Error: route container not found."
+        );
+      }
+
+      const params =
+        context.params || {};
+
+      state.activeView =
+        params.view === "details" &&
+        params.tripId
+          ? "details"
+          : "hub";
+
+      state.activeTripId =
+        params.tripId || null;
+
+      if (
+        params.tab &&
+        TAB_LABELS[params.tab]
+      ) {
+        state.activeTab =
+          params.tab;
+      }
+
+      if (
+        state.container &&
+        state.container !== container
+      ) {
+        unbindPlannedTripsEvents();
+      }
+
+      state.container =
+        container;
+
+      state.mounted = true;
+      state.destroyed = false;
+
+      const snapshot =
+        buildSnapshot();
+
+      container.innerHTML =
+        renderPage(snapshot);
+
+      state.lastRenderedSignature =
+        state.lastSnapshotSignature;
+
+      applyInputBindings();
+      bindPlannedTripsEvents();
+      injectPlannedTrips(true);
+
+      emit("mounted", {
+        view: state.activeView,
+        tab: state.activeTab,
+        activeTripId:
+          state.activeTripId,
+        tripCount:
+          snapshot.trips.length,
+        plannedTripCount:
+          getPlannedTrips().length,
+        passportTripCount:
+          snapshot.statistics.memories
+      });
+
+      notifyIntelligenceLayer(
+        "trips-page-mounted",
+        {
+          view: state.activeView,
+          tab: state.activeTab,
+          tripCount:
+            snapshot.trips.length,
+          plannedTripCount:
+            getPlannedTrips().length
+        }
+      );
+
+      return container;
+    },
+
+    afterEnter(context = {}) {
+      const container =
+        resolveContainer(
+          context.container
+        );
+
+      if (container) {
+        if (
+          state.container &&
+          state.container !== container
         ) {
-          const result = original(...args);
+          unbindPlannedTripsEvents();
+        }
 
-          runtime.lastSignature = "";
+        state.container =
+          container;
 
-          window.requestAnimationFrame(() => {
-            inject(true);
-          });
-
-          return result;
-        };
-      }
-    );
-
-    Object.defineProperty(
-      page,
-      "__plannedTripsIntegrationPatched",
-      {
-        value: true,
-        enumerable: false,
-        configurable: false,
-        writable: false
-      }
-    );
-
-    page.getPlannedTrips = () =>
-      clone(getPlannedTrips());
-
-    page.openPlannedTrips = () => {
-      if (typeof page.openHub === "function") {
-        page.openHub("upcoming");
+        state.mounted = true;
       }
 
-      window.requestAnimationFrame(() => {
-        document
-          .querySelector(SECTION_SELECTOR)
-          ?.scrollIntoView({
-            behavior: "smooth",
-            block: "start"
-          });
-      });
+      applyInputBindings();
+      bindPlannedTripsEvents();
+      injectPlannedTrips(true);
 
       return true;
-    };
+    },
 
-    page.promotePlannedTrip = (
+    unmount() {
+      closeModal();
+      closeCountrySheet();
+      cancelDeferredRefresh?.();
+
+      unbindPlannedTripsEvents();
+
+      const previousContainer =
+        state.container;
+
+      state.mounted = false;
+      state.container = null;
+      state.isUserInteracting = false;
+      state.isScrolling = false;
+      state.isTyping = false;
+      state.isFormOpen = false;
+
+      emit("unmounted", {
+        view: state.activeView,
+        tab: state.activeTab,
+        activeTripId:
+          state.activeTripId
+      });
+
+      if (
+        previousContainer &&
+        previousContainer.isConnected
+      ) {
+        previousContainer
+          .querySelector(
+            PLANNED_SECTION_SELECTOR
+          )
+          ?.remove();
+      }
+
+      return true;
+    },
+
+    refresh(options = {}) {
+      const result =
+        refresh(options);
+
+      if (
+        result !== false &&
+        state.activeView !== "details"
+      ) {
+        bindPlannedTripsEvents();
+        injectPlannedTrips(true);
+      }
+
+      return result;
+    },
+
+    openTrip(tripId) {
+      if (!findTrip(tripId)) {
+        return false;
+      }
+
+      state.activeTripId =
+        tripId;
+
+      state.activeView =
+        "details";
+
+      return this.refresh({
+        reason: "api-open-trip",
+        force: true,
+        scrollTop: true
+      });
+    },
+
+    openHub(tab = "upcoming") {
+      state.activeTripId = null;
+      state.activeView = "hub";
+
+      if (TAB_LABELS[tab]) {
+        state.activeTab = tab;
+      }
+
+      return this.refresh({
+        reason: "api-open-hub",
+        force: true
+      });
+    },
+
+    openList() {
+      return this.openHub("all");
+    },
+
+    openMemories() {
+      return this.openCountries();
+    },
+
+    openCountries() {
+      state.activeView = "hub";
+      state.activeTab =
+        "upcoming";
+
+      const result =
+        this.refresh({
+          reason:
+            "api-open-countries",
+          force: true
+        });
+
+      window.requestAnimationFrame(
+        () => {
+          state.container
+            ?.querySelector(
+              ".passport-section"
+            )
+            ?.scrollIntoView({
+              behavior: "smooth",
+              block: "start"
+            });
+        }
+      );
+
+      return result;
+    },
+
+    openCountry(countryKey) {
+      const normalized =
+        normalizeCountryKey(
+          countryKey
+        );
+
+      const country =
+        buildSnapshot()
+          .countries
+          .find(
+            (item) =>
+              item.key === normalized ||
+              item.countryCode ===
+                text(
+                  countryKey
+                ).toUpperCase()
+          );
+
+      return country
+        ? showCountrySheet(
+            country.key
+          )
+        : false;
+    },
+
+    openPlannedTrips() {
+      state.activeView = "hub";
+      state.activeTab =
+        "upcoming";
+
+      const result =
+        this.refresh({
+          reason:
+            "api-open-planned-trips",
+          force: true
+        });
+
+      window.requestAnimationFrame(
+        () => {
+          state.container
+            ?.querySelector(
+              PLANNED_SECTION_SELECTOR
+            )
+            ?.scrollIntoView({
+              behavior: "smooth",
+              block: "start"
+            });
+        }
+      );
+
+      return result;
+    },
+
+    addPastTrip() {
+      return showMemoryModal({});
+    },
+
+    setFilters(filters = {}) {
+      state.filters = {
+        ...state.filters,
+        ...clone(filters)
+      };
+
+      this.refresh({
+        reason: "api-set-filters",
+        force: true
+      });
+
+      return clone(
+        state.filters
+      );
+    },
+
+    getFilters() {
+      return clone(
+        state.filters
+      );
+    },
+
+    getSnapshot() {
+      return clone(
+        state.lastSnapshot ||
+        buildSnapshot()
+      );
+    },
+
+    getPlannedTrips() {
+      return clone(
+        getPlannedTrips()
+      );
+    },
+
+    updatePlannedTripChecklist(
+      plannedTripId,
+      checkKey
+    ) {
+      return updateChecklist(
+        plannedTripId,
+        checkKey
+      );
+    },
+
+    promotePlannedTrip(
       plannedTripId
-    ) =>
-      promotePlannedTrip(
+    ) {
+      return promotePlannedTrip(
         plannedTripId,
         false
       );
+    },
 
-    return true;
+    deletePlannedTrip(
+      plannedTripId
+    ) {
+      return deletePlannedTrip(
+        plannedTripId
+      );
+    },
+
+    subscribe(listener) {
+      if (
+        typeof listener !==
+        "function"
+      ) {
+        throw new TypeError(
+          "TIC Trips subscriber must be a function."
+        );
+      }
+
+      state.subscribers.add(
+        listener
+      );
+
+      return () =>
+        state.subscribers.delete(
+          listener
+        );
+    },
+
+    destroy() {
+      this.unmount();
+
+      if (
+        typeof state.unsubscribeStore ===
+        "function"
+      ) {
+        state.unsubscribeStore();
+      }
+
+      state.actionUnsubscribers.forEach(
+        (unsubscribe) => {
+          try {
+            unsubscribe?.();
+          } catch (_) {
+            // Ignore cleanup errors.
+          }
+        }
+      );
+
+      state.integrationUnsubscribers
+        ?.forEach(
+          (unsubscribe) => {
+            try {
+              unsubscribe?.();
+            } catch (_) {
+              // Ignore cleanup errors.
+            }
+          }
+        );
+
+      document
+        .getElementById(STYLE_ID)
+        ?.remove();
+
+      document
+        .getElementById(
+          PLANNED_STYLE_ID
+        )
+        ?.remove();
+
+      state.unsubscribeStore =
+        null;
+
+      state.actionUnsubscribers =
+        [];
+
+      state.integrationUnsubscribers =
+        [];
+
+      state.subscribers.clear();
+      state.lastSnapshot = null;
+      state.lastSnapshotSignature =
+        "";
+
+      state.lastRenderedSignature =
+        "";
+
+      state.activeView = "hub";
+      state.activeTab =
+        "upcoming";
+
+      state.activeTripId = null;
+      state.activeCountryKey =
+        null;
+
+      state.initialized = false;
+      state.destroyed = true;
+
+      plannedRuntime.lastSignature =
+        "";
+
+      plannedRuntime
+        .pendingActionIds
+        .clear();
+
+      return true;
+    },
+
+    diagnostics() {
+      return {
+        id: this.id,
+        title: this.title,
+        version: this.version,
+        initialized:
+          state.initialized,
+        mounted: state.mounted,
+        destroyed:
+          state.destroyed,
+        activeView:
+          state.activeView,
+        activeTab:
+          state.activeTab,
+        activeTripId:
+          state.activeTripId,
+        activeCountryKey:
+          state.activeCountryKey,
+        filters: clone(
+          state.filters
+        ),
+        filtersOpen:
+          state.filtersOpen,
+        hasContainer:
+          Boolean(
+            state.container
+          ),
+        isRendering:
+          Boolean(
+            state.isRendering
+          ),
+        isRefreshing:
+          Boolean(
+            state.isRefreshing
+          ),
+        isUserInteracting:
+          Boolean(
+            state.isUserInteracting
+          ),
+        isScrolling:
+          Boolean(
+            state.isScrolling
+          ),
+        isTyping:
+          Boolean(
+            state.isTyping
+          ),
+        isFormOpen:
+          Boolean(
+            state.isFormOpen
+          ),
+        refreshQueued:
+          Boolean(
+            state.refreshQueued
+          ),
+        storeAvailable:
+          Boolean(getStore()),
+        routerAvailable:
+          Boolean(getRouter()),
+        uiAvailable:
+          Boolean(getUI()),
+        tripFormAvailable:
+          Boolean(
+            getTripForm()
+          ),
+        guideEngineAvailable:
+          Boolean(
+            getGuideEngine()
+          ),
+        worldGuideDataAvailable:
+          Boolean(
+            getWorldGuideData()
+          ),
+        travelBrainAvailable:
+          Boolean(
+            getTravelBrain?.()
+          ),
+        travelAssistantAvailable:
+          Boolean(
+            getTravelAssistant?.()
+          ),
+        travelImportAvailable:
+          Boolean(
+            getTravelImport?.()
+          ),
+        travelSyncAvailable:
+          Boolean(
+            getTravelSync?.()
+          ),
+        actionCount:
+          state.actionUnsubscribers
+            .length,
+        integrationBindingCount:
+          state
+            .integrationUnsubscribers
+            ?.length || 0,
+        subscriberCount:
+          state.subscribers.size,
+        hasSnapshot:
+          Boolean(
+            state.lastSnapshot
+          ),
+        snapshotSignature:
+          state.lastSnapshotSignature,
+        renderedSignature:
+          state.lastRenderedSignature,
+        plannedTrips: {
+          count:
+            getPlannedTrips().length,
+          sectionInjected:
+            Boolean(
+              state.container
+                ?.querySelector(
+                  PLANNED_SECTION_SELECTOR
+                )
+            ),
+          lastSignature:
+            plannedRuntime.lastSignature,
+          pendingActionCount:
+            plannedRuntime
+              .pendingActionIds
+              .size
+        }
+      };
+    }
   };
 
-  const registerUIActions = () => {
-    const ui = getUI();
+  window.TIC =
+    window.TIC || {};
 
-    if (
-      !ui ||
-      typeof ui.registerAction !== "function"
-    ) {
-      return false;
+  window.TIC.Pages =
+    window.TIC.Pages || {};
+
+  window.TIC.Pages.trips =
+    TripsPage;
+
+  window.TICTripsPage =
+    TripsPage;
+
+  const router =
+    getRouter();
+
+  if (
+    router &&
+    typeof router.register ===
+      "function"
+  ) {
+    if (!router.has?.("trips")) {
+      router.register(
+        "trips",
+        {
+          id: "trips",
+          title: "رحلاتي",
+          module: "trips",
+          icon: "✈",
+          visible: true,
+          order: 2
+        }
+      );
     }
 
-    const register = (name, handler) => {
-      if (ui.hasAction?.(name)) return;
+    router.registerPage?.(
+      "trips",
+      TripsPage
+    );
+  }
+
+  const ui =
+    getUI();
+
+  if (
+    ui &&
+    typeof ui.registerAction ===
+      "function"
+  ) {
+    const registerPublicAction = (
+      name,
+      handler
+    ) => {
+      if (ui.hasAction?.(name)) {
+        return;
+      }
 
       try {
-        ui.registerAction(name, handler);
+        const unsubscribe =
+          ui.registerAction(
+            name,
+            handler
+          );
+
+        if (
+          typeof unsubscribe ===
+          "function"
+        ) {
+          state
+            .actionUnsubscribers
+            .push(unsubscribe);
+        }
       } catch (error) {
         console.warn(
-          `Planned Trips UI action registration failed: ${name}`,
+          `TIC Trips public action registration failed: ${name}`,
           error
         );
       }
     };
 
-    register(
+    registerPublicAction(
       "trips-open-planned",
-      () => {
-        const page =
-          window.TIC?.Pages?.trips ||
-          window.TICTripsPage;
-
-        return page?.openPlannedTrips?.();
-      }
+      () =>
+        TripsPage.openPlannedTrips()
     );
 
-    register(
+    registerPublicAction(
       "planned-trip-promote",
       (payload = {}) =>
-        promotePlannedTrip(
-          payload.params?.plannedTripId ||
-          payload.plannedTripId,
-          false
+        TripsPage.promotePlannedTrip(
+          payload.params
+            ?.plannedTripId ||
+          payload.plannedTripId
         )
     );
-
-    return true;
-  };
-
-  const init = () => {
-    if (runtime.initialized) return true;
-
-    ensureStyles();
-    bindEvents();
-    observePage();
-    patchTripsPage();
-    registerUIActions();
-
-    runtime.initialized = true;
-
-    window.requestAnimationFrame(() => {
-      inject(true);
-    });
-
-    window.TIC = window.TIC || {};
-    window.TIC.Features =
-      window.TIC.Features || {};
-
-    window.TIC.Features.plannedTripsPageIntegration =
-      Object.freeze({
-        version: VERSION,
-        inject: () => inject(true),
-        getPlannedTrips: () =>
-          clone(getPlannedTrips()),
-        updateChecklist,
-        promotePlannedTrip,
-        deletePlannedTrip,
-        diagnostics() {
-          return {
-            version: VERSION,
-            initialized: runtime.initialized,
-            patchApplied:
-              Boolean(
-                window.TIC?.Pages?.trips
-                  ?.__plannedTripsIntegrationPatched
-              ),
-            storeAvailable: Boolean(getStore()),
-            pageAvailable: Boolean(
-              document.querySelector(PAGE_SELECTOR)
-            ),
-            sectionInjected: Boolean(
-              document.querySelector(
-                SECTION_SELECTOR
-              )
-            ),
-            plannedTripCount:
-              getPlannedTrips().length,
-            eventBindingCount:
-              runtime.eventBindings.length,
-            lastSignature:
-              runtime.lastSignature
-          };
-        }
-      });
-
-    return true;
-  };
-
-  if (document.readyState === "loading") {
-    document.addEventListener(
-      "DOMContentLoaded",
-      init,
-      { once: true }
-    );
-  } else {
-    init();
   }
+
+  TripsPage.init();
 })(window, document);
