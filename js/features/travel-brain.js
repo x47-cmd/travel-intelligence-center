@@ -1,19 +1,19 @@
 /* =========================================================
    Travel Intelligence Center
-   Travel Brain Intelligence Engine V1.0.0
+   Travel Brain Intelligence Engine V1.1.0
+   Stable Store V2.5 Integration
 
    File Path:
    js/features/travel-brain.js
 
    Purpose:
-   - Central intelligence layer for the Travel Intelligence Center.
-   - Reads the current application state without changing existing pages.
-   - Produces normalized travel insights, scores, alerts, priorities,
-     recommendations, and assistant-ready context.
-   - Works safely with the current Store, Analytics, Events, Router,
-     localStorage, and future travel intelligence modules.
-   - Keeps the app fully local-first and browser compatible.
-   - Does not require external APIs.
+   - Central read-only intelligence layer for the Travel Intelligence Center.
+   - Reads the current Store without changing page layouts or application data.
+   - Produces normalized context, scores, alerts, insights, recommendations,
+     trip analysis, destination analysis and assistant-ready answers.
+   - Supports Store V2.5.0, legacy Store shapes, Events, Analytics,
+     browser CustomEvents, localStorage and future intelligence modules.
+   - Remains local-first and requires no external API.
 
    Recommended Load Order:
    1) js/config.js
@@ -27,66 +27,83 @@
    9) js/features/travel-sync.js
    10) js/app.js
 
-   Public Global:
+   Public Globals:
    - window.TravelBrain
+   - window.TIC.TravelBrain
 
-   Main APIs:
+   Backward-Compatible Main APIs:
    - TravelBrain.init()
    - TravelBrain.refresh()
+   - TravelBrain.scheduleRefresh()
    - TravelBrain.getSnapshot()
    - TravelBrain.getContext()
    - TravelBrain.getInsights()
    - TravelBrain.getAlerts()
    - TravelBrain.getRecommendations()
-   - TravelBrain.getTripAnalysis(tripOrId)
-   - TravelBrain.getDestinationAnalysis(destinationOrCode)
+   - TravelBrain.getTripAnalysis()
+   - TravelBrain.getDestinationAnalysis()
    - TravelBrain.getBudgetAnalysis()
    - TravelBrain.getPassportAnalysis()
    - TravelBrain.getReadinessAnalysis()
-   - TravelBrain.ask(question, options)
-   - TravelBrain.subscribe(listener)
+   - TravelBrain.ask()
+   - TravelBrain.subscribe()
+   - TravelBrain.getHealth()
+   - TravelBrain.clearCache()
    - TravelBrain.destroy()
-
-   Notes:
-   - This file is defensive by design.
-   - Missing Store branches or optional engines will never crash the app.
-   - Existing app data remains the single source of truth.
-   ========================================================= */
+========================================================= */
 
 (function travelBrainFactory(global) {
   "use strict";
 
-  if (!global || global.TravelBrain) {
+  if (!global) return;
+
+  global.TIC = global.TIC || {};
+
+  if (global.TravelBrain || global.TIC.TravelBrain) {
     return;
   }
 
-  var VERSION = "1.0.0";
+  var VERSION = "1.1.0";
   var MODULE_NAME = "TravelBrain";
   var STORAGE_KEY = "tic_travel_brain_snapshot_v1";
   var DEFAULT_CURRENCY = "AED";
   var DEFAULT_LANGUAGE = "ar";
-  var MS_PER_DAY = 24 * 60 * 60 * 1000;
+  var MS_PER_DAY = 86400000;
+  var MAX_PERSISTED_ITEMS = 20;
+  var DEFAULT_REFRESH_DELAY = 70;
+
+  var UPCOMING_STATUSES = [
+    "draft", "planning", "planned", "booked", "confirmed", "ready", "upcoming"
+  ];
+
+  var ACTIVE_STATUSES = ["active", "ongoing"];
+  var COMPLETED_STATUSES = ["completed", "past", "done"];
+  var HIDDEN_STATUSES = ["cancelled", "canceled", "archived", "deleted"];
 
   var runtime = {
     initialized: false,
     destroyed: false,
+    refreshing: false,
     refreshTimer: null,
     unsubscribeStore: null,
     eventUnsubscribers: [],
+    domListeners: [],
     listeners: new Set(),
     snapshot: null,
     revision: 0,
-    lastError: null
+    lastError: null,
+    lastRefreshReason: null,
+    lastRefreshAt: null
   };
 
-  var LEVEL_ORDER = {
+  var LEVEL_ORDER = Object.freeze({
     critical: 5,
     danger: 4,
     warning: 3,
     attention: 2,
     info: 1,
     success: 0
-  };
+  });
 
   var DEFAULT_WEIGHTS = Object.freeze({
     readiness: 0.26,
@@ -99,67 +116,22 @@
   });
 
   var QUESTION_PATTERNS = Object.freeze({
-    nextTrip: [
-      "الرحلة القادمة",
-      "السفرة القادمة",
-      "رحلتي القادمة",
-      "next trip",
-      "upcoming trip"
-    ],
-    budget: [
-      "الميزانية",
-      "ميزانية",
-      "المصروف",
-      "المصاريف",
-      "budget",
-      "spending",
-      "expense"
-    ],
-    readiness: [
-      "الجاهزية",
-      "جاهز",
-      "مستعد",
-      "readiness",
-      "ready"
-    ],
-    documents: [
-      "الجواز",
-      "التأشيرة",
-      "المستندات",
-      "passport",
-      "visa",
-      "documents"
-    ],
-    packing: [
-      "التجهيز",
-      "الشنطة",
-      "الأغراض",
-      "packing",
-      "checklist"
-    ],
-    savings: [
-      "الادخار",
-      "التوفير",
-      "savings",
-      "saving"
-    ],
-    destination: [
-      "وجهة",
-      "الدولة",
-      "المدينة",
-      "destination",
-      "country",
-      "city"
-    ],
-    summary: [
-      "ملخص",
-      "وضعي",
-      "حالة سفري",
-      "summary",
-      "overview",
-      "status"
-    ]
+    nextTrip: ["الرحلة القادمة", "السفرة القادمة", "رحلتي القادمة", "next trip", "upcoming trip"],
+    budget: ["الميزانية", "ميزانية", "الرصيد", "المصروف", "المصاريف", "budget", "balance", "spending", "expense"],
+    readiness: ["الجاهزية", "جاهز", "مستعد", "readiness", "ready"],
+    documents: ["الجواز", "التأشيرة", "المستندات", "passport", "visa", "documents"],
+    packing: ["التجهيز", "الشنطة", "الأغراض", "packing", "checklist"],
+    savings: ["الادخار", "التوفير", "savings", "saving"],
+    destination: ["وجهة", "الدولة", "المدينة", "destination", "country", "city"],
+    passport: ["جواز سفري", "الدول التي زرتها", "سجل السفر", "passport history", "visited countries"],
+    alerts: ["التنبيهات", "تنبيه", "مشكلة", "خطر", "alerts", "warning", "risk"],
+    recommendations: ["التوصيات", "تنصحني", "شو اسوي", "recommendation", "advice"],
+    summary: ["ملخص", "وضعي", "حالة سفري", "summary", "overview", "status"]
   });
+
+  /* =========================================================
+     Generic utilities
+  ========================================================= */
 
   function nowIso() {
     return new Date().toISOString();
@@ -178,33 +150,30 @@
   }
 
   function asString(value, fallback) {
-    if (value === null || value === undefined) {
-      return fallback || "";
-    }
-
+    if (value === null || value === undefined) return fallback || "";
     var text = String(value).trim();
     return text || fallback || "";
   }
 
   function asNumber(value, fallback) {
     var number = Number(value);
-    return Number.isFinite(number) ? number : (Number.isFinite(fallback) ? fallback : 0);
+    return Number.isFinite(number)
+      ? number
+      : (Number.isFinite(fallback) ? fallback : 0);
   }
 
   function asBoolean(value, fallback) {
-    if (typeof value === "boolean") {
-      return value;
-    }
-
-    if (value === "true" || value === 1 || value === "1") {
-      return true;
-    }
-
-    if (value === "false" || value === 0 || value === "0") {
-      return false;
-    }
-
+    if (value === true || value === "true" || value === 1 || value === "1") return true;
+    if (value === false || value === "false" || value === 0 || value === "0") return false;
     return Boolean(fallback);
+  }
+
+  function firstDefined() {
+    for (var index = 0; index < arguments.length; index += 1) {
+      var value = arguments[index];
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return undefined;
   }
 
   function clamp(value, min, max) {
@@ -223,42 +192,73 @@
     })));
   }
 
-  function safeJsonClone(value) {
-    if (value === undefined) {
-      return undefined;
+  function safeClone(value) {
+    if (value === undefined) return undefined;
+
+    if (typeof global.structuredClone === "function") {
+      try {
+        return global.structuredClone(value);
+      } catch (_) {}
     }
 
     try {
       return JSON.parse(JSON.stringify(value));
-    } catch (error) {
+    } catch (_) {
       return value;
     }
   }
 
+  function rememberError(error) {
+    if (error) runtime.lastError = error;
+  }
+
   function safeCall(fn, fallback, context, args) {
-    if (typeof fn !== "function") {
-      return fallback;
-    }
+    if (typeof fn !== "function") return fallback;
 
     try {
       var result = fn.apply(context || null, asArray(args));
       return result === undefined ? fallback : result;
     } catch (error) {
-      runtime.lastError = error;
+      rememberError(error);
       return fallback;
     }
   }
 
-  function parseDate(value) {
-    if (!value) {
-      return null;
-    }
+  function normalizeDateString(value) {
+    if (!value) return "";
 
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
-      return new Date(value.getTime());
+      return [
+        value.getFullYear(),
+        String(value.getMonth() + 1).padStart(2, "0"),
+        String(value.getDate()).padStart(2, "0")
+      ].join("-");
     }
 
-    var date = new Date(value);
+    var raw = asString(value, "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+    var parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+
+    return [
+      parsed.getFullYear(),
+      String(parsed.getMonth() + 1).padStart(2, "0"),
+      String(parsed.getDate()).padStart(2, "0")
+    ].join("-");
+  }
+
+  function parseDate(value) {
+    var normalized = normalizeDateString(value);
+    if (!normalized) return null;
+
+    var direct = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (direct) {
+      var local = new Date(Number(direct[1]), Number(direct[2]) - 1, Number(direct[3]));
+      return Number.isNaN(local.getTime()) ? null : local;
+    }
+
+    var date = new Date(normalized);
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
@@ -274,8 +274,7 @@
   }
 
   function daysUntil(value) {
-    var date = parseDate(value);
-    return date ? daysBetween(new Date(), date) : null;
+    return parseDate(value) ? daysBetween(new Date(), value) : null;
   }
 
   function dateValue(value, fallback) {
@@ -283,8 +282,19 @@
     return date ? date.getTime() : (fallback || 0);
   }
 
+  function calculateDurationDays(startDate, endDate, fallback) {
+    var start = parseDate(startDate);
+    var end = parseDate(endDate);
+
+    if (start && end && end >= start) {
+      return daysBetween(start, end) + 1;
+    }
+
+    return Math.max(0, Math.floor(asNumber(fallback, 0)));
+  }
+
   function normalizeText(value) {
-    return asString(value)
+    return asString(value, "")
       .toLowerCase()
       .replace(/[أإآ]/g, "ا")
       .replace(/ى/g, "ي")
@@ -324,17 +334,14 @@
         currency: selectedCurrency,
         maximumFractionDigits: 0
       }).format(amount);
-    } catch (error) {
+    } catch (_) {
       return round(amount, 0).toLocaleString(selectedLocale) + " " + selectedCurrency;
     }
   }
 
   function formatDate(value, locale) {
     var date = parseDate(value);
-
-    if (!date) {
-      return "";
-    }
+    if (!date) return "";
 
     try {
       return new Intl.DateTimeFormat(asString(locale, "ar-AE"), {
@@ -342,26 +349,24 @@
         month: "short",
         day: "numeric"
       }).format(date);
-    } catch (error) {
-      return date.toISOString().slice(0, 10);
+    } catch (_) {
+      return normalizeDateString(value);
     }
   }
 
   function percentage(part, total) {
     var denominator = asNumber(total, 0);
-    return denominator > 0 ? clamp((asNumber(part, 0) / denominator) * 100, 0, 999) : 0;
+    return denominator > 0
+      ? clamp((asNumber(part, 0) / denominator) * 100, 0, 999)
+      : 0;
   }
 
   function average(values) {
     var numbers = asArray(values)
-      .map(function mapNumber(value) {
-        return asNumber(value, NaN);
-      })
+      .map(function mapNumber(value) { return asNumber(value, NaN); })
       .filter(Number.isFinite);
 
-    if (!numbers.length) {
-      return 0;
-    }
+    if (!numbers.length) return 0;
 
     return numbers.reduce(function sum(total, value) {
       return total + value;
@@ -375,7 +380,6 @@
     asArray(items).forEach(function scoreItem(item) {
       var score = clamp(asNumber(item && item.score, 0), 0, 100);
       var weight = Math.max(0, asNumber(item && item.weight, 0));
-
       totalScore += score * weight;
       totalWeight += weight;
     });
@@ -383,8 +387,20 @@
     return totalWeight > 0 ? round(totalScore / totalWeight, 0) : 0;
   }
 
+  function sortByPriority(items) {
+    return asArray(items).sort(function sort(a, b) {
+      return asNumber(b.priority, 0) - asNumber(a.priority, 0);
+    });
+  }
+
+  /* =========================================================
+     Integration discovery and persistence
+  ========================================================= */
+
   function getGlobalConfig() {
     return asObject(
+      global.TICConfig ||
+      global.TIC && global.TIC.Config ||
       global.TravelConfig ||
       global.CONFIG ||
       global.AppConfig ||
@@ -394,6 +410,8 @@
 
   function getStore() {
     return (
+      global.TIC && global.TIC.Store ||
+      global.TICStore ||
       global.Store ||
       global.TravelStore ||
       global.AppStore ||
@@ -403,6 +421,7 @@
 
   function getEvents() {
     return (
+      global.TIC && global.TIC.Events ||
       global.Events ||
       global.EventBus ||
       global.TravelEvents ||
@@ -412,6 +431,7 @@
 
   function getAnalytics() {
     return (
+      global.TIC && global.TIC.Analytics ||
       global.Analytics ||
       global.TravelAnalytics ||
       null
@@ -429,62 +449,57 @@
         safeCall(store.getData, null, store) ||
         safeCall(store.read, null, store);
 
-      if (!state && isObject(store.state)) {
-        state = store.state;
-      }
-
-      if (!state && isObject(store.data)) {
-        state = store.data;
-      }
+      if (!state && isObject(store.state)) state = store.state;
+      if (!state && isObject(store.data)) state = store.data;
     }
 
     if (!state) {
-      state =
-        global.appState ||
-        global.travelState ||
-        global.__TRAVEL_STATE__ ||
-        {};
+      state = global.appState || global.travelState || global.__TRAVEL_STATE__ || {};
     }
 
-    return safeJsonClone(asObject(state));
+    return safeClone(asObject(state));
   }
 
   function readPersistedSnapshot() {
     try {
-      if (!global.localStorage) {
-        return null;
-      }
-
+      if (!global.localStorage) return null;
       var raw = global.localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (error) {
+      var parsed = raw ? JSON.parse(raw) : null;
+      return isObject(parsed) ? parsed : null;
+    } catch (_) {
       return null;
     }
   }
 
   function persistSnapshot(snapshot) {
     try {
-      if (!global.localStorage) {
-        return false;
-      }
+      if (!global.localStorage || !snapshot) return false;
 
       var payload = {
+        module: MODULE_NAME,
         version: VERSION,
         generatedAt: snapshot.generatedAt,
         revision: snapshot.revision,
         summary: snapshot.summary,
         scores: snapshot.scores,
-        insights: snapshot.insights.slice(0, 20),
-        alerts: snapshot.alerts.slice(0, 20),
-        recommendations: snapshot.recommendations.slice(0, 20)
+        readiness: snapshot.readiness,
+        statistics: snapshot.statistics,
+        insights: snapshot.insights.slice(0, MAX_PERSISTED_ITEMS),
+        alerts: snapshot.alerts.slice(0, MAX_PERSISTED_ITEMS),
+        recommendations: snapshot.recommendations.slice(0, MAX_PERSISTED_ITEMS)
       };
 
       global.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       return true;
     } catch (error) {
+      rememberError(error);
       return false;
     }
   }
+
+  /* =========================================================
+     State normalization
+  ========================================================= */
 
   function normalizeProfile(state, config) {
     var profile = asObject(state.profile);
@@ -492,36 +507,57 @@
     var defaults = asObject(config.defaults);
 
     return {
-      name: asString(profile.name, asString(defaults.name, "يوسف")),
-      currency: asString(
-        profile.currency,
-        asString(settings.currency, asString(defaults.currency, DEFAULT_CURRENCY))
-      ),
-      language: asString(
-        profile.language,
-        asString(settings.language, asString(defaults.language, DEFAULT_LANGUAGE))
-      ),
-      homeAirport: asString(
-        profile.homeAirport,
-        asString(defaults.homeAirport, "Abu Dhabi")
-      ),
-      travelStyle: asString(
-        profile.travelStyle,
-        asString(defaults.travelStyle, "Premium Family")
-      ),
+      name: asString(profile.name, asString(defaults.profileName, asString(defaults.name, "يوسف"))),
+      currency: asString(profile.currency, asString(settings.currency, asString(defaults.currency, DEFAULT_CURRENCY))),
+      language: asString(profile.language, asString(settings.language, asString(defaults.language, DEFAULT_LANGUAGE))),
+      homeAirport: asString(profile.homeAirport, asString(defaults.homeAirport, "Abu Dhabi")),
+      travelStyle: asString(profile.travelStyle, asString(defaults.travelStyle, "Premium Family")),
       annualTravelBudget: asNumber(
-        profile.annualTravelBudget,
-        asNumber(settings.annualTravelBudget, asNumber(defaults.annualTravelBudget, 30000))
+        firstDefined(
+          profile.annualTravelBudget,
+          settings.annualTravelBudget,
+          asObject(state.budgets).annualBudget,
+          defaults.annualTravelBudget
+        ),
+        30000
       ),
       monthlySaving: asNumber(
-        profile.monthlySaving,
-        asNumber(settings.monthlySaving, asNumber(defaults.monthlySaving, 1500))
+        firstDefined(
+          profile.monthlyTravelSaving,
+          profile.monthlySaving,
+          settings.monthlySaving,
+          asObject(state.savings).monthlySaving,
+          defaults.monthlySaving
+        ),
+        1500
       )
     };
   }
 
   function normalizeChecklist(value) {
-    var items = asArray(value);
+    var items = [];
+
+    if (Array.isArray(value)) {
+      items = value;
+    } else if (isObject(value)) {
+      Object.keys(value).forEach(function objectChecklist(key) {
+        if (key === "templates" || key === "lists") return;
+
+        var itemValue = value[key];
+
+        if (typeof itemValue === "boolean") {
+          items.push({
+            id: key,
+            title: key,
+            completed: itemValue,
+            category: "general",
+            required: true
+          });
+        } else if (isObject(itemValue)) {
+          items.push(Object.assign({ id: key }, itemValue));
+        }
+      });
+    }
 
     return items.map(function normalizeItem(item, index) {
       if (typeof item === "string") {
@@ -529,7 +565,9 @@
           id: createId("check", [index, item]),
           title: item,
           completed: false,
-          category: "general"
+          category: "general",
+          required: true,
+          dueDate: null
         };
       }
 
@@ -537,11 +575,8 @@
 
       return {
         id: asString(record.id, createId("check", [index, record.title || record.name])),
-        title: asString(record.title, asString(record.name, "عنصر")),
-        completed: asBoolean(
-          record.completed,
-          asBoolean(record.done, asBoolean(record.checked, false))
-        ),
+        title: asString(record.title, asString(record.name, asString(record.label, "عنصر"))),
+        completed: asBoolean(record.completed, asBoolean(record.done, asBoolean(record.checked, false))),
         category: asString(record.category, "general"),
         dueDate: record.dueDate || null,
         required: record.required !== false
@@ -549,145 +584,143 @@
     });
   }
 
-  function normalizeExpenses(value) {
+  function normalizeExpenses(value, defaultCurrency) {
     return asArray(value).map(function normalizeExpense(expense, index) {
       var record = asObject(expense);
 
       return {
         id: asString(record.id, createId("expense", [index, record.title, record.amount])),
-        title: asString(record.title, asString(record.name, "مصروف")),
-        amount: asNumber(
-          record.amount,
-          asNumber(record.value, asNumber(record.cost, 0))
-        ),
-        category: asString(record.category, "other"),
-        date: record.date || record.createdAt || null,
-        paid: record.paid !== false,
-        currency: asString(record.currency, DEFAULT_CURRENCY)
+        tripId: record.tripId || null,
+        title: asString(record.title, asString(record.name, asString(record.description, "مصروف"))),
+        amount: Math.max(0, asNumber(firstDefined(record.amount, record.value, record.cost, record.total), 0)),
+        category: asString(firstDefined(record.category, record.type), "other"),
+        date: record.date || record.createdAt || record.paidAt || null,
+        paid: record.paid !== false && record.status !== "cancelled",
+        deleted: Boolean(record.deletedAt || record.isDeleted === true),
+        currency: asString(record.currency, defaultCurrency || DEFAULT_CURRENCY)
       };
     });
   }
 
-  function normalizeTrip(rawTrip, index, fallbackType) {
+  function normalizeTrip(rawTrip, index, fallbackType, defaultCurrency) {
     var trip = asObject(rawTrip);
-    var destination = asObject(trip.destination);
-    var budgetRecord = asObject(trip.budget);
+    var destination = isObject(trip.destination) ? trip.destination : {};
+    var budgetObject = isObject(trip.budget) ? trip.budget : {};
     var dates = asObject(trip.dates);
 
-    var startDate =
-      trip.startDate ||
-      trip.departureDate ||
-      trip.fromDate ||
-      dates.start ||
-      dates.from ||
-      null;
+    var startDate = normalizeDateString(firstDefined(
+      trip.startDate,
+      trip.departureDate,
+      trip.fromDate,
+      dates.start,
+      dates.from
+    ));
 
-    var endDate =
-      trip.endDate ||
-      trip.returnDate ||
-      trip.toDate ||
-      dates.end ||
-      dates.to ||
-      null;
+    var endDate = normalizeDateString(firstDefined(
+      trip.endDate,
+      trip.returnDate,
+      trip.toDate,
+      dates.end,
+      dates.to
+    ));
+
+    var durationDays = Math.max(0, asNumber(firstDefined(trip.durationDays, trip.days), 0));
+
+    if (!endDate && startDate && durationDays > 0) {
+      var start = parseDate(startDate);
+      var derived = new Date(start.getTime() + Math.max(0, durationDays - 1) * MS_PER_DAY);
+      endDate = normalizeDateString(derived);
+    }
 
     var expenses = normalizeExpenses(
-      trip.expenses ||
-      budgetRecord.expenses ||
-      trip.transactions
+      firstDefined(trip.expenses, budgetObject.expenses, trip.transactions),
+      defaultCurrency
     );
 
-    var budget = asNumber(
+    var rawBudget = isObject(trip.budget) ? undefined : trip.budget;
+    var budget = Math.max(0, asNumber(firstDefined(
       trip.budgetAmount,
-      asNumber(
-        budgetRecord.total,
-        asNumber(
-          budgetRecord.amount,
-          asNumber(trip.totalBudget, asNumber(trip.estimatedBudget, 0))
-        )
-      )
-    );
+      rawBudget,
+      budgetObject.total,
+      budgetObject.amount,
+      trip.totalBudget,
+      trip.estimatedBudget
+    ), 0));
 
-    var spent = asNumber(
+    var spent = Math.max(0, asNumber(firstDefined(
       trip.spent,
-      asNumber(
-        budgetRecord.spent,
-        expenses.reduce(function sum(total, expense) {
-          return total + expense.amount;
-        }, 0)
-      )
-    );
+      budgetObject.spent,
+      expenses.reduce(function sum(total, expense) {
+        return total + (expense.deleted ? 0 : expense.amount);
+      }, 0)
+    ), 0));
 
-    var checklist = normalizeChecklist(
-      trip.checklist ||
-      trip.packing ||
-      trip.tasks ||
+    var checklist = normalizeChecklist(firstDefined(
+      trip.checklist,
+      trip.packing,
+      trip.tasks,
       []
-    );
+    ));
 
-    var documents = asArray(
-      trip.documents ||
-      trip.requiredDocuments ||
-      []
-    );
+    var status = asString(firstDefined(trip.status, trip.tripStatus, fallbackType), "planning").toLowerCase();
+    var planningStatus = asString(trip.planningStatus, "").toLowerCase();
 
-    var status = asString(
-      trip.status,
-      asString(trip.tripStatus, asString(fallbackType, "planned"))
-    ).toLowerCase();
-
-    var planningStatus = asString(
-      trip.planningStatus,
-      status === "planned" ? "planned" : ""
-    ).toLowerCase();
-
-    var country = asString(
+    var country = asString(firstDefined(
       trip.country,
-      asString(
-        destination.country,
-        asString(trip.destinationName, asString(destination.name, ""))
-      )
-    );
+      trip.destinationCountry,
+      destination.country,
+      trip.destinationName,
+      destination.name,
+      typeof trip.destination === "string" ? trip.destination : ""
+    ), "");
 
-    var city = asString(
+    var city = asString(firstDefined(
       trip.city,
-      asString(destination.city, asString(trip.location, ""))
-    );
+      trip.destinationCity,
+      destination.city,
+      trip.location
+    ), "");
+
+    var countryCode = asString(firstDefined(
+      trip.countryCode,
+      trip.destinationCountryCode,
+      trip.guideCountryCode,
+      destination.countryCode,
+      destination.code
+    ), "").toUpperCase();
 
     return {
-      id: asString(
-        trip.id,
-        createId("trip", [index, trip.title, country, startDate])
-      ),
-      title: asString(
-        trip.title,
-        asString(trip.name, country ? "رحلة " + country : "رحلة")
-      ),
+      id: asString(trip.id, createId("trip", [index, trip.title, country, startDate])),
+      title: asString(trip.title, asString(trip.name, country ? "رحلة " + country : "رحلة")),
       status: status,
       planningStatus: planningStatus,
-      startDate: startDate,
-      endDate: endDate,
+      lifecycleStatus: asString(trip.lifecycleStatus, ""),
+      startDate: startDate || null,
+      endDate: endDate || null,
+      durationDays: calculateDurationDays(startDate, endDate, durationDays),
       country: country,
-      countryCode: asString(
-        trip.countryCode,
-        asString(destination.countryCode, asString(destination.code, ""))
-      ).toUpperCase(),
+      countryCode: countryCode,
       city: city,
       destination: country || city,
-      travelers: Math.max(1, asNumber(trip.travelers, asNumber(trip.people, 1))),
+      travelers: Math.max(1, asNumber(firstDefined(trip.travelers, trip.people), 1)),
       budget: budget,
+      estimatedBudget: Math.max(0, asNumber(firstDefined(trip.estimatedBudget, budget), budget)),
       spent: spent,
-      currency: asString(
-        trip.currency,
-        asString(budgetRecord.currency, DEFAULT_CURRENCY)
-      ),
+      currency: asString(firstDefined(trip.currency, budgetObject.currency), defaultCurrency || DEFAULT_CURRENCY),
       checklist: checklist,
-      documents: documents,
+      readiness: isObject(trip.readiness) ? safeClone(trip.readiness) : null,
+      documents: asArray(firstDefined(trip.documents, trip.requiredDocuments)),
       activities: asArray(trip.activities),
       bookings: asArray(trip.bookings),
       flights: asArray(trip.flights || (trip.flight ? [trip.flight] : [])),
       hotels: asArray(trip.hotels || (trip.hotel ? [trip.hotel] : [])),
+      hotelName: asString(firstDefined(trip.hotelName, trip.accommodationName), ""),
+      accommodation: trip.accommodation || "",
       notes: asString(trip.notes, ""),
-      source: asString(trip.source, fallbackType || "trips"),
+      source: typeof trip.source === "string"
+        ? trip.source
+        : asString(asObject(trip.source).engine, fallbackType || "trips"),
+      sourceType: fallbackType || "trips",
       createdAt: trip.createdAt || null,
       updatedAt: trip.updatedAt || null,
       raw: trip
@@ -695,74 +728,85 @@
   }
 
   function classifyTrip(trip) {
-    var today = startOfDay(new Date());
-    var start = parseDate(trip.startDate);
-    var end = parseDate(trip.endDate);
-    var status = normalizeText(trip.status + " " + trip.planningStatus);
+    var explicit = normalizeText(
+      [
+        trip.lifecycleStatus,
+        trip.status,
+        trip.planningStatus
+      ].join(" ")
+    );
 
-    if (
-      status.indexOf("cancel") !== -1 ||
-      status.indexOf("ملغي") !== -1 ||
-      status.indexOf("deleted") !== -1
-    ) {
+    if (HIDDEN_STATUSES.some(function hidden(status) {
+      return explicit.indexOf(status) !== -1;
+    }) || explicit.indexOf("ملغي") !== -1) {
       return "cancelled";
     }
 
-    if (
-      status.indexOf("complete") !== -1 ||
-      status.indexOf("completed") !== -1 ||
-      status.indexOf("past") !== -1 ||
-      status.indexOf("منتهي") !== -1 ||
-      status.indexOf("مكتمل") !== -1
-    ) {
+    if (COMPLETED_STATUSES.some(function complete(status) {
+      return explicit.indexOf(status) !== -1;
+    }) || explicit.indexOf("مكتمل") !== -1 || explicit.indexOf("منتهي") !== -1) {
       return "completed";
     }
 
-    if (
-      status.indexOf("active") !== -1 ||
-      status.indexOf("ongoing") !== -1 ||
-      status.indexOf("حالي") !== -1
-    ) {
+    if (ACTIVE_STATUSES.some(function active(status) {
+      return explicit.indexOf(status) !== -1;
+    }) || explicit.indexOf("حالي") !== -1) {
       return "active";
     }
 
-    if (start && end && today >= startOfDay(start) && today <= startOfDay(end)) {
-      return "active";
-    }
+    var today = startOfDay(new Date());
+    var start = parseDate(trip.startDate);
+    var end = parseDate(trip.endDate);
 
-    if (end && startOfDay(end) < today) {
-      return "completed";
-    }
+    if (start && end && today >= startOfDay(start) && today <= startOfDay(end)) return "active";
+    if (end && startOfDay(end) < today) return "completed";
+    if (start && startOfDay(start) > today) return "upcoming";
 
-    if (start && startOfDay(start) > today) {
-      return "upcoming";
-    }
-
-    if (
-      status.indexOf("wishlist") !== -1 ||
-      status.indexOf("wish") !== -1 ||
-      status.indexOf("امنيه") !== -1
-    ) {
+    if (explicit.indexOf("wishlist") !== -1 || explicit.indexOf("wish") !== -1 || explicit.indexOf("امنيه") !== -1) {
       return "wishlist";
     }
 
-    return "planned";
+    if (UPCOMING_STATUSES.some(function planned(status) {
+      return explicit.indexOf(status) !== -1;
+    })) {
+      return trip.sourceType === "plannedTrips" ? "planned" : "upcoming";
+    }
+
+    return trip.sourceType === "plannedTrips" ? "planned" : "planned";
   }
 
-  function collectTrips(state) {
+  function collectTrips(state, profile) {
     var collected = [];
-    var seen = new Set();
+    var identityMap = new Map();
+
+    function getIdentity(trip) {
+      if (trip.id) return "id:" + trip.id;
+
+      return [
+        normalizeText(trip.title),
+        normalizeText(trip.countryCode || trip.country),
+        normalizeDateString(trip.startDate)
+      ].join("|");
+    }
 
     function addTrips(value, source) {
       asArray(value).forEach(function addTrip(item, index) {
-        var trip = normalizeTrip(item, index, source);
+        var trip = normalizeTrip(item, index, source, profile.currency);
+        trip.lifecycle = classifyTrip(trip);
 
-        if (seen.has(trip.id)) {
+        var identity = getIdentity(trip);
+        var existingIndex = identityMap.get(identity);
+
+        if (existingIndex !== undefined) {
+          var existing = collected[existingIndex];
+
+          if (existing.sourceType === "plannedTrips" && source === "trips") {
+            collected[existingIndex] = trip;
+          }
           return;
         }
 
-        seen.add(trip.id);
-        trip.lifecycle = classifyTrip(trip);
+        identityMap.set(identity, collected.length);
         collected.push(trip);
       });
     }
@@ -777,39 +821,24 @@
     addTrips(travel.trips, "travel.trips");
     addTrips(travel.plannedTrips, "travel.plannedTrips");
 
-    collected.sort(function sortTrips(a, b) {
+    return collected.sort(function sortTrips(a, b) {
       var aDate = dateValue(a.startDate, Number.MAX_SAFE_INTEGER);
       var bDate = dateValue(b.startDate, Number.MAX_SAFE_INTEGER);
       return aDate - bDate;
     });
-
-    return collected;
   }
 
   function normalizeDestination(item, index) {
-    var destination = asObject(item);
+    var destination = isObject(item) ? item : { countryCode: item };
 
     return {
-      id: asString(
-        destination.id,
-        createId("destination", [index, destination.name, destination.countryCode])
-      ),
-      name: asString(
-        destination.name,
-        asString(destination.country, asString(destination.title, "وجهة"))
-      ),
-      country: asString(destination.country, asString(destination.name, "")),
+      id: asString(destination.id, createId("destination", [index, destination.name, destination.countryCode])),
+      name: asString(firstDefined(destination.name, destination.countryName, destination.country, destination.title), "وجهة"),
+      country: asString(firstDefined(destination.country, destination.countryName, destination.name), ""),
       city: asString(destination.city, ""),
-      countryCode: asString(
-        destination.countryCode,
-        asString(destination.code, "")
-      ).toUpperCase(),
+      countryCode: asString(firstDefined(destination.countryCode, destination.code, destination.iso2), "").toUpperCase(),
       region: asString(destination.region, ""),
-      rating: clamp(
-        asNumber(destination.rating, asNumber(destination.score, 0)),
-        0,
-        100
-      ),
+      rating: clamp(asNumber(firstDefined(destination.rating, destination.score), 0), 0, 100),
       visited: asBoolean(destination.visited, false),
       wishlist: asBoolean(destination.wishlist, false),
       raw: destination
@@ -821,16 +850,8 @@
     var seen = new Set();
 
     function add(destination) {
-      var key = normalizeText(
-        destination.countryCode ||
-        destination.country ||
-        destination.name
-      );
-
-      if (!key || seen.has(key)) {
-        return;
-      }
-
+      var key = normalizeText(destination.countryCode || destination.country || destination.name);
+      if (!key || seen.has(key)) return;
       seen.add(key);
       values.push(destination);
     }
@@ -846,9 +867,7 @@
     });
 
     asArray(trips).forEach(function fromTrip(trip, index) {
-      if (!trip.country && !trip.destination) {
-        return;
-      }
+      if (!trip.country && !trip.destination) return;
 
       add({
         id: createId("destination", [index, trip.country, trip.countryCode]),
@@ -867,62 +886,128 @@
     return values;
   }
 
-  function collectBudgets(state, trips, profile) {
-    var budgets = asArray(state.budgets);
-    var savings = asArray(state.savings);
-    var currentYear = new Date().getFullYear();
+  function collectWallet(state, profile) {
+    var wallet = asObject(state.budgetWallet);
+    var transactions = asArray(wallet.transactions);
+    var openingBalance = Math.max(0, asNumber(wallet.openingBalance, 0));
 
-    var completedAndCurrentTrips = trips.filter(function relevantTrip(trip) {
-      var tripYear = parseDate(trip.startDate);
-      return !tripYear || tripYear.getFullYear() === currentYear;
+    var deposits = openingBalance;
+    var withdrawals = 0;
+    var expenses = 0;
+
+    transactions.forEach(function totalTransaction(transaction) {
+      var item = asObject(transaction);
+      var amount = Math.max(0, asNumber(item.amount, 0));
+
+      if (item.type === "deposit") deposits += amount;
+      if (item.type === "withdrawal") withdrawals += amount;
+      if (item.type === "expense") expenses += amount;
     });
 
-    var tripBudget = completedAndCurrentTrips.reduce(function sum(total, trip) {
-      return total + asNumber(trip.budget, 0);
+    var calculatedBalance = Math.max(0, deposits - withdrawals - expenses);
+
+    return {
+      currency: asString(wallet.currency, profile.currency),
+      openingBalance: openingBalance,
+      balance: Math.max(0, asNumber(wallet.balance, calculatedBalance)),
+      deposits: deposits,
+      withdrawals: withdrawals,
+      expenses: expenses,
+      transactionCount: transactions.length,
+      transactions: safeClone(transactions)
+    };
+  }
+
+  function collectBudgetRecords(state) {
+    if (Array.isArray(state.budgets)) return state.budgets;
+
+    var budgets = asObject(state.budgets);
+    return asArray(budgets.items || budgets.records || budgets.plans);
+  }
+
+  function collectSavingsEntries(state) {
+    if (Array.isArray(state.savings)) return state.savings;
+
+    var savings = asObject(state.savings);
+    return asArray(
+      firstDefined(
+        savings.entries,
+        savings.contributions,
+        savings.transactions,
+        savings.goals
+      )
+    );
+  }
+
+  function collectBudgets(state, trips, profile) {
+    var budgetRoot = asObject(state.budgets);
+    var savingsRoot = asObject(state.savings);
+    var statistics = asObject(state.statistics);
+    var wallet = collectWallet(state, profile);
+    var budgetRecords = collectBudgetRecords(state);
+    var savingsEntries = collectSavingsEntries(state);
+    var currentYear = new Date().getFullYear();
+
+    var relevantTrips = trips.filter(function relevantTrip(trip) {
+      if (trip.lifecycle === "cancelled") return false;
+      var date = parseDate(trip.startDate || trip.endDate);
+      return !date || date.getFullYear() === currentYear;
+    });
+
+    var tripBudget = relevantTrips.reduce(function sum(total, trip) {
+      return total + asNumber(trip.budget || trip.estimatedBudget, 0);
     }, 0);
 
-    var tripSpent = completedAndCurrentTrips.reduce(function sum(total, trip) {
+    var tripSpent = relevantTrips.reduce(function sum(total, trip) {
       return total + asNumber(trip.spent, 0);
     }, 0);
 
-    var explicitBudget = budgets.reduce(function sum(total, budget) {
+    var explicitBudget = budgetRecords.reduce(function sum(total, budget) {
       var record = asObject(budget);
-      return total + asNumber(
-        record.amount,
-        asNumber(record.total, asNumber(record.budget, 0))
-      );
+      return total + asNumber(firstDefined(record.amount, record.total, record.budget), 0);
     }, 0);
 
-    var explicitSpent = budgets.reduce(function sum(total, budget) {
-      var record = asObject(budget);
-      return total + asNumber(
-        record.spent,
-        asArray(record.expenses).reduce(function expenseSum(subtotal, expense) {
-          return subtotal + asNumber(asObject(expense).amount, 0);
-        }, 0)
-      );
-    }, 0);
+    var rootExpenses = normalizeExpenses(
+      firstDefined(state.expenses, budgetRoot.expenses),
+      profile.currency
+    ).filter(function activeExpense(expense) {
+      return !expense.deleted && expense.paid;
+    });
 
-    var savingsTotal = savings.reduce(function sum(total, saving) {
-      var record = asObject(saving);
-      return total + asNumber(
-        record.currentAmount,
-        asNumber(record.amount, asNumber(record.saved, 0))
-      );
-    }, 0);
-
-    var savingsTarget = savings.reduce(function sum(total, saving) {
-      var record = asObject(saving);
-      return total + asNumber(
-        record.targetAmount,
-        asNumber(record.target, 0)
-      );
-    }, 0);
-
-    var annualBudget = asNumber(
-      asObject(state.statistics).annualTravelBudget,
-      profile.annualTravelBudget
+    var explicitSpent = Math.max(
+      asNumber(firstDefined(budgetRoot.totalSpent, statistics.totalTravelSpend), 0),
+      rootExpenses.reduce(function sum(total, expense) {
+        return total + expense.amount;
+      }, 0)
     );
+
+    var savingsEntriesTotal = savingsEntries.reduce(function sum(total, saving) {
+      var record = asObject(saving);
+      var amount = asNumber(firstDefined(record.currentAmount, record.amount, record.saved), 0);
+      return record.type === "withdrawal" ? total - amount : total + amount;
+    }, 0);
+
+    var legacySavingsBalance = asNumber(firstDefined(
+      savingsRoot.currentBalance,
+      savingsRoot.balance,
+      budgetRoot.savingsBalance
+    ), 0);
+
+    var savingsTotal = wallet.balance > 0
+      ? wallet.balance
+      : Math.max(0, legacySavingsBalance, savingsEntriesTotal);
+
+    var savingsTarget = Math.max(0, asNumber(firstDefined(
+      savingsRoot.targetAmount,
+      budgetRoot.savingsTarget,
+      profile.annualTravelBudget
+    ), 0));
+
+    var annualBudget = Math.max(0, asNumber(firstDefined(
+      budgetRoot.annualBudget,
+      statistics.annualTravelBudget,
+      profile.annualTravelBudget
+    ), 30000));
 
     var plannedBudget = Math.max(explicitBudget, tripBudget);
     var spent = Math.max(explicitSpent, tripSpent);
@@ -937,30 +1022,38 @@
       savingsTotal: savingsTotal,
       savingsTarget: savingsTarget,
       savingsProgress: percentage(savingsTotal, savingsTarget),
-      monthlySaving: profile.monthlySaving,
-      budgets: budgets,
-      savings: savings
+      monthlySaving: Math.max(0, asNumber(firstDefined(
+        savingsRoot.monthlySaving,
+        savingsRoot.monthlySavingTarget,
+        profile.monthlySaving
+      ), 0)),
+      wallet: wallet,
+      expenses: rootExpenses,
+      budgetRecords: safeClone(budgetRecords),
+      savingsEntries: safeClone(savingsEntries)
     };
   }
 
   function collectDocuments(state) {
     var documents = asArray(state.documents);
-    var passports = asArray(
-      state.passports ||
-      asObject(state.passport).items ||
-      []
-    );
+    var passportRoot = asObject(state.passport);
+    var passportItems = asArray(firstDefined(
+      state.passports,
+      passportRoot.items,
+      passportRoot.documents
+    ));
 
-    var all = documents.concat(passports).map(function normalizeDocument(item, index) {
+    return documents.concat(passportItems).map(function normalizeDocument(item, index) {
       var document = asObject(item);
-      var expiryDate =
-        document.expiryDate ||
-        document.expiresAt ||
-        document.expirationDate ||
-        null;
+      var expiryDate = firstDefined(
+        document.expiryDate,
+        document.expiresAt,
+        document.expirationDate,
+        document.validUntil
+      );
 
       var daysToExpiry = expiryDate ? daysUntil(expiryDate) : null;
-      var status = "valid";
+      var status = asString(document.status, "valid").toLowerCase();
 
       if (daysToExpiry !== null && daysToExpiry < 0) {
         status = "expired";
@@ -968,8 +1061,10 @@
         status = "critical";
       } else if (daysToExpiry !== null && daysToExpiry <= 180) {
         status = "expiring";
-      } else if (document.valid === false || document.status === "invalid") {
+      } else if (document.valid === false || status === "invalid") {
         status = "invalid";
+      } else {
+        status = "valid";
       }
 
       return {
@@ -977,23 +1072,36 @@
         type: asString(document.type, asString(document.title, "document")),
         title: asString(document.title, asString(document.name, "مستند")),
         countryCode: asString(document.countryCode, "").toUpperCase(),
-        expiryDate: expiryDate,
+        expiryDate: normalizeDateString(expiryDate) || null,
         daysToExpiry: daysToExpiry,
         status: status,
         required: document.required !== false,
         raw: document
       };
     });
-
-    return all;
   }
 
   function collectPacking(state, trips) {
-    var globalPacking = normalizeChecklist(
-      state.packing ||
-      asObject(state.checklists).packing ||
-      []
-    );
+    var packingRoot = state.packing;
+    var globalPacking = [];
+
+    if (Array.isArray(packingRoot)) {
+      globalPacking = normalizeChecklist(packingRoot);
+    } else if (isObject(packingRoot)) {
+      globalPacking = normalizeChecklist(
+        firstDefined(
+          packingRoot.items,
+          packingRoot.current,
+          packingRoot.checklist
+        )
+      );
+
+      asArray(packingRoot.lists).forEach(function fromList(list) {
+        globalPacking = globalPacking.concat(normalizeChecklist(
+          firstDefined(asObject(list).items, asObject(list).checklist)
+        ));
+      });
+    }
 
     var tripPacking = [];
 
@@ -1021,24 +1129,34 @@
   }
 
   function selectNextTrip(trips) {
-    return trips
-      .filter(function upcoming(trip) {
-        return trip.lifecycle === "upcoming" || trip.lifecycle === "planned";
+    var future = trips
+      .filter(function eligible(trip) {
+        return ["upcoming", "planned", "active"].indexOf(trip.lifecycle) !== -1;
       })
       .filter(function hasValidDate(trip) {
         return parseDate(trip.startDate) !== null;
       })
       .sort(function nearest(a, b) {
-        return dateValue(a.startDate) - dateValue(b.startDate);
-      })[0] || null;
+        var aDays = daysUntil(a.startDate);
+        var bDays = daysUntil(b.startDate);
+
+        if (a.lifecycle === "active" && b.lifecycle !== "active") return -1;
+        if (b.lifecycle === "active" && a.lifecycle !== "active") return 1;
+
+        return asNumber(aDays, Number.MAX_SAFE_INTEGER) -
+          asNumber(bDays, Number.MAX_SAFE_INTEGER);
+      });
+
+    return future[0] || null;
   }
+
+  /* =========================================================
+     Scores and analysis
+  ========================================================= */
 
   function calculateChecklistScore(items) {
     var checklist = asArray(items);
-
-    if (!checklist.length) {
-      return 70;
-    }
+    if (!checklist.length) return 70;
 
     var required = checklist.filter(function requiredItem(item) {
       return item.required !== false;
@@ -1054,10 +1172,7 @@
 
   function calculateDocumentScore(documents, nextTrip) {
     var all = asArray(documents);
-
-    if (!all.length) {
-      return nextTrip ? 45 : 70;
-    }
+    if (!all.length) return nextTrip ? 45 : 70;
 
     var score = 100;
 
@@ -1075,50 +1190,33 @@
   }
 
   function calculateBudgetScore(budget) {
-    var usage = budget.usagePercent;
-    var remaining = budget.remaining;
-
-    if (budget.annualBudget <= 0) {
-      return 55;
+    if (budget.annualBudget <= 0) return 55;
+    if (budget.remaining < 0 || budget.usagePercent > 100) {
+      return clamp(100 - (budget.usagePercent - 100) * 2.5, 0, 45);
     }
-
-    if (remaining < 0 || usage > 100) {
-      return clamp(100 - (usage - 100) * 2.5, 0, 45);
-    }
-
-    if (usage >= 90) {
-      return 55;
-    }
-
-    if (usage >= 75) {
-      return 72;
-    }
-
-    if (usage >= 50) {
-      return 85;
-    }
-
+    if (budget.usagePercent >= 90) return 55;
+    if (budget.usagePercent >= 75) return 72;
+    if (budget.usagePercent >= 50) return 85;
     return 95;
   }
 
   function calculatePlanningScore(trip) {
-    if (!trip) {
-      return 65;
-    }
+    if (!trip) return 65;
+
+    var hasHotel = trip.hotels.length > 0 || Boolean(trip.hotelName || trip.accommodation);
 
     var signals = [
       Boolean(trip.startDate),
-      Boolean(trip.endDate),
+      Boolean(trip.endDate || trip.durationDays),
       Boolean(trip.country || trip.destination),
-      trip.budget > 0,
+      trip.budget > 0 || trip.estimatedBudget > 0,
       trip.travelers > 0,
       trip.activities.length > 0,
       trip.flights.length > 0,
-      trip.hotels.length > 0
+      hasHotel
     ];
 
-    var positive = signals.filter(Boolean).length;
-    return round((positive / signals.length) * 100, 0);
+    return round((signals.filter(Boolean).length / signals.length) * 100, 0);
   }
 
   function calculateSavingsScore(budget, nextTrip) {
@@ -1126,8 +1224,12 @@
       return clamp(budget.savingsProgress, 0, 100);
     }
 
-    if (nextTrip && nextTrip.budget > 0) {
-      return clamp(percentage(budget.savingsTotal, nextTrip.budget), 0, 100);
+    if (nextTrip && (nextTrip.budget > 0 || nextTrip.estimatedBudget > 0)) {
+      return clamp(
+        percentage(budget.savingsTotal, nextTrip.budget || nextTrip.estimatedBudget),
+        0,
+        100
+      );
     }
 
     return budget.monthlySaving > 0 ? 75 : 50;
@@ -1140,9 +1242,7 @@
 
     var visitedCountries = unique(
       destinations
-        .filter(function visited(destination) {
-          return destination.visited;
-        })
+        .filter(function visited(destination) { return destination.visited; })
         .map(function countryKey(destination) {
           return destination.countryCode || normalizeText(destination.country);
         })
@@ -1164,11 +1264,17 @@
       };
     }
 
-    var checklistScore = calculateChecklistScore(trip.checklist);
+    var checklistScore = trip.readiness && Number.isFinite(Number(trip.readiness.percentage))
+      ? clamp(trip.readiness.percentage, 0, 100)
+      : calculateChecklistScore(trip.checklist);
+
     var documentScore = calculateDocumentScore(documents, trip);
-    var budgetScore = trip.budget > 0
-      ? clamp(100 - Math.max(0, percentage(trip.spent, trip.budget) - 85) * 2, 0, 100)
+    var tripBudget = trip.budget || trip.estimatedBudget;
+
+    var budgetScore = tripBudget > 0
+      ? clamp(100 - Math.max(0, percentage(trip.spent, tripBudget) - 85) * 2, 0, 100)
       : 60;
+
     var planningScore = calculatePlanningScore(trip);
 
     var score = weightedScore([
@@ -1189,29 +1295,27 @@
     return {
       score: score,
       status: status,
-      checklistScore: checklistScore,
-      documentScore: documentScore,
+      checklistScore: round(checklistScore, 0),
+      documentScore: round(documentScore, 0),
       budgetScore: round(budgetScore, 0),
       planningScore: planningScore,
       daysUntil: daysUntil(trip.startDate)
     };
   }
 
+  /* =========================================================
+     Insights, alerts and recommendations
+  ========================================================= */
+
   function makeInsight(type, title, message, options) {
     var settings = asObject(options);
     var level = asString(settings.level, "info");
 
     return {
-      id: asString(
-        settings.id,
-        createId("insight", [type, title, message])
-      ),
+      id: asString(settings.id, createId("insight", [type, title, message])),
       type: asString(type, "general"),
       level: level,
-      priority: asNumber(
-        settings.priority,
-        LEVEL_ORDER[level] || 1
-      ),
+      priority: asNumber(settings.priority, LEVEL_ORDER[level] || 1),
       title: asString(title, "معلومة"),
       message: asString(message, ""),
       value: settings.value === undefined ? null : settings.value,
@@ -1226,10 +1330,7 @@
     var settings = asObject(options);
 
     return {
-      id: asString(
-        settings.id,
-        createId("recommendation", [type, title, message])
-      ),
+      id: asString(settings.id, createId("recommendation", [type, title, message])),
       type: asString(type, "general"),
       priority: clamp(asNumber(settings.priority, 50), 0, 100),
       title: asString(title, "توصية"),
@@ -1258,7 +1359,9 @@
         "next-trip",
         "رحلتك القادمة",
         nextTrip.title + " بتاريخ " + tripDateText +
-          (tripDays !== null ? "، والمتبقي " + Math.max(0, tripDays) + " يوم." : "."),
+          (tripDays !== null
+            ? "، والمتبقي " + Math.max(0, tripDays) + " يوم."
+            : "."),
         {
           level: tripDays !== null && tripDays <= 14 ? "attention" : "info",
           priority: tripDays !== null && tripDays <= 7 ? 4 : 2,
@@ -1313,6 +1416,20 @@
         priority: budget.usagePercent > 100 ? 5 : budget.usagePercent >= 85 ? 4 : 2,
         value: round(budget.usagePercent, 0),
         metric: "annualBudgetUsage",
+        action: { type: "open-budget" }
+      }
+    ));
+
+    insights.push(makeInsight(
+      "wallet",
+      "رصيد السفر الحالي",
+      "رصيد محفظة السفر الحالي " +
+        formatCurrency(budget.wallet.balance, budget.wallet.currency, locale) + ".",
+      {
+        level: budget.wallet.balance > 0 ? "success" : "info",
+        priority: 2,
+        value: budget.wallet.balance,
+        metric: "travelWalletBalance",
         action: { type: "open-budget" }
       }
     ));
@@ -1384,9 +1501,7 @@
       }
     ));
 
-    return insights.sort(function sortInsights(a, b) {
-      return b.priority - a.priority;
-    });
+    return sortByPriority(insights);
   }
 
   function buildAlerts(context) {
@@ -1491,8 +1606,7 @@
         alerts.push(makeInsight(
           "packing-pending",
           "عناصر تجهيز قبل السفر",
-          "يوجد " + incompleteRequired.length +
-            " عنصر ضروري غير مكتمل قبل الرحلة.",
+          "يوجد " + incompleteRequired.length + " عنصر ضروري غير مكتمل قبل الرحلة.",
           {
             level: "warning",
             priority: 4,
@@ -1502,7 +1616,9 @@
         ));
       }
 
-      if (nextTrip.budget > 0 && nextTrip.spent > nextTrip.budget) {
+      var tripBudget = nextTrip.budget || nextTrip.estimatedBudget;
+
+      if (tripBudget > 0 && nextTrip.spent > tripBudget) {
         alerts.push(makeInsight(
           "trip-budget-overrun",
           "تجاوز ميزانية الرحلة",
@@ -1517,9 +1633,7 @@
       }
     }
 
-    return alerts.sort(function sortAlerts(a, b) {
-      return b.priority - a.priority;
-    });
+    return sortByPriority(alerts);
   }
 
   function buildRecommendations(context) {
@@ -1582,7 +1696,7 @@
         ));
       }
 
-      if (nextTrip.budget <= 0) {
+      if ((nextTrip.budget || nextTrip.estimatedBudget) <= 0) {
         recommendations.push(makeRecommendation(
           "trip-budget",
           "حدد ميزانية الرحلة",
@@ -1604,8 +1718,7 @@
         "قلل الالتزامات غير الضرورية أو ارفع الادخار قبل إضافة حجوزات جديدة.",
         {
           priority: 92,
-          reason: "استخدام الميزانية السنوية وصل إلى " +
-            round(budget.usagePercent, 0) + "%.",
+          reason: "استخدام الميزانية السنوية وصل إلى " + round(budget.usagePercent, 0) + "%.",
           action: { type: "open-budget" }
         }
       ));
@@ -1637,12 +1750,12 @@
       ));
     }
 
-    return recommendations
-      .sort(function sortRecommendations(a, b) {
-        return b.priority - a.priority;
-      })
-      .slice(0, 20);
+    return sortByPriority(recommendations).slice(0, MAX_PERSISTED_ITEMS);
   }
+
+  /* =========================================================
+     Context and snapshot
+  ========================================================= */
 
   function getAnalyticsSummary(state, context) {
     var analytics = getAnalytics();
@@ -1655,9 +1768,7 @@
       annualBudgetUsage: context.budget.usagePercent
     };
 
-    if (!analytics) {
-      return fallback;
-    }
+    if (!analytics) return fallback;
 
     return Object.assign(
       {},
@@ -1673,7 +1784,7 @@
   function buildContext(state) {
     var config = getGlobalConfig();
     var profile = normalizeProfile(state, config);
-    var trips = collectTrips(state);
+    var trips = collectTrips(state, profile);
     var destinations = collectDestinations(state, trips);
     var documents = collectDocuments(state);
     var packing = collectPacking(state, trips);
@@ -1686,9 +1797,7 @@
     });
 
     var upcomingTrips = trips.filter(function upcoming(trip) {
-      return trip.lifecycle === "upcoming" ||
-        trip.lifecycle === "planned" ||
-        trip.lifecycle === "active";
+      return ["upcoming", "planned", "active"].indexOf(trip.lifecycle) !== -1;
     });
 
     var visitedCountries = unique(
@@ -1703,7 +1812,9 @@
       }).length;
 
     var statistics = {
-      totalTrips: trips.length,
+      totalTrips: trips.filter(function visible(trip) {
+        return trip.lifecycle !== "cancelled";
+      }).length,
       completedTrips: completedTrips.length,
       upcomingTrips: upcomingTrips.length,
       activeTrips: trips.filter(function active(trip) {
@@ -1753,7 +1864,6 @@
     };
 
     context.analytics = getAnalyticsSummary(state, context);
-
     return context;
   }
 
@@ -1771,12 +1881,13 @@
       version: VERSION,
       revision: runtime.revision,
       generatedAt: nowIso(),
-      profile: safeJsonClone(context.profile),
+      profile: safeClone(context.profile),
       summary: {
         nextTrip: context.nextTrip ? {
           id: context.nextTrip.id,
           title: context.nextTrip.title,
           destination: context.nextTrip.destination,
+          countryCode: context.nextTrip.countryCode,
           startDate: context.nextTrip.startDate,
           endDate: context.nextTrip.endDate,
           daysUntil: daysUntil(context.nextTrip.startDate),
@@ -1785,21 +1896,24 @@
         totalTrips: context.statistics.totalTrips,
         completedTrips: context.statistics.completedTrips,
         upcomingTrips: context.statistics.upcomingTrips,
+        activeTrips: context.statistics.activeTrips,
+        plannedTrips: context.statistics.plannedTrips,
         visitedCountries: context.statistics.visitedCountries,
         wishlistCount: context.statistics.wishlistCount,
         annualBudget: context.budget.annualBudget,
         spent: context.budget.spent,
         remaining: context.budget.remaining,
         budgetUsage: round(context.budget.usagePercent, 0),
+        travelBalance: context.budget.wallet.balance,
         savingsTotal: context.budget.savingsTotal,
         packingProgress: round(context.packing.progress, 0),
         documentIssues: context.documents.filter(function documentIssue(document) {
           return document.status !== "valid";
         }).length
       },
-      scores: safeJsonClone(context.scores),
-      readiness: safeJsonClone(context.readiness),
-      statistics: safeJsonClone(context.statistics),
+      scores: safeClone(context.scores),
+      readiness: safeClone(context.readiness),
+      statistics: safeClone(context.statistics),
       insights: insights,
       alerts: alerts,
       recommendations: recommendations,
@@ -1807,62 +1921,85 @@
     };
   }
 
+  /* =========================================================
+     Refresh, subscriptions and events
+  ========================================================= */
+
   function notifyListeners(snapshot, reason) {
     runtime.listeners.forEach(function notify(listener) {
       try {
-        listener(safeJsonClone(snapshot), {
+        listener(safeClone(snapshot), {
           reason: asString(reason, "refresh"),
           revision: snapshot.revision,
           generatedAt: snapshot.generatedAt
         });
       } catch (error) {
-        runtime.lastError = error;
+        rememberError(error);
       }
     });
   }
 
   function emitEvent(name, payload) {
+    var emitted = false;
     var events = getEvents();
 
-    if (!events) {
-      return false;
+    if (events) {
+      emitted = Boolean(
+        safeCall(events.emit, false, events, [name, payload]) ||
+        safeCall(events.publish, false, events, [name, payload]) ||
+        safeCall(events.dispatch, false, events, [name, payload])
+      );
     }
 
-    return Boolean(
-      safeCall(events.emit, false, events, [name, payload]) ||
-      safeCall(events.publish, false, events, [name, payload]) ||
-      safeCall(events.dispatch, false, events, [name, payload])
-    );
+    if (typeof global.dispatchEvent === "function" && typeof global.CustomEvent === "function") {
+      try {
+        global.dispatchEvent(new global.CustomEvent(name, { detail: safeClone(payload) }));
+        emitted = true;
+      } catch (error) {
+        rememberError(error);
+      }
+    }
+
+    return emitted;
   }
 
   function refresh(reason) {
-    if (runtime.destroyed) {
-      return null;
+    if (runtime.destroyed) return null;
+    if (runtime.refreshing) return safeClone(runtime.snapshot);
+
+    runtime.refreshing = true;
+
+    try {
+      var previous = runtime.snapshot;
+      var snapshot = buildSnapshot();
+
+      runtime.snapshot = snapshot;
+      runtime.lastRefreshReason = asString(reason, "refresh");
+      runtime.lastRefreshAt = snapshot.generatedAt;
+
+      persistSnapshot(snapshot);
+      notifyListeners(snapshot, runtime.lastRefreshReason);
+
+      emitEvent("travel-brain:updated", {
+        reason: runtime.lastRefreshReason,
+        revision: snapshot.revision,
+        generatedAt: snapshot.generatedAt,
+        summary: snapshot.summary,
+        scores: snapshot.scores,
+        previousRevision: previous ? previous.revision : null
+      });
+
+      return safeClone(snapshot);
+    } catch (error) {
+      rememberError(error);
+      return runtime.snapshot ? safeClone(runtime.snapshot) : null;
+    } finally {
+      runtime.refreshing = false;
     }
-
-    var previous = runtime.snapshot;
-    var snapshot = buildSnapshot();
-
-    runtime.snapshot = snapshot;
-    persistSnapshot(snapshot);
-    notifyListeners(snapshot, reason);
-
-    emitEvent("travel-brain:updated", {
-      reason: asString(reason, "refresh"),
-      revision: snapshot.revision,
-      generatedAt: snapshot.generatedAt,
-      summary: snapshot.summary,
-      scores: snapshot.scores,
-      previousRevision: previous ? previous.revision : null
-    });
-
-    return safeJsonClone(snapshot);
   }
 
   function scheduleRefresh(reason, delay) {
-    if (runtime.destroyed) {
-      return;
-    }
+    if (runtime.destroyed) return false;
 
     if (runtime.refreshTimer) {
       global.clearTimeout(runtime.refreshTimer);
@@ -1871,22 +2008,22 @@
     runtime.refreshTimer = global.setTimeout(function scheduled() {
       runtime.refreshTimer = null;
       refresh(reason || "scheduled");
-    }, Math.max(0, asNumber(delay, 60)));
+    }, Math.max(0, asNumber(delay, DEFAULT_REFRESH_DELAY)));
+
+    return true;
   }
 
   function subscribeToStore() {
     var store = getStore();
 
-    if (!store || typeof store.subscribe !== "function") {
-      return;
-    }
+    if (!store || typeof store.subscribe !== "function") return;
 
     runtime.unsubscribeStore = safeCall(
       store.subscribe,
       null,
       store,
       [function onStoreChange() {
-        scheduleRefresh("store-change", 40);
+        scheduleRefresh("store-change", 45);
       }]
     );
   }
@@ -1894,45 +2031,54 @@
   function subscribeToEvents() {
     var events = getEvents();
 
-    if (!events) {
-      return;
-    }
-
     var eventNames = [
       "store:updated",
       "store:changed",
+      "tic:store-change",
       "trip:created",
       "trip:updated",
       "trip:deleted",
+      "planned-trip:updated",
       "budget:updated",
+      "tic:budget-wallet-changed",
       "expense:created",
       "savings:updated",
       "documents:updated",
       "packing:updated",
       "wishlist:updated",
-      "guide:updated",
-      "planned-trip:updated"
+      "guide:updated"
     ];
 
-    eventNames.forEach(function bind(eventName) {
-      var handler = function onEvent() {
-        scheduleRefresh(eventName, 50);
-      };
+    if (events) {
+      eventNames.forEach(function bind(eventName) {
+        var handler = function onEvent() {
+          scheduleRefresh(eventName, 55);
+        };
 
-      var unsubscribe =
-        safeCall(events.on, null, events, [eventName, handler]) ||
-        safeCall(events.subscribe, null, events, [eventName, handler]);
+        var unsubscribe =
+          safeCall(events.on, null, events, [eventName, handler]) ||
+          safeCall(events.subscribe, null, events, [eventName, handler]);
 
-      if (typeof unsubscribe === "function") {
-        runtime.eventUnsubscribers.push(unsubscribe);
-      }
-    });
+        if (typeof unsubscribe === "function") {
+          runtime.eventUnsubscribers.push(unsubscribe);
+        }
+      });
+    }
+
+    if (typeof global.addEventListener === "function") {
+      eventNames.forEach(function bindDom(eventName) {
+        var handler = function onDomEvent() {
+          scheduleRefresh(eventName, 55);
+        };
+
+        global.addEventListener(eventName, handler);
+        runtime.domListeners.push({ name: eventName, handler: handler });
+      });
+    }
   }
 
   function init(options) {
-    if (runtime.initialized && !runtime.destroyed) {
-      return getSnapshot();
-    }
+    if (runtime.initialized && !runtime.destroyed) return getSnapshot();
 
     runtime.destroyed = false;
     runtime.initialized = true;
@@ -1967,8 +2113,15 @@
       safeCall(fn, null);
     });
 
+    runtime.domListeners.forEach(function removeDomListener(item) {
+      if (typeof global.removeEventListener === "function") {
+        global.removeEventListener(item.name, item.handler);
+      }
+    });
+
     runtime.unsubscribeStore = null;
     runtime.eventUnsubscribers = [];
+    runtime.domListeners = [];
     runtime.listeners.clear();
     runtime.destroyed = true;
     runtime.initialized = false;
@@ -1977,20 +2130,21 @@
   }
 
   function ensureSnapshot() {
-    if (!runtime.snapshot) {
-      init();
-    }
-
+    if (!runtime.snapshot) init();
     return runtime.snapshot;
   }
 
+  /* =========================================================
+     Public getters and analyses
+  ========================================================= */
+
   function getSnapshot() {
-    return safeJsonClone(ensureSnapshot());
+    return safeClone(ensureSnapshot());
   }
 
   function getContext() {
     var snapshot = ensureSnapshot();
-    return safeJsonClone(snapshot.context);
+    return snapshot ? safeClone(snapshot.context) : null;
   }
 
   function getInsights(options) {
@@ -1998,49 +2152,11 @@
     var items = ensureSnapshot().insights.slice();
 
     if (settings.type) {
-      items = items.filter(function byType(item) {
-        return item.type === settings.type;
-      });
+      items = items.filter(function byType(item) { return item.type === settings.type; });
     }
 
     if (settings.level) {
-      items = items.filter(function byLevel(item) {
-        return item.level === settings.level;
-      });
-    }
-
-    if (settings.limit) {
-      items = items.slice(0, Math.max(0, asNumber(settings.limit, items.length)));
-    }
-
-    return safeJsonClone(items);
-  }
-
-  function getAlerts(options) {
-    var settings = asObject(options);
-    var items = ensureSnapshot().alerts.slice();
-
-    if (settings.level) {
-      items = items.filter(function byLevel(item) {
-        return item.level === settings.level;
-      });
-    }
-
-    if (settings.limit) {
-      items = items.slice(0, Math.max(0, asNumber(settings.limit, items.length)));
-    }
-
-    return safeJsonClone(items);
-  }
-
-  function getRecommendations(options) {
-    var settings = asObject(options);
-    var items = ensureSnapshot().recommendations.slice();
-
-    if (settings.type) {
-      items = items.filter(function byType(item) {
-        return item.type === settings.type;
-      });
+      items = items.filter(function byLevel(item) { return item.level === settings.level; });
     }
 
     if (settings.minimumPriority !== undefined) {
@@ -2049,24 +2165,78 @@
       });
     }
 
-    if (settings.limit) {
+    if (settings.limit !== undefined) {
       items = items.slice(0, Math.max(0, asNumber(settings.limit, items.length)));
     }
 
-    return safeJsonClone(items);
+    return safeClone(items);
+  }
+
+  function getAlerts(options) {
+    var settings = asObject(options);
+    var items = ensureSnapshot().alerts.slice();
+
+    if (settings.type) {
+      items = items.filter(function byType(item) { return item.type === settings.type; });
+    }
+
+    if (settings.level) {
+      items = items.filter(function byLevel(item) { return item.level === settings.level; });
+    }
+
+    if (settings.minimumPriority !== undefined) {
+      items = items.filter(function byPriority(item) {
+        return item.priority >= asNumber(settings.minimumPriority, 0);
+      });
+    }
+
+    if (settings.limit !== undefined) {
+      items = items.slice(0, Math.max(0, asNumber(settings.limit, items.length)));
+    }
+
+    return safeClone(items);
+  }
+
+  function getRecommendations(options) {
+    var settings = asObject(options);
+    var items = ensureSnapshot().recommendations.slice();
+
+    if (settings.type) {
+      items = items.filter(function byType(item) { return item.type === settings.type; });
+    }
+
+    if (settings.minimumPriority !== undefined) {
+      items = items.filter(function byPriority(item) {
+        return item.priority >= asNumber(settings.minimumPriority, 0);
+      });
+    }
+
+    if (settings.limit !== undefined) {
+      items = items.slice(0, Math.max(0, asNumber(settings.limit, items.length)));
+    }
+
+    return safeClone(items);
   }
 
   function resolveTrip(tripOrId) {
-    var context = ensureSnapshot().context;
+    var snapshot = ensureSnapshot();
+    if (!snapshot) return null;
 
     if (isObject(tripOrId)) {
-      return normalizeTrip(tripOrId, 0, "external");
+      var external = normalizeTrip(
+        tripOrId,
+        0,
+        "external",
+        snapshot.context.profile.currency
+      );
+      external.lifecycle = classifyTrip(external);
+      return external;
     }
 
     var id = asString(tripOrId, "");
 
-    return context.trips.find(function findTrip(trip) {
-      return trip.id === id;
+    return snapshot.context.trips.find(function findTrip(trip) {
+      return String(trip.id) === String(id);
     }) || null;
   }
 
@@ -2074,55 +2244,43 @@
     var trip = resolveTrip(tripOrId);
     var snapshot = ensureSnapshot();
 
-    if (!trip) {
-      return null;
-    }
+    if (!trip || !snapshot) return null;
 
     var readiness = calculateTripReadiness(trip, snapshot.context.documents);
-    var remainingBudget = trip.budget - trip.spent;
-    var duration = trip.startDate && trip.endDate
-      ? Math.max(1, daysBetween(trip.startDate, trip.endDate) + 1)
-      : null;
+    var totalBudget = trip.budget || trip.estimatedBudget;
+    var remainingBudget = totalBudget - trip.spent;
+    var duration = calculateDurationDays(trip.startDate, trip.endDate, trip.durationDays);
 
     var result = {
-      trip: safeJsonClone(trip),
+      trip: safeClone(trip),
       lifecycle: classifyTrip(trip),
       daysUntil: daysUntil(trip.startDate),
-      durationDays: duration,
+      durationDays: duration || null,
       readiness: readiness,
       budget: {
-        total: trip.budget,
+        total: totalBudget,
         spent: trip.spent,
         remaining: remainingBudget,
-        usagePercent: percentage(trip.spent, trip.budget),
-        dailyBudget: duration && trip.budget > 0
-          ? round(trip.budget / duration, 2)
-          : 0,
-        dailySpent: duration && trip.spent > 0
-          ? round(trip.spent / duration, 2)
-          : 0
+        usagePercent: percentage(trip.spent, totalBudget),
+        dailyBudget: duration && totalBudget > 0 ? round(totalBudget / duration, 2) : 0,
+        dailySpent: duration && trip.spent > 0 ? round(trip.spent / duration, 2) : 0
       },
       checklist: {
         total: trip.checklist.length,
-        completed: trip.checklist.filter(function completed(item) {
-          return item.completed;
-        }).length,
-        pending: trip.checklist.filter(function pending(item) {
-          return !item.completed;
-        }).length,
+        completed: trip.checklist.filter(function completed(item) { return item.completed; }).length,
+        pending: trip.checklist.filter(function pending(item) { return !item.completed; }).length,
         progress: calculateChecklistScore(trip.checklist)
       },
       planning: {
         score: calculatePlanningScore(trip),
-        hasDates: Boolean(trip.startDate && trip.endDate),
-        hasBudget: trip.budget > 0,
+        hasDates: Boolean(trip.startDate && (trip.endDate || trip.durationDays)),
+        hasBudget: totalBudget > 0,
         hasFlights: trip.flights.length > 0,
-        hasHotels: trip.hotels.length > 0,
+        hasHotels: trip.hotels.length > 0 || Boolean(trip.hotelName || trip.accommodation),
         hasActivities: trip.activities.length > 0
-      }
+      },
+      risks: []
     };
-
-    result.risks = [];
 
     if (result.daysUntil !== null && result.daysUntil <= 14 && readiness.score < 70) {
       result.risks.push({
@@ -2132,7 +2290,7 @@
       });
     }
 
-    if (trip.budget > 0 && remainingBudget < 0) {
+    if (totalBudget > 0 && remainingBudget < 0) {
       result.risks.push({
         type: "budget",
         level: "danger",
@@ -2140,7 +2298,7 @@
       });
     }
 
-    if (!trip.flights.length && result.daysUntil !== null && result.daysUntil <= 30) {
+    if (!result.planning.hasFlights && result.daysUntil !== null && result.daysUntil <= 30) {
       result.risks.push({
         type: "flight",
         level: "attention",
@@ -2148,7 +2306,7 @@
       });
     }
 
-    if (!trip.hotels.length && result.daysUntil !== null && result.daysUntil <= 30) {
+    if (!result.planning.hasHotels && result.daysUntil !== null && result.daysUntil <= 30) {
       result.risks.push({
         type: "hotel",
         level: "attention",
@@ -2156,28 +2314,25 @@
       });
     }
 
-    return safeJsonClone(result);
+    return safeClone(result);
   }
 
   function getDestinationAnalysis(destinationOrCode) {
     var snapshot = ensureSnapshot();
+    if (!snapshot) return null;
+
     var key = normalizeText(
       isObject(destinationOrCode)
-        ? (
-          destinationOrCode.countryCode ||
-          destinationOrCode.country ||
-          destinationOrCode.name
-        )
+        ? firstDefined(
+            destinationOrCode.countryCode,
+            destinationOrCode.country,
+            destinationOrCode.name
+          )
         : destinationOrCode
     );
 
     var destination = snapshot.context.destinations.find(function findDestination(item) {
-      return [
-        item.countryCode,
-        item.country,
-        item.name,
-        item.city
-      ].some(function match(value) {
+      return [item.countryCode, item.country, item.name, item.city].some(function match(value) {
         return normalizeText(value) === key;
       });
     });
@@ -2186,18 +2341,10 @@
       destination = normalizeDestination(destinationOrCode, 0);
     }
 
-    if (!destination) {
-      return null;
-    }
+    if (!destination) return null;
 
     var relatedTrips = snapshot.context.trips.filter(function related(trip) {
-      var tripKeys = [
-        trip.countryCode,
-        trip.country,
-        trip.destination,
-        trip.city
-      ].map(normalizeText);
-
+      var tripKeys = [trip.countryCode, trip.country, trip.destination, trip.city].map(normalizeText);
       var destinationKeys = [
         destination.countryCode,
         destination.country,
@@ -2223,21 +2370,19 @@
     }, 0);
 
     var totalBudget = relatedTrips.reduce(function sum(total, trip) {
-      return total + trip.budget;
+      return total + (trip.budget || trip.estimatedBudget);
     }, 0);
 
-    return {
-      destination: safeJsonClone(destination),
-      trips: safeJsonClone(relatedTrips),
+    return safeClone({
+      destination: destination,
+      trips: relatedTrips,
       statistics: {
         totalTrips: relatedTrips.length,
         completedTrips: completed.length,
         upcomingTrips: upcoming.length,
         totalSpent: totalSpent,
         totalBudget: totalBudget,
-        averageTripBudget: relatedTrips.length
-          ? round(totalBudget / relatedTrips.length, 2)
-          : 0
+        averageTripBudget: relatedTrips.length ? round(totalBudget / relatedTrips.length, 2) : 0
       },
       relationship: completed.length
         ? "visited"
@@ -2246,16 +2391,18 @@
           : destination.wishlist
             ? "wishlist"
             : "known"
-    };
+    });
   }
 
   function getBudgetAnalysis() {
     var snapshot = ensureSnapshot();
+    if (!snapshot) return null;
+
     var budget = snapshot.context.budget;
     var profile = snapshot.context.profile;
     var locale = profile.language === "ar" ? "ar-AE" : "en-US";
 
-    return safeJsonClone({
+    return safeClone({
       annualBudget: budget.annualBudget,
       plannedBudget: budget.plannedBudget,
       spent: budget.spent,
@@ -2266,6 +2413,7 @@
       savingsTarget: budget.savingsTarget,
       savingsProgress: round(budget.savingsProgress, 1),
       monthlySaving: budget.monthlySaving,
+      wallet: budget.wallet,
       score: snapshot.scores.budget,
       status: budget.remaining < 0
         ? "over-budget"
@@ -2278,22 +2426,34 @@
         annualBudget: formatCurrency(budget.annualBudget, profile.currency, locale),
         spent: formatCurrency(budget.spent, profile.currency, locale),
         remaining: formatCurrency(budget.remaining, profile.currency, locale),
-        savingsTotal: formatCurrency(budget.savingsTotal, profile.currency, locale)
+        savingsTotal: formatCurrency(budget.savingsTotal, profile.currency, locale),
+        travelBalance: formatCurrency(budget.wallet.balance, budget.wallet.currency, locale)
       }
     });
   }
 
   function getPassportAnalysis() {
     var snapshot = ensureSnapshot();
+    if (!snapshot) return null;
+
     var completedTrips = snapshot.context.trips.filter(function completed(trip) {
       return trip.lifecycle === "completed";
     });
 
+    var passportRoot = asObject(snapshot.context.state.passport);
+
     var countries = unique(
       completedTrips.map(function country(trip) {
         return trip.countryCode || trip.country || trip.destination;
-      })
-    );
+      }).concat(
+        asArray(firstDefined(passportRoot.countries, passportRoot.visitedCountries))
+          .map(function normalizeCountry(item) {
+            return isObject(item)
+              ? firstDefined(item.countryCode, item.code, item.country, item.name)
+              : item;
+          })
+      )
+    ).filter(Boolean);
 
     var years = {};
 
@@ -2303,7 +2463,7 @@
       years[year] = (years[year] || 0) + 1;
     });
 
-    return safeJsonClone({
+    return safeClone({
       completedTrips: completedTrips.length,
       visitedCountries: countries.length,
       countries: countries,
@@ -2313,14 +2473,16 @@
         .sort(function latest(a, b) {
           return dateValue(b.endDate || b.startDate) - dateValue(a.endDate || a.startDate);
         })[0] || null,
+      passport: passportRoot,
       score: snapshot.scores.experience
     });
   }
 
   function getReadinessAnalysis() {
     var snapshot = ensureSnapshot();
+    if (!snapshot) return null;
 
-    return safeJsonClone({
+    return safeClone({
       overallScore: snapshot.scores.overall,
       nextTrip: snapshot.summary.nextTrip,
       tripReadiness: snapshot.readiness,
@@ -2337,13 +2499,17 @@
     });
   }
 
+  /* =========================================================
+     Local assistant
+  ========================================================= */
+
   function buildAnswer(title, message, data, actions) {
     return {
       id: createId("answer", [title, message, nowIso()]),
       title: asString(title, "مساعد السفر"),
       message: asString(message, ""),
-      data: data === undefined ? null : safeJsonClone(data),
-      actions: safeJsonClone(asArray(actions)),
+      data: data === undefined ? null : safeClone(data),
+      actions: safeClone(asArray(actions)),
       generatedAt: nowIso()
     };
   }
@@ -2352,6 +2518,15 @@
     var text = asString(question, "");
     var settings = asObject(options);
     var snapshot = ensureSnapshot();
+
+    if (!snapshot) {
+      return buildAnswer("مساعد السفر", "تعذر قراءة بيانات السفر حالياً.", null, []);
+    }
+
+    if (settings.refresh === true) {
+      snapshot = refresh("assistant-question") || snapshot;
+    }
+
     var profile = snapshot.context.profile;
     var locale = profile.language === "ar" ? "ar-AE" : "en-US";
 
@@ -2394,7 +2569,8 @@
         "ملخص الميزانية",
         "صرفت " + budget.formatted.spent +
           " من أصل " + budget.formatted.annualBudget +
-          "، والمتبقي " + budget.formatted.remaining + ".",
+          "، والمتبقي " + budget.formatted.remaining +
+          "، ورصيد السفر الحالي " + budget.formatted.travelBalance + ".",
         budget,
         [{ type: "open-budget", label: "فتح الميزانية" }]
       );
@@ -2457,6 +2633,44 @@
       );
     }
 
+    if (containsAny(text, QUESTION_PATTERNS.passport)) {
+      var passport = getPassportAnalysis();
+
+      return buildAnswer(
+        "جواز سفري",
+        "لديك " + passport.completedTrips + " رحلة مكتملة و" +
+          passport.visitedCountries + " دولة مسجلة.",
+        passport,
+        [{ type: "open-passport", label: "فتح جواز سفري" }]
+      );
+    }
+
+    if (containsAny(text, QUESTION_PATTERNS.alerts)) {
+      return buildAnswer(
+        "تنبيهات السفر",
+        snapshot.alerts.length
+          ? "يوجد " + snapshot.alerts.length + " تنبيه يحتاج مراجعة."
+          : "لا توجد تنبيهات عاجلة حالياً.",
+        snapshot.alerts,
+        snapshot.alerts[0] && snapshot.alerts[0].action
+          ? [snapshot.alerts[0].action]
+          : []
+      );
+    }
+
+    if (containsAny(text, QUESTION_PATTERNS.recommendations)) {
+      return buildAnswer(
+        "توصيات السفر",
+        snapshot.recommendations.length
+          ? snapshot.recommendations[0].message
+          : "لا توجد توصية عاجلة حالياً.",
+        snapshot.recommendations,
+        snapshot.recommendations[0] && snapshot.recommendations[0].action
+          ? [snapshot.recommendations[0].action]
+          : []
+      );
+    }
+
     if (containsAny(text, QUESTION_PATTERNS.destination)) {
       var destinationNames = snapshot.context.destinations
         .map(function name(destination) {
@@ -2512,20 +2726,25 @@
     );
   }
 
+  /* =========================================================
+     Subscription, health and cache
+  ========================================================= */
+
   function subscribe(listener, options) {
     if (typeof listener !== "function") {
       throw new TypeError("TravelBrain.subscribe requires a function.");
     }
 
     runtime.listeners.add(listener);
-
     var settings = asObject(options);
 
     if (settings.immediate !== false) {
-      listener(getSnapshot(), {
+      var snapshot = getSnapshot();
+
+      listener(snapshot, {
         reason: "subscribe",
-        revision: ensureSnapshot().revision,
-        generatedAt: ensureSnapshot().generatedAt
+        revision: snapshot ? snapshot.revision : 0,
+        generatedAt: snapshot ? snapshot.generatedAt : nowIso()
       });
     }
 
@@ -2544,34 +2763,43 @@
       version: VERSION,
       initialized: runtime.initialized,
       destroyed: runtime.destroyed,
+      refreshing: runtime.refreshing,
       revision: runtime.revision,
       hasSnapshot: Boolean(runtime.snapshot),
+      lastRefreshReason: runtime.lastRefreshReason,
+      lastRefreshAt: runtime.lastRefreshAt,
       integrations: {
         store: Boolean(store),
+        storeVersion: store && store.version ? store.version : null,
         storeSubscription: Boolean(store && typeof store.subscribe === "function"),
         events: Boolean(events),
         analytics: Boolean(analytics),
-        localStorage: Boolean(global.localStorage)
+        localStorage: Boolean(global.localStorage),
+        customEvents: typeof global.CustomEvent === "function"
       },
       lastError: runtime.lastError
         ? {
-          name: runtime.lastError.name,
-          message: runtime.lastError.message
-        }
+            name: runtime.lastError.name,
+            message: runtime.lastError.message
+          }
         : null,
       generatedAt: nowIso()
     };
   }
 
-  function clearCache() {
+  function clearCache(options) {
     runtime.snapshot = null;
+
+    if (asObject(options).resetRevision === true) {
+      runtime.revision = 0;
+    }
 
     try {
       if (global.localStorage) {
         global.localStorage.removeItem(STORAGE_KEY);
       }
     } catch (error) {
-      runtime.lastError = error;
+      rememberError(error);
     }
 
     return true;
@@ -2607,14 +2835,19 @@
       asObject: asObject,
       asNumber: asNumber,
       asString: asString,
+      asBoolean: asBoolean,
+      firstDefined: firstDefined,
       clamp: clamp,
       round: round,
+      average: average,
       percentage: percentage,
       weightedScore: weightedScore,
       daysUntil: daysUntil,
       daysBetween: daysBetween,
+      calculateDurationDays: calculateDurationDays,
       formatCurrency: formatCurrency,
       formatDate: formatDate,
+      normalizeDateString: normalizeDateString,
       normalizeText: normalizeText,
       createId: createId
     })
@@ -2623,24 +2856,23 @@
   Object.defineProperty(api, "cachedSnapshot", {
     enumerable: true,
     get: function cachedSnapshotGetter() {
-      return safeJsonClone(runtime.snapshot || readPersistedSnapshot());
+      return safeClone(runtime.snapshot || readPersistedSnapshot());
     }
   });
 
-  global.TravelBrain = Object.freeze(api);
+  var frozenApi = Object.freeze(api);
+
+  global.TravelBrain = frozenApi;
+  global.TIC.TravelBrain = frozenApi;
 
   if (global.document) {
     if (global.document.readyState === "loading") {
       global.document.addEventListener("DOMContentLoaded", function onReady() {
-        if (!runtime.initialized && !runtime.destroyed) {
-          init();
-        }
+        if (!runtime.initialized && !runtime.destroyed) init();
       }, { once: true });
     } else {
       global.setTimeout(function autoInit() {
-        if (!runtime.initialized && !runtime.destroyed) {
-          init();
-        }
+        if (!runtime.initialized && !runtime.destroyed) init();
       }, 0);
     }
   }
