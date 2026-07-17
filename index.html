@@ -35,7 +35,6 @@
 
   <!-- =====================================================
        Travel Intelligence Center V4.2.0
-       Performance & Stability Integration V1.0.0
 
        Premium iPhone-first interface
        TravelBrain intelligence orchestration
@@ -59,8 +58,6 @@
        Automatic destination and multi-trip suggestions
        Duplicate-event and refresh-loop protection
        Scroll-safe and iPhone-stable page updates
-       Performance Layer: 10 files
-       Performance Integration Layer: 6 files
   ====================================================== -->
 
   <!-- =====================================================
@@ -250,132 +247,16 @@
   <script defer src="js/pages/more.js?v=2.0.0"></script>
 
   <!-- =====================================================
-       10. Legacy Application Bootstrap
+       10. Application Bootstrap
 
-       app.js remains frozen and loads before the new extension
-       layer. The performance files extend the existing app
-       without editing app.js, trips.js or guide.js.
+       app.js remains the final JavaScript file.
+       The 16 performance files remain in the project folders
+       but are not loaded until they are tested individually.
   ====================================================== -->
 
   <script
     defer
     src="js/app.js?v=4.2.0"
-  ></script>
-
-  <!-- =====================================================
-       11. Performance Layer V1.0.0 — 10 New Files
-
-       Folder:
-       js/extensions/performance/
-
-       Required order:
-       Core
-       → Route Performance
-       → Page Cache
-       → Render Optimizer
-       → Virtual Scroll
-       → Image Lazy Loader
-       → Data Prefetch
-       → Memory Manager
-       → Performance Monitor
-       → Performance Bootstrap
-  ====================================================== -->
-
-  <script
-    defer
-    src="js/extensions/performance/performance-core.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/route-performance.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/page-cache.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/render-optimizer.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/virtual-scroll.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/image-lazy-loader.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/data-prefetch.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/memory-manager.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/performance-monitor.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance/performance-bootstrap.js?v=1.0.0"
-  ></script>
-
-  <!-- =====================================================
-       12. Performance Integration Layer V1.0.0 — 6 New Files
-
-       Folder:
-       js/extensions/performance-integration/
-
-       Required order:
-       Integration Core
-       → App Route Adapter
-       → Trips Adapter
-       → Guide Adapter
-       → Cache Invalidation Adapter
-       → Integration Bootstrap
-
-       integration-bootstrap.js must remain the final script.
-  ====================================================== -->
-
-  <script
-    defer
-    src="js/extensions/performance-integration/integration-core.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance-integration/app-route-adapter.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance-integration/trips-performance-adapter.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance-integration/guide-performance-adapter.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance-integration/cache-invalidation-adapter.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/extensions/performance-integration/integration-bootstrap.js?v=1.0.0"
   ></script>
 </head>
 
