@@ -1,18 +1,25 @@
 /* =========================================================
    Travel Intelligence Center
-   Home Page Module V2.4.0
+   Home Page Module V2.5.0
+   Unified Travel Intelligence Home Runtime
 
    File Path:
    js/pages/home.js
 
    Purpose:
    - Premium, compact and iPhone-first Home Page.
+   - Preserves the approved Home visual structure and CSS hooks.
    - Uses the newest saved manual flight date/time first.
    - Supports Trip Form V4.1.0 synchronized flight aliases.
+   - Connects Store V2.5.0 with Travel Brain V1.1.0.
+   - Connects Travel Assistant V1.1.0 recommendations and alerts.
+   - Connects Travel Import V1.1.0 smart trip creation/editing.
+   - Connects Travel Sync V1.1.0 cross-tab and session refresh events.
    - Prevents stale legacy departureDateTime values from overriding edits.
    - Calculates airport arrival time with a safe positive lead time.
    - Displays full travel date, flight timeline and hotel details.
-   - Preserves Store, Router, UI and Trip Form integration.
+   - Prevents duplicate actions, subscriptions and refresh loops.
+   - Preserves Store, Router, UI and Trip Form compatibility.
 
    Dependencies:
    - js/config.js
@@ -20,29 +27,54 @@
    - js/router.js
    - js/ui.js
    - js/features/trip-form.js
+   - js/features/travel-brain.js
+   - js/features/travel-assistant.js
+   - js/features/travel-import.js
+   - js/features/travel-sync.js
 
    Global APIs:
    - window.TIC.Pages.home
    - window.TICHomePage
 ========================================================= */
 
-(function (window, document) {
+(function homePageFactory(window, document) {
   "use strict";
 
-  const Config = window.TICConfig || window.TIC?.Config || {};
+  window.TIC = window.TIC || {};
+  window.TIC.Pages = window.TIC.Pages || {};
+
+  const Config =
+    window.TICConfig ||
+    window.TIC?.Config ||
+    {};
+
   const PAGE_ID = "home";
-  const PAGE_VERSION = "2.4.0";
+  const PAGE_VERSION = "2.5.0";
   const DEFAULT_AIRPORT_LEAD_MINUTES = 120;
+  const REFRESH_DEBOUNCE_MS = 50;
 
   const state = {
     initialized: false,
     mounted: false,
+    destroyed: false,
+    refreshing: false,
+    refreshQueued: false,
+    refreshTimer: null,
     container: null,
     unsubscribeStore: null,
     actionUnsubscribers: [],
+    runtimeBindings: [],
     subscribers: new Set(),
-    lastSnapshot: null
+    lastSnapshot: null,
+    lastRenderSignature: "",
+    lastRefreshAt: null,
+    lastRefreshSource: null,
+    intelligenceRefreshRunning: false
   };
+
+  /* =========================================================
+     Utilities
+  ========================================================= */
 
   const isObject = (value) =>
     value !== null &&
@@ -55,14 +87,14 @@
     if (typeof structuredClone === "function") {
       try {
         return structuredClone(value);
-      } catch (error) {
+      } catch (_) {
         // Continue to JSON fallback.
       }
     }
 
     try {
       return JSON.parse(JSON.stringify(value));
-    } catch (error) {
+    } catch (_) {
       return value;
     }
   };
@@ -75,11 +107,14 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
 
-  const text = (value) => String(value ?? "").trim();
+  const text = (value) =>
+    String(value ?? "").trim();
 
   const number = (value, fallback = 0) => {
     const result = Number(value);
-    return Number.isFinite(result) ? result : fallback;
+    return Number.isFinite(result)
+      ? result
+      : fallback;
   };
 
   const positiveNumber = (value, fallback) => {
@@ -87,7 +122,8 @@
     return result > 0 ? result : fallback;
   };
 
-  const list = (value) => (Array.isArray(value) ? value : []);
+  const list = (value) =>
+    Array.isArray(value) ? value : [];
 
   const firstText = (...values) => {
     for (const value of values) {
@@ -100,7 +136,11 @@
 
   const firstValue = (...values) => {
     for (const value of values) {
-      if (value !== undefined && value !== null && value !== "") {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== ""
+      ) {
         return value;
       }
     }
@@ -108,22 +148,117 @@
     return null;
   };
 
-  const pad2 = (value) => String(value).padStart(2, "0");
+  const nowISO = () =>
+    new Date().toISOString();
 
-  const getStore = () => window.TIC?.Store || window.TICStore || null;
-  const getRouter = () => window.TIC?.Router || window.TICRouter || null;
-  const getUI = () => window.TIC?.UI || window.TICUI || null;
+  const stableStringify = (value) => {
+    const seen = new WeakSet();
+
+    const normalize = (input) => {
+      if (
+        input === null ||
+        typeof input !== "object"
+      ) {
+        return input;
+      }
+
+      if (seen.has(input)) {
+        return "[Circular]";
+      }
+
+      seen.add(input);
+
+      if (Array.isArray(input)) {
+        return input.map(normalize);
+      }
+
+      return Object.keys(input)
+        .sort()
+        .reduce((output, key) => {
+          output[key] = normalize(input[key]);
+          return output;
+        }, {});
+    };
+
+    try {
+      return JSON.stringify(normalize(value));
+    } catch (_) {
+      return String(Date.now());
+    }
+  };
+
+  const dispatchWindowEvent = (
+    name,
+    detail = {}
+  ) => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: clone(detail)
+        })
+      );
+    } catch (_) {
+      // Ignore test environments without CustomEvent.
+    }
+  };
+
+  const getStore = () =>
+    window.TIC?.Store ||
+    window.TICStore ||
+    window.Store ||
+    window.TravelStore ||
+    null;
+
+  const getRouter = () =>
+    window.TIC?.Router ||
+    window.TICRouter ||
+    null;
+
+  const getUI = () =>
+    window.TIC?.UI ||
+    window.TICUI ||
+    null;
 
   const getTripForm = () =>
     window.TIC?.Features?.TripForm ||
+    window.TIC?.Features?.tripForm ||
     window.TICTripForm ||
+    null;
+
+  const getTravelBrain = () =>
+    window.TIC?.TravelBrain ||
+    window.TIC?.Features?.TravelBrain ||
+    window.TravelBrain ||
+    null;
+
+  const getTravelAssistant = () =>
+    window.TIC?.TravelAssistant ||
+    window.TIC?.Features?.TravelAssistant ||
+    window.TravelAssistant ||
+    null;
+
+  const getTravelImport = () =>
+    window.TIC?.TravelImport ||
+    window.TIC?.Features?.TravelImport ||
+    window.TravelImport ||
+    null;
+
+  const getTravelSync = () =>
+    window.TIC?.TravelSync ||
+    window.TIC?.Features?.TravelSync ||
+    window.TravelSync ||
+    null;
+
+  const getApp = () =>
+    window.TIC?.App ||
+    window.TICApp ||
     null;
 
   const emit = (type, detail = {}) => {
     const payload = {
       type,
       page: PAGE_ID,
-      timestamp: new Date().toISOString(),
+      timestamp: nowISO(),
       ...clone(detail)
     };
 
@@ -131,21 +266,28 @@
       try {
         listener(payload);
       } catch (error) {
-        console.error("TIC Home subscriber error:", error);
+        console.error(
+          "TIC Home subscriber error:",
+          error
+        );
       }
     });
 
-    window.dispatchEvent(
-      new CustomEvent(`tic:page:${PAGE_ID}:${type}`, {
-        detail: payload
-      })
+    dispatchWindowEvent(
+      `tic:page:${PAGE_ID}:${type}`,
+      payload
     );
 
     return payload;
   };
 
   const resolveContainer = (container) => {
-    if (container instanceof window.Element) return container;
+    if (
+      window.Element &&
+      container instanceof window.Element
+    ) {
+      return container;
+    }
 
     if (typeof container === "string") {
       return document.querySelector(container);
@@ -155,37 +297,201 @@
       document.querySelector("[data-router-view]") ||
       document.querySelector("#app-view") ||
       document.querySelector("#tic-page") ||
-      document.querySelector("#app-content")
+      document.querySelector("#app-content") ||
+      document.querySelector("#app")
     );
   };
+
+  /* =========================================================
+     Store and intelligence resolution
+  ========================================================= */
 
   const getStoreState = () => {
     const store = getStore();
 
     if (!store) return {};
 
-    if (typeof store.getState === "function") {
-      return clone(store.getState()) || {};
-    }
+    try {
+      if (typeof store.getState === "function") {
+        return clone(store.getState()) || {};
+      }
 
-    if (typeof store.get === "function") {
-      return {
-        profile: store.get("profile"),
-        statistics: store.get("statistics"),
-        trips: store.get("trips"),
-        destinations: store.get("destinations"),
-        wishlist: store.get("wishlist"),
-        budgets: store.get("budgets"),
-        savings: store.get("savings"),
-        documents: store.get("documents"),
-        packing: store.get("packing"),
-        memories: store.get("memories"),
-        notifications: store.get("notifications")
-      };
+      if (typeof store.snapshot === "function") {
+        return clone(store.snapshot()) || {};
+      }
+
+      if (typeof store.get === "function") {
+        return {
+          profile: store.get("profile"),
+          statistics: store.get("statistics"),
+          trips: store.get("trips"),
+          plannedTrips: store.get("plannedTrips"),
+          destinations: store.get("destinations"),
+          wishlist: store.get("wishlist"),
+          guides: store.get("guides"),
+          annualPlans: store.get("annualPlans"),
+          budgets: store.get("budgets"),
+          savings: store.get("savings"),
+          wallet: store.get("wallet"),
+          documents: store.get("documents"),
+          packing: store.get("packing"),
+          memories: store.get("memories"),
+          notifications: store.get("notifications"),
+          settings: store.get("settings")
+        };
+      }
+    } catch (error) {
+      console.warn(
+        "TIC Home could not read Store state:",
+        error
+      );
     }
 
     return {};
   };
+
+  const readBrainSnapshot = () => {
+    const brain = getTravelBrain();
+
+    if (!brain) return null;
+
+    const methods = [
+      "getSnapshot",
+      "snapshot",
+      "getState",
+      "analyze",
+      "getContext"
+    ];
+
+    for (const method of methods) {
+      if (typeof brain[method] !== "function") {
+        continue;
+      }
+
+      try {
+        const result = brain[method]({
+          source: "home-page",
+          silent: true
+        });
+
+        if (
+          result &&
+          typeof result.then !== "function"
+        ) {
+          return clone(result);
+        }
+      } catch (_) {
+        // Continue to the next compatible API.
+      }
+    }
+
+    return null;
+  };
+
+  const readAssistantSnapshot = (
+    brainSnapshot = null
+  ) => {
+    const assistant = getTravelAssistant();
+
+    if (!assistant) return null;
+
+    const methods = [
+      "getSnapshot",
+      "snapshot",
+      "getState",
+      "getRecommendations",
+      "getInsights"
+    ];
+
+    for (const method of methods) {
+      if (typeof assistant[method] !== "function") {
+        continue;
+      }
+
+      try {
+        const result = assistant[method]({
+          source: "home-page",
+          context: brainSnapshot,
+          silent: true
+        });
+
+        if (
+          result &&
+          typeof result.then !== "function"
+        ) {
+          return clone(result);
+        }
+      } catch (_) {
+        // Continue to the next compatible API.
+      }
+    }
+
+    return null;
+  };
+
+  const normalizeAssistantMessage = (
+    assistantSnapshot
+  ) => {
+    if (!assistantSnapshot) return null;
+
+    const candidates = [
+      assistantSnapshot.home,
+      assistantSnapshot.primary,
+      assistantSnapshot.highlight,
+      assistantSnapshot.recommendation,
+      assistantSnapshot.recommendations?.[0],
+      assistantSnapshot.insight,
+      assistantSnapshot.insights?.[0],
+      assistantSnapshot.message,
+      assistantSnapshot
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string") {
+        const message = text(candidate);
+
+        if (message) {
+          return {
+            title: "اقتراح ذكي",
+            message
+          };
+        }
+      }
+
+      if (isObject(candidate)) {
+        const title = firstText(
+          candidate.title,
+          candidate.heading,
+          candidate.label,
+          candidate.name
+        );
+
+        const message = firstText(
+          candidate.message,
+          candidate.text,
+          candidate.description,
+          candidate.body,
+          candidate.content,
+          candidate.advice
+        );
+
+        if (title || message) {
+          return {
+            title: title || "اقتراح ذكي",
+            message:
+              message ||
+              "راجع تفاصيل رحلتك القادمة."
+          };
+        }
+      }
+    }
+
+    return null;
+  };
+
+  /* =========================================================
+     Date and time helpers
+  ========================================================= */
 
   const parseDateOnly = (value) => {
     if (!value) return null;
@@ -213,7 +519,9 @@
         0
       );
 
-      return Number.isNaN(date.getTime()) ? null : date;
+      return Number.isNaN(date.getTime())
+        ? null
+        : date;
     }
 
     const parsed = new Date(raw);
@@ -227,7 +535,9 @@
     if (!value && value !== 0) return null;
 
     if (value instanceof Date) {
-      if (Number.isNaN(value.getTime())) return null;
+      if (Number.isNaN(value.getTime())) {
+        return null;
+      }
 
       return {
         hours: value.getHours(),
@@ -272,7 +582,9 @@
         Math.max(0, number(match[2], 0))
       );
 
-      if (match[3] === "م") hours += 12;
+      if (match[3] === "م") {
+        hours += 12;
+      }
 
       return { hours, minutes };
     }
@@ -288,7 +600,9 @@
         Math.max(0, number(match[2], 0))
       );
 
-      if (match[3].toUpperCase() === "PM") {
+      if (
+        match[3].toUpperCase() === "PM"
+      ) {
         hours += 12;
       }
 
@@ -307,7 +621,10 @@
     return null;
   };
 
-  const combineDateAndTime = (dateValue, timeValue) => {
+  const combineDateAndTime = (
+    dateValue,
+    timeValue
+  ) => {
     const date = parseDateOnly(dateValue);
 
     if (!date) return null;
@@ -376,8 +693,10 @@
     date.setHours(0, 0, 0, 0);
 
     return Math.ceil(
-      (date.getTime() - today.getTime()) /
-      86400000
+      (
+        date.getTime() -
+        today.getTime()
+      ) / 86400000
     );
   };
 
@@ -387,39 +706,59 @@
         ? value
         : parseDateTime(value);
 
-    if (!date || Number.isNaN(date.getTime())) {
+    if (
+      !date ||
+      Number.isNaN(date.getTime())
+    ) {
       return null;
     }
 
     return Math.round(
-      (date.getTime() - Date.now()) /
-      60000
+      (
+        date.getTime() -
+        Date.now()
+      ) / 60000
     );
   };
 
-  const durationDays = (startDate, endDate) => {
+  const durationDays = (
+    startDate,
+    endDate
+  ) => {
     const start = startOfDay(startDate);
     const end = startOfDay(endDate);
 
-    if (!start || !end || end < start) {
+    if (
+      !start ||
+      !end ||
+      end < start
+    ) {
       return 0;
     }
 
     return (
       Math.floor(
-        (end.getTime() - start.getTime()) /
-        86400000
+        (
+          end.getTime() -
+          start.getTime()
+        ) / 86400000
       ) + 1
     );
   };
 
-  const subtractMinutes = (dateValue, minutes) => {
+  const subtractMinutes = (
+    dateValue,
+    minutes
+  ) => {
     const date =
       dateValue instanceof Date
         ? dateValue
         : parseDateTime(dateValue);
 
-    if (!date || Number.isNaN(date.getTime())) {
+    if (
+      !date ||
+      Number.isNaN(date.getTime())
+    ) {
       return null;
     }
 
@@ -453,20 +792,28 @@
       );
     }
 
-    if (Number.isNaN(date.getTime())) return "";
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
 
     try {
-      return new Intl.DateTimeFormat("ar-AE", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true
-      }).format(date);
-    } catch (error) {
-      return date.toLocaleTimeString("ar-AE", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true
-      });
+      return new Intl.DateTimeFormat(
+        "ar-AE",
+        {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        }
+      ).format(date);
+    } catch (_) {
+      return date.toLocaleTimeString(
+        "ar-AE",
+        {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        }
+      );
     }
   };
 
@@ -484,12 +831,15 @@
           year: "numeric"
         }
       ).format(date);
-    } catch (error) {
-      return date.toLocaleDateString("ar-AE", {
-        day: "numeric",
-        month: "long",
-        year: "numeric"
-      });
+    } catch (_) {
+      return date.toLocaleDateString(
+        "ar-AE",
+        {
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        }
+      );
     }
   };
 
@@ -506,35 +856,41 @@
           month: "short"
         }
       ).format(date);
-    } catch (error) {
-      return date.toLocaleDateString("ar-AE", {
-        day: "numeric",
-        month: "short"
-      });
+    } catch (_) {
+      return date.toLocaleDateString(
+        "ar-AE",
+        {
+          day: "numeric",
+          month: "short"
+        }
+      );
     }
   };
 
-  const tripsFrom = (snapshot) => list(snapshot.trips);
+  /* =========================================================
+     Trip normalization
+  ========================================================= */
+
+  const tripsFrom = (snapshot) =>
+    list(snapshot.trips);
 
   const getFlightSources = (trip) => ({
     flight: isObject(trip?.flight)
       ? trip.flight
       : {},
-    outbound: isObject(trip?.outboundFlight)
+    outbound: isObject(
+      trip?.outboundFlight
+    )
       ? trip.outboundFlight
       : {}
   });
 
   const getTripDepartureDateTime = (trip) => {
-    const { flight, outbound } =
-      getFlightSources(trip);
+    const {
+      flight,
+      outbound
+    } = getFlightSources(trip);
 
-    /*
-     * Important:
-     * Use the separately saved date/time fields first.
-     * They represent the latest manual edit from Trip Form V4.1.0.
-     * Legacy combined values are only fallbacks.
-     */
     const dateValue = firstValue(
       trip?.departureDate,
       trip?.flightDate,
@@ -568,7 +924,9 @@
       flight.departureDateTime
     );
 
-    const direct = parseDateTime(directValue);
+    const direct = parseDateTime(
+      directValue
+    );
 
     if (direct) return direct;
 
@@ -579,8 +937,10 @@
   };
 
   const getTripArrivalDateTime = (trip) => {
-    const { flight, outbound } =
-      getFlightSources(trip);
+    const {
+      flight,
+      outbound
+    } = getFlightSources(trip);
 
     const dateValue = firstValue(
       trip?.arrivalDate,
@@ -612,7 +972,9 @@
       flight.arrivalDateTime
     );
 
-    const direct = parseDateTime(directValue);
+    const direct = parseDateTime(
+      directValue
+    );
 
     if (direct) return direct;
 
@@ -623,8 +985,10 @@
   };
 
   const getFlightDetails = (trip) => {
-    const { flight, outbound } =
-      getFlightSources(trip);
+    const {
+      flight,
+      outbound
+    } = getFlightSources(trip);
 
     const departureDateTime =
       getTripDepartureDateTime(trip);
@@ -632,15 +996,16 @@
     const arrivalDateTime =
       getTripArrivalDateTime(trip);
 
-    const airportLeadMinutes = positiveNumber(
-      firstValue(
-        trip?.airportLeadMinutes,
-        trip?.arriveAirportBeforeMinutes,
-        flight.airportLeadMinutes,
-        outbound.airportLeadMinutes
-      ),
-      DEFAULT_AIRPORT_LEAD_MINUTES
-    );
+    const airportLeadMinutes =
+      positiveNumber(
+        firstValue(
+          trip?.airportLeadMinutes,
+          trip?.arriveAirportBeforeMinutes,
+          flight.airportLeadMinutes,
+          outbound.airportLeadMinutes
+        ),
+        DEFAULT_AIRPORT_LEAD_MINUTES
+      );
 
     return {
       airline: firstText(
@@ -718,10 +1083,11 @@
       arrivalDateTime,
       airportLeadMinutes,
 
-      airportArrivalDateTime: subtractMinutes(
-        departureDateTime,
-        airportLeadMinutes
-      )
+      airportArrivalDateTime:
+        subtractMinutes(
+          departureDateTime,
+          airportLeadMinutes
+        )
     };
   };
 
@@ -744,7 +1110,8 @@
         accommodation.hotelName,
         hotel.name,
         hotel.hotelName,
-        typeof trip?.accommodation === "string"
+        typeof trip?.accommodation ===
+        "string"
           ? trip.accommodation
           : ""
       ),
@@ -807,9 +1174,12 @@
             startDate >= today ||
             (endDate && endDate >= today)
           ) &&
-          !["completed", "cancelled"].includes(
-            status
-          )
+          ![
+            "completed",
+            "cancelled",
+            "canceled",
+            "archived"
+          ].includes(status)
         );
       })
       .sort((a, b) => {
@@ -834,15 +1204,19 @@
         trip.status
       ).toLowerCase();
 
-      const endDate = parseDateOnly(
-        trip.endDate
-      );
+      const endDate =
+        parseDateOnly(trip.endDate);
 
-      const today = startOfDay(new Date());
+      const today =
+        startOfDay(new Date());
 
       return (
         status === "completed" ||
-        (endDate && today && endDate < today)
+        (
+          endDate &&
+          today &&
+          endDate < today
+        )
       );
     });
 
@@ -858,7 +1232,9 @@
           ?.trim();
 
       if (country) {
-        countries.add(country.toLowerCase());
+        countries.add(
+          country.toLowerCase()
+        );
       }
     });
 
@@ -894,6 +1270,12 @@
     const nextTrip =
       upcomingTrips[0] || null;
 
+    const brain =
+      readBrainSnapshot();
+
+    const assistant =
+      readAssistantSnapshot(brain);
+
     return {
       raw,
       profile,
@@ -910,16 +1292,34 @@
         ? getHotelDetails(nextTrip)
         : null,
 
+      intelligence: {
+        brain,
+        assistant,
+        message:
+          normalizeAssistantMessage(
+            assistant
+          )
+      },
+
       statistics: {
         totalTrips: trips.length,
-        upcomingTrips: upcomingTrips.length,
-        completedTrips: completedTrips.length,
-        countries: countriesCountFrom(raw),
-        wishlist: list(raw.wishlist).length,
-        memories: list(raw.memories).length
+        upcomingTrips:
+          upcomingTrips.length,
+        completedTrips:
+          completedTrips.length,
+        countries:
+          countriesCountFrom(raw),
+        wishlist:
+          list(raw.wishlist).length,
+        memories:
+          list(raw.memories).length
       }
     };
   };
+
+  /* =========================================================
+     Smart messages
+  ========================================================= */
 
   const formatCountdown = (trip) => {
     if (!trip) return "";
@@ -982,7 +1382,10 @@
 
   const getTripDestination = (trip) =>
     text(trip?.destination) ||
-    [trip?.city, trip?.country]
+    [
+      trip?.city,
+      trip?.country
+    ]
       .filter(Boolean)
       .join("، ") ||
     text(trip?.title) ||
@@ -1039,8 +1442,16 @@
   const getSmartTripMessage = (
     trip,
     flight,
-    hotel
+    hotel,
+    assistantMessage = null
   ) => {
+    if (
+      assistantMessage?.title &&
+      assistantMessage?.message
+    ) {
+      return assistantMessage;
+    }
+
     const stage = getTripStage(trip);
 
     if (stage === "travel-day") {
@@ -1092,6 +1503,10 @@
         "خذ وقتك في التخطيط واستمتع بحماس الرحلة من الحين."
     };
   };
+
+  /* =========================================================
+     Rendering
+  ========================================================= */
 
   const renderWelcome = (snapshot) => {
     const name =
@@ -1159,11 +1574,22 @@
         </p>
 
         <div class="tic-home-next-actions">
-          ${ui?.button?.({
-            label: "إنشاء رحلة",
-            action: "home-new-trip",
-            primary: true
-          }) || ""}
+          ${
+            ui?.button?.({
+              label: "إنشاء رحلة",
+              action: "home-new-trip",
+              primary: true
+            }) ||
+            `
+              <button
+                type="button"
+                class="tic-btn tic-btn-primary"
+                data-tic-action="home-new-trip"
+              >
+                إنشاء رحلة
+              </button>
+            `
+          }
         </div>
       </article>
     `;
@@ -1178,8 +1604,14 @@
 
     return `
       <div class="tic-home-trip-fact${
-        options.emphasis ? " is-emphasis" : ""
-      }${options.full ? " is-full" : ""}">
+        options.emphasis
+          ? " is-emphasis"
+          : ""
+      }${
+        options.full
+          ? " is-full"
+          : ""
+      }">
         <span>${escapeHTML(label)}</span>
         <strong>${escapeHTML(value)}</strong>
       </div>
@@ -1316,11 +1748,12 @@
     const leadHours =
       flight.airportLeadMinutes / 60;
 
-    const leadLabel = Number.isInteger(
-      leadHours
-    )
-      ? `${leadHours} ساعة`
-      : `${leadHours.toLocaleString("ar-AE")} ساعة`;
+    const leadLabel =
+      Number.isInteger(leadHours)
+        ? `${leadHours} ساعة`
+        : `${leadHours.toLocaleString(
+            "ar-AE"
+          )} ساعة`;
 
     return `
       <section
@@ -1380,14 +1813,18 @@
       hotel.checkIn
         ? renderTripFact(
             "تسجيل الدخول",
-            formatCompactDate(hotel.checkIn)
+            formatCompactDate(
+              hotel.checkIn
+            )
           )
         : "",
 
       hotel.checkOut
         ? renderTripFact(
             "تسجيل الخروج",
-            formatCompactDate(hotel.checkOut)
+            formatCompactDate(
+              hotel.checkOut
+            )
           )
         : "",
 
@@ -1450,7 +1887,8 @@
       getSmartTripMessage(
         trip,
         flight,
-        hotel
+        hotel,
+        snapshot.intelligence.message
       );
 
     const travelDate = formatFullDate(
@@ -1536,7 +1974,9 @@
           ${renderTripFact(
             "الميزانية",
             ui?.currency?.(trip.budget) ||
-            `${number(trip.budget).toLocaleString()} AED`
+            `${number(
+              trip.budget
+            ).toLocaleString()} AED`
           )}
         </div>
 
@@ -1567,14 +2007,36 @@
                 tripId: trip.id
               },
               primary: true
-            }) || ""
+            }) ||
+            `
+              <button
+                type="button"
+                class="tic-btn tic-btn-primary"
+                data-tic-route="trips"
+                data-trip-id="${escapeHTML(
+                  trip.id
+                )}"
+              >
+                عرض الرحلة
+              </button>
+            `
           }
 
           ${
             ui?.button?.({
               label: "تعديل البيانات",
-              action: "home-edit-next-trip"
-            }) || ""
+              action:
+                "home-edit-next-trip"
+            }) ||
+            `
+              <button
+                type="button"
+                class="tic-btn"
+                data-tic-action="home-edit-next-trip"
+              >
+                تعديل البيانات
+              </button>
+            `
           }
         </div>
       </article>
@@ -1590,22 +2052,26 @@
     const stats = [
       {
         icon: "✈",
-        value: snapshot.statistics.totalTrips,
+        value:
+          snapshot.statistics.totalTrips,
         label: "الرحلات"
       },
       {
         icon: "◎",
-        value: snapshot.statistics.countries,
+        value:
+          snapshot.statistics.countries,
         label: "الدول"
       },
       {
         icon: "☆",
-        value: snapshot.statistics.wishlist,
+        value:
+          snapshot.statistics.wishlist,
         label: "الأمنيات"
       },
       {
         icon: "◈",
-        value: snapshot.statistics.memories,
+        value:
+          snapshot.statistics.memories,
         label: "الذكريات"
       }
     ];
@@ -1623,8 +2089,13 @@
                   ${item.icon}
                 </span>
 
-                <strong>${number(item.value)}</strong>
-                <small>${escapeHTML(item.label)}</small>
+                <strong>${number(
+                  item.value
+                )}</strong>
+
+                <small>${escapeHTML(
+                  item.label
+                )}</small>
               </article>
             `
           )
@@ -1634,6 +2105,35 @@
   };
 
   const renderInspiration = (snapshot) => {
+    const assistantMessage =
+      snapshot.intelligence.message;
+
+    if (
+      assistantMessage?.title &&
+      assistantMessage?.message
+    ) {
+      return `
+        <article class="tic-home-inspiration">
+          <div
+            class="tic-home-inspiration-icon"
+            aria-hidden="true"
+          >
+            ✦
+          </div>
+
+          <div class="tic-home-inspiration-copy">
+            <span>إلهام السفر</span>
+            <h3>${escapeHTML(
+              assistantMessage.title
+            )}</h3>
+            <p>${escapeHTML(
+              assistantMessage.message
+            )}</p>
+          </div>
+        </article>
+      `;
+    }
+
     const trip = snapshot.nextTrip;
 
     const remainingDays = trip
@@ -1643,11 +2143,16 @@
         )
       : null;
 
-    let title = "رحلتك تبدأ بفكرة جميلة";
+    let title =
+      "رحلتك تبدأ بفكرة جميلة";
+
     let message =
       "اختر وجهة تحبها، وخطط لها على راحتك، وخلك مستمتع من أول خطوة.";
 
-    if (trip && remainingDays !== null) {
+    if (
+      trip &&
+      remainingDays !== null
+    ) {
       if (
         remainingDays <= 7 &&
         remainingDays >= 0
@@ -1659,11 +2164,17 @@
         remainingDays <= 30 &&
         remainingDays > 7
       ) {
-        title = "كل يوم يقربك من رحلتك";
+        title =
+          "كل يوم يقربك من رحلتك";
+
         message =
           "استمتع بالتخطيط؛ أجمل الرحلات تبدأ قبل الوصول.";
-      } else if (remainingDays > 30) {
-        title = "عندك وقت تخلي الرحلة أجمل";
+      } else if (
+        remainingDays > 30
+      ) {
+        title =
+          "عندك وقت تخلي الرحلة أجمل";
+
         message =
           "اكتشف تفاصيل أكثر عن وجهتك واختر التجارب اللي تناسبك.";
       }
@@ -1710,7 +2221,19 @@
       data-page="home"
       data-page-version="${PAGE_VERSION}"
       data-has-next-trip="${
-        snapshot.nextTrip ? "true" : "false"
+        snapshot.nextTrip
+          ? "true"
+          : "false"
+      }"
+      data-travel-brain="${
+        snapshot.intelligence.brain
+          ? "connected"
+          : "fallback"
+      }"
+      data-travel-assistant="${
+        snapshot.intelligence.assistant
+          ? "connected"
+          : "fallback"
       }"
     >
       ${renderWelcome(snapshot)}
@@ -1735,7 +2258,8 @@
         ${renderSectionHeader({
           eyebrow: "YOUR TRAVEL",
           title: "سفراتك",
-          subtitle: "أرقام خفيفة من سجل سفرك."
+          subtitle:
+            "أرقام خفيفة من سجل سفرك."
         })}
 
         ${renderStatistics(snapshot)}
@@ -1749,70 +2273,274 @@
     </div>
   `;
 
-  const refresh = () => {
-    if (!state.container || !state.mounted) {
+  /* =========================================================
+     Refresh and intelligence coordination
+  ========================================================= */
+
+  const refreshIntelligence = async (
+    source = "home-refresh"
+  ) => {
+    if (state.intelligenceRefreshRunning) {
       return false;
     }
 
-    const snapshot = buildSnapshot();
+    state.intelligenceRefreshRunning = true;
 
-    state.lastSnapshot = snapshot;
-    state.container.innerHTML =
-      renderPage(snapshot);
+    try {
+      const app = getApp();
 
-    emit("refreshed", {
-      statistics: snapshot.statistics,
-      nextTripId:
-        snapshot.nextTrip?.id || null
-    });
+      if (
+        typeof app?.refreshIntelligence ===
+        "function"
+      ) {
+        await app.refreshIntelligence({
+          source,
+          silent: true
+        });
+
+        return true;
+      }
+
+      const brain = getTravelBrain();
+      const assistant =
+        getTravelAssistant();
+
+      if (
+        typeof brain?.refresh === "function"
+      ) {
+        await brain.refresh({
+          source,
+          silent: true
+        });
+      }
+
+      if (
+        typeof assistant?.refresh ===
+        "function"
+      ) {
+        await assistant.refresh({
+          source,
+          silent: true
+        });
+      }
+
+      return true;
+    } catch (error) {
+      console.warn(
+        "TIC Home intelligence refresh warning:",
+        error
+      );
+
+      return false;
+    } finally {
+      state.intelligenceRefreshRunning =
+        false;
+    }
+  };
+
+  const refresh = (
+    options = {}
+  ) => {
+    if (
+      !state.container ||
+      !state.mounted ||
+      state.destroyed
+    ) {
+      return false;
+    }
+
+    if (state.refreshing) {
+      state.refreshQueued = true;
+      return false;
+    }
+
+    state.refreshing = true;
+
+    try {
+      const snapshot = buildSnapshot();
+      const signature = stableStringify({
+        profile: snapshot.profile,
+        nextTrip: snapshot.nextTrip,
+        nextFlight: snapshot.nextFlight,
+        nextHotel: snapshot.nextHotel,
+        statistics: snapshot.statistics,
+        intelligenceMessage:
+          snapshot.intelligence.message
+      });
+
+      state.lastSnapshot = snapshot;
+      state.lastRefreshAt = nowISO();
+      state.lastRefreshSource =
+        options.source ||
+        "manual";
+
+      if (
+        options.force === true ||
+        signature !== state.lastRenderSignature
+      ) {
+        state.container.innerHTML =
+          renderPage(snapshot);
+
+        state.lastRenderSignature =
+          signature;
+      }
+
+      emit("refreshed", {
+        source:
+          state.lastRefreshSource,
+        statistics:
+          snapshot.statistics,
+        nextTripId:
+          snapshot.nextTrip?.id ||
+          null,
+        travelBrainConnected:
+          Boolean(
+            snapshot.intelligence.brain
+          ),
+        travelAssistantConnected:
+          Boolean(
+            snapshot.intelligence.assistant
+          )
+      });
+
+      return true;
+    } finally {
+      state.refreshing = false;
+
+      if (state.refreshQueued) {
+        state.refreshQueued = false;
+
+        window.setTimeout(
+          () =>
+            refresh({
+              source:
+                "queued-refresh"
+            }),
+          0
+        );
+      }
+    }
+  };
+
+  const scheduleRefresh = (
+    source = "runtime-event",
+    options = {}
+  ) => {
+    if (
+      !state.mounted ||
+      state.destroyed
+    ) {
+      return false;
+    }
+
+    if (state.refreshTimer) {
+      window.clearTimeout(
+        state.refreshTimer
+      );
+    }
+
+    state.refreshTimer =
+      window.setTimeout(
+        async () => {
+          state.refreshTimer = null;
+
+          if (
+            options.refreshIntelligence ===
+            true
+          ) {
+            await refreshIntelligence(
+              source
+            );
+          }
+
+          refresh({
+            source,
+            force:
+              options.force === true
+          });
+        },
+        number(
+          options.delay,
+          REFRESH_DEBOUNCE_MS
+        )
+      );
 
     return true;
   };
 
+  /* =========================================================
+     Actions
+  ========================================================= */
+
   const openCreateTrip = () => {
-    const tripForm = getTripForm();
+    const travelImport =
+      getTravelImport();
+
+    const tripForm =
+      getTripForm();
 
     if (
       tripForm &&
-      typeof tripForm.openCreate === "function"
+      typeof tripForm.openCreate ===
+        "function"
     ) {
       return tripForm.openCreate({
         source: "home",
         mode: "create",
-        smartImport: true
+        smartImport:
+          Boolean(travelImport)
       });
     }
 
-    return getRouter()?.go?.("trip-form", {
-      params: {
-        mode: "create",
-        smartImport: true
-      },
-      source: "home-new-trip"
-    });
+    return getRouter()?.go?.(
+      "trip-form",
+      {
+        params: {
+          mode: "create",
+          smartImport:
+            Boolean(travelImport)
+        },
+        source:
+          "home-new-trip"
+      }
+    );
   };
 
   const openEditTrip = (tripId) => {
-    const tripForm = getTripForm();
+    const travelImport =
+      getTravelImport();
+
+    const tripForm =
+      getTripForm();
 
     if (
       tripForm &&
-      typeof tripForm.openEdit === "function"
+      typeof tripForm.openEdit ===
+        "function"
     ) {
-      return tripForm.openEdit(tripId, {
-        source: "home",
-        smartImport: true
-      });
+      return tripForm.openEdit(
+        tripId,
+        {
+          source: "home",
+          smartImport:
+            Boolean(travelImport)
+        }
+      );
     }
 
-    return getRouter()?.go?.("trip-form", {
-      params: {
-        mode: "edit",
-        tripId,
-        smartImport: true
-      },
-      source: "home-edit-next-trip"
-    });
+    return getRouter()?.go?.(
+      "trip-form",
+      {
+        params: {
+          mode: "edit",
+          tripId,
+          smartImport:
+            Boolean(travelImport)
+        },
+        source:
+          "home-edit-next-trip"
+      }
+    );
   };
 
   const registerActions = () => {
@@ -1820,17 +2548,33 @@
 
     if (
       !ui ||
-      typeof ui.registerAction !== "function"
+      typeof ui.registerAction !==
+        "function"
     ) {
       return;
     }
 
-    const register = (name, handler) => {
-      if (ui.hasAction?.(name)) return;
+    const register = (
+      name,
+      handler
+    ) => {
+      if (ui.hasAction?.(name)) {
+        return;
+      }
 
-      state.actionUnsubscribers.push(
-        ui.registerAction(name, handler)
-      );
+      const unsubscribe =
+        ui.registerAction(
+          name,
+          handler
+        );
+
+      if (
+        typeof unsubscribe === "function"
+      ) {
+        state.actionUnsubscribers.push(
+          unsubscribe
+        );
+      }
     };
 
     register(
@@ -1842,7 +2586,8 @@
       "home-edit-next-trip",
       () => {
         const tripId =
-          state.lastSnapshot?.nextTrip?.id;
+          state.lastSnapshot
+            ?.nextTrip?.id;
 
         if (!tripId) {
           getUI()?.toast?.(
@@ -1856,26 +2601,191 @@
         return openEditTrip(tripId);
       }
     );
+
+    register(
+      "home-refresh-intelligence",
+      async () => {
+        await refreshIntelligence(
+          "home-manual-action"
+        );
+
+        return refresh({
+          source:
+            "home-manual-action",
+          force: true
+        });
+      }
+    );
   };
+
+  /* =========================================================
+     Store and runtime event bindings
+  ========================================================= */
 
   const subscribeToStore = () => {
     const store = getStore();
 
     if (
       !store ||
-      typeof store.subscribe !== "function" ||
+      typeof store.subscribe !==
+        "function" ||
       state.unsubscribeStore
     ) {
+      return false;
+    }
+
+    try {
+      state.unsubscribeStore =
+        store.subscribe(
+          (
+            snapshot,
+            event
+          ) => {
+            scheduleRefresh(
+              event?.type ||
+              event?.action ||
+              "store-update",
+              {
+                refreshIntelligence:
+                  true
+              }
+            );
+          }
+        );
+
+      return true;
+    } catch (error) {
+      console.warn(
+        "TIC Home Store subscription warning:",
+        error
+      );
+
+      return false;
+    }
+  };
+
+  const bindRuntimeEvents = () => {
+    if (state.runtimeBindings.length) {
       return;
     }
 
-    state.unsubscribeStore =
-      store.subscribe(() => {
-        if (state.mounted) {
-          refresh();
-        }
+    const bind = (
+      name,
+      handler,
+      target = window
+    ) => {
+      target.addEventListener(
+        name,
+        handler
+      );
+
+      state.runtimeBindings.push({
+        name,
+        handler,
+        target
       });
+    };
+
+    const refreshHandler = (event) => {
+      scheduleRefresh(
+        event?.type ||
+        "intelligence-event",
+        {
+          refreshIntelligence:
+            false,
+          force: true
+        }
+      );
+    };
+
+    const intelligenceHandler = (
+      event
+    ) => {
+      scheduleRefresh(
+        event?.type ||
+        "intelligence-update",
+        {
+          refreshIntelligence:
+            true,
+          force: true
+        }
+      );
+    };
+
+    [
+      "tic:travel-brain:updated",
+      "tic:travel-brain:refreshed",
+      "tic:travel-assistant:updated",
+      "tic:travel-assistant:response",
+      "tic:travel-assistant:refreshed",
+      "tic:travel-import:completed",
+      "tic:travel-import:imported",
+      "tic:travel-import:data-imported",
+      "tic:travel-sync:applied",
+      "tic:travel-sync:pull-completed",
+      "tic:travel-sync:remote-state-applied",
+      "tic:app:intelligence-refreshed"
+    ].forEach((name) => {
+      bind(name, refreshHandler);
+    });
+
+    [
+      "tic:trip-created",
+      "tic:trip-updated",
+      "tic:trip-deleted",
+      "tic:planned-trip-created",
+      "tic:planned-trip-updated",
+      "tic:planned-trip-promoted",
+      "tic:planned-trip-deleted",
+      "tic:page:trips:passport-trip-created",
+      "tic:page:trips:passport-trip-updated",
+      "tic:guide:refresh-requested"
+    ].forEach((name) => {
+      bind(name, intelligenceHandler);
+    });
+
+    bind(
+      "visibilitychange",
+      () => {
+        if (
+          document.visibilityState ===
+          "visible"
+        ) {
+          scheduleRefresh(
+            "visibilitychange",
+            {
+              refreshIntelligence:
+                true,
+              force: true,
+              delay: 0
+            }
+          );
+        }
+      },
+      document
+    );
   };
+
+  const unbindRuntimeEvents = () => {
+    state.runtimeBindings.forEach(
+      ({
+        name,
+        handler,
+        target
+      }) => {
+        target.removeEventListener(
+          name,
+          handler
+        );
+      }
+    );
+
+    state.runtimeBindings = [];
+  };
+
+  /* =========================================================
+     Public page API
+  ========================================================= */
 
   const HomePage = {
     id: PAGE_ID,
@@ -1883,39 +2793,77 @@
     icon: "⌂",
     version: PAGE_VERSION,
 
-    init() {
-      if (state.initialized) {
+    init(context = {}) {
+      if (
+        state.initialized &&
+        !state.destroyed
+      ) {
         return this.diagnostics();
       }
 
+      state.destroyed = false;
+
       registerActions();
       subscribeToStore();
+      bindRuntimeEvents();
 
       state.initialized = true;
 
       emit("initialized", {
-        version: PAGE_VERSION
+        version: PAGE_VERSION,
+        travelBrainAvailable:
+          Boolean(getTravelBrain()),
+        travelAssistantAvailable:
+          Boolean(
+            getTravelAssistant()
+          ),
+        travelImportAvailable:
+          Boolean(getTravelImport()),
+        travelSyncAvailable:
+          Boolean(getTravelSync()),
+        source:
+          context.source ||
+          "page-init"
       });
 
       return this.diagnostics();
     },
 
     render() {
-      this.init();
+      this.init({
+        source: "render"
+      });
 
-      const snapshot = buildSnapshot();
+      const snapshot =
+        buildSnapshot();
 
       state.lastSnapshot = snapshot;
+      state.lastRenderSignature =
+        stableStringify({
+          profile: snapshot.profile,
+          nextTrip: snapshot.nextTrip,
+          nextFlight:
+            snapshot.nextFlight,
+          nextHotel:
+            snapshot.nextHotel,
+          statistics:
+            snapshot.statistics,
+          intelligenceMessage:
+            snapshot.intelligence.message
+        });
 
       return renderPage(snapshot);
     },
 
     mount(context = {}) {
-      this.init();
+      this.init({
+        source: "mount"
+      });
 
-      const container = resolveContainer(
-        context.container
-      );
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (!container) {
         throw new Error(
@@ -1926,37 +2874,91 @@
       state.container = container;
       state.mounted = true;
 
-      const snapshot = buildSnapshot();
+      const snapshot =
+        buildSnapshot();
 
       state.lastSnapshot = snapshot;
+      state.lastRenderSignature =
+        stableStringify({
+          profile: snapshot.profile,
+          nextTrip: snapshot.nextTrip,
+          nextFlight:
+            snapshot.nextFlight,
+          nextHotel:
+            snapshot.nextHotel,
+          statistics:
+            snapshot.statistics,
+          intelligenceMessage:
+            snapshot.intelligence.message
+        });
+
       container.innerHTML =
         renderPage(snapshot);
 
       emit("mounted", {
         nextTripId:
-          snapshot.nextTrip?.id || null,
-        statistics: snapshot.statistics
+          snapshot.nextTrip?.id ||
+          null,
+        statistics:
+          snapshot.statistics,
+        travelBrainConnected:
+          Boolean(
+            snapshot.intelligence.brain
+          ),
+        travelAssistantConnected:
+          Boolean(
+            snapshot.intelligence.assistant
+          )
+      });
+
+      refreshIntelligence(
+        "home-mounted"
+      ).then(() => {
+        scheduleRefresh(
+          "home-mounted-intelligence",
+          {
+            force: true,
+            delay: 0
+          }
+        );
       });
 
       return container;
     },
 
     afterEnter(context = {}) {
-      const container = resolveContainer(
-        context.container
-      );
+      const container =
+        resolveContainer(
+          context.container
+        );
 
       if (container) {
         state.container = container;
         state.mounted = true;
       }
 
-      refresh();
+      scheduleRefresh(
+        "after-enter",
+        {
+          refreshIntelligence:
+            true,
+          force: true,
+          delay: 0
+        }
+      );
 
       return true;
     },
 
     unmount() {
+      if (state.refreshTimer) {
+        window.clearTimeout(
+          state.refreshTimer
+        );
+
+        state.refreshTimer = null;
+      }
+
       state.mounted = false;
       state.container = null;
 
@@ -1967,6 +2969,25 @@
 
     refresh,
 
+    async refreshIntelligence(
+      options = {}
+    ) {
+      const result =
+        await refreshIntelligence(
+          options.source ||
+          "home-public-api"
+        );
+
+      refresh({
+        source:
+          options.source ||
+          "home-public-api",
+        force: true
+      });
+
+      return result;
+    },
+
     getSnapshot() {
       return clone(
         state.lastSnapshot ||
@@ -1974,24 +2995,42 @@
       );
     },
 
+    getIntelligenceSnapshot() {
+      const snapshot =
+        state.lastSnapshot ||
+        buildSnapshot();
+
+      return clone(
+        snapshot.intelligence
+      );
+    },
+
     subscribe(listener) {
-      if (typeof listener !== "function") {
+      if (
+        typeof listener !==
+        "function"
+      ) {
         throw new TypeError(
           "TIC Home subscriber must be a function."
         );
       }
 
-      state.subscribers.add(listener);
+      state.subscribers.add(
+        listener
+      );
 
       return () =>
-        state.subscribers.delete(listener);
+        state.subscribers.delete(
+          listener
+        );
     },
 
     destroy() {
       this.unmount();
 
       if (
-        typeof state.unsubscribeStore === "function"
+        typeof state.unsubscribeStore ===
+        "function"
       ) {
         state.unsubscribeStore();
       }
@@ -1999,18 +3038,29 @@
       state.actionUnsubscribers.forEach(
         (unsubscribe) => {
           if (
-            typeof unsubscribe === "function"
+            typeof unsubscribe ===
+            "function"
           ) {
             unsubscribe();
           }
         }
       );
 
+      unbindRuntimeEvents();
+
       state.unsubscribeStore = null;
       state.actionUnsubscribers = [];
       state.subscribers.clear();
       state.lastSnapshot = null;
+      state.lastRenderSignature = "";
+      state.lastRefreshAt = null;
+      state.lastRefreshSource = null;
+      state.refreshQueued = false;
+      state.refreshing = false;
+      state.intelligenceRefreshRunning =
+        false;
       state.initialized = false;
+      state.destroyed = true;
 
       return true;
     },
@@ -2020,48 +3070,108 @@
         state.lastSnapshot ||
         buildSnapshot();
 
+      const travelBrain =
+        getTravelBrain();
+
+      const travelAssistant =
+        getTravelAssistant();
+
+      const travelImport =
+        getTravelImport();
+
+      const travelSync =
+        getTravelSync();
+
       return {
         id: this.id,
         title: this.title,
         version: this.version,
-        initialized: state.initialized,
-        mounted: state.mounted,
-        hasContainer: Boolean(state.container),
-        storeAvailable: Boolean(getStore()),
-        routerAvailable: Boolean(getRouter()),
-        uiAvailable: Boolean(getUI()),
-        tripFormAvailable: Boolean(
-          getTripForm()
-        ),
+        initialized:
+          state.initialized,
+        mounted:
+          state.mounted,
+        destroyed:
+          state.destroyed,
+        refreshing:
+          state.refreshing,
+        refreshQueued:
+          state.refreshQueued,
+        hasContainer:
+          Boolean(state.container),
+        storeAvailable:
+          Boolean(getStore()),
+        routerAvailable:
+          Boolean(getRouter()),
+        uiAvailable:
+          Boolean(getUI()),
+        tripFormAvailable:
+          Boolean(getTripForm()),
+        travelBrainAvailable:
+          Boolean(travelBrain),
+        travelBrainVersion:
+          travelBrain?.version ||
+          travelBrain?.VERSION ||
+          null,
+        travelAssistantAvailable:
+          Boolean(travelAssistant),
+        travelAssistantVersion:
+          travelAssistant?.version ||
+          travelAssistant?.VERSION ||
+          null,
+        travelImportAvailable:
+          Boolean(travelImport),
+        travelImportVersion:
+          travelImport?.version ||
+          travelImport?.VERSION ||
+          null,
+        travelSyncAvailable:
+          Boolean(travelSync),
+        travelSyncVersion:
+          travelSync?.version ||
+          travelSync?.VERSION ||
+          null,
         actionCount:
           state.actionUnsubscribers.length,
+        runtimeBindingCount:
+          state.runtimeBindings.length,
         subscriberCount:
           state.subscribers.size,
-        hasSnapshot: Boolean(
-          state.lastSnapshot
-        ),
-        hasNextTrip: Boolean(
-          snapshot.nextTrip
-        ),
+        hasSnapshot:
+          Boolean(state.lastSnapshot),
+        hasNextTrip:
+          Boolean(snapshot.nextTrip),
         nextTripId:
-          snapshot.nextTrip?.id || null,
+          snapshot.nextTrip?.id ||
+          null,
+        intelligenceMessageAvailable:
+          Boolean(
+            snapshot.intelligence
+              ?.message
+          ),
+        lastRefreshAt:
+          state.lastRefreshAt,
+        lastRefreshSource:
+          state.lastRefreshSource,
         defaultAirportLeadMinutes:
           DEFAULT_AIRPORT_LEAD_MINUTES,
-        manualFlightTimePriority: true
+        manualFlightTimePriority:
+          true
       };
     }
   };
 
-  window.TIC = window.TIC || {};
-  window.TIC.Pages = window.TIC.Pages || {};
-  window.TIC.Pages.home = HomePage;
-  window.TICHomePage = HomePage;
+  window.TIC.Pages.home =
+    HomePage;
+
+  window.TICHomePage =
+    HomePage;
 
   const router = getRouter();
 
   if (
     router &&
-    typeof router.register === "function"
+    typeof router.register ===
+      "function"
   ) {
     if (!router.has?.("home")) {
       router.register("home", {
@@ -2075,7 +3185,8 @@
     }
 
     if (
-      typeof router.registerPage === "function"
+      typeof router.registerPage ===
+      "function"
     ) {
       router.registerPage(
         "home",
@@ -2084,5 +3195,7 @@
     }
   }
 
-  HomePage.init();
+  HomePage.init({
+    source: "automatic"
+  });
 })(window, document);
