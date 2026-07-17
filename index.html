@@ -35,6 +35,7 @@
 
   <!-- =====================================================
        Travel Intelligence Center V4.2.0
+       Performance & Stability Integration V1.0.0
 
        Premium iPhone-first interface
        TravelBrain intelligence orchestration
@@ -58,23 +59,12 @@
        Automatic destination and multi-trip suggestions
        Duplicate-event and refresh-loop protection
        Scroll-safe and iPhone-stable page updates
+       Performance Layer: 10 files
+       Performance Integration Layer: 6 files
   ====================================================== -->
 
   <!-- =====================================================
        Global Design System
-
-       style.css:
-       - Global application shell
-       - Shared components
-       - Home, Trips and More shared styles
-
-       guide.css:
-       - Dedicated Guide Intelligence Platform styling
-       - Must load AFTER style.css
-
-       budget.css:
-       - Dedicated Simple Travel Budget Advisor styling
-       - Must load AFTER style.css and guide.css
   ====================================================== -->
 
   <link
@@ -94,8 +84,6 @@
 
   <!-- =====================================================
        1. Configuration and Base Data
-
-       Required order:
        Config → Base Data
   ====================================================== -->
 
@@ -111,33 +99,7 @@
 
   <!-- =====================================================
        2. Core Services
-
-       Required order:
        Store → Router → UI
-
-       Store V2.5.0 includes:
-       - Complete trip persistence
-       - Planned Trips persistence
-       - Planned-trip checklist persistence
-       - Planned-trip lifecycle synchronization
-       - Planned-trip to ready-trip promotion
-       - Duplicate-conversion protection
-       - Travel Passport lifecycle
-       - Guide wishlist persistence
-       - Annual travel-plan persistence
-       - ISO country-code normalization
-       - Travel DNA persistence
-       - Flight and hotel fields
-       - Legacy expense, savings and payment persistence
-       - Budget Wallet persistence
-       - Budget wallet deposits
-       - Budget wallet withdrawals
-       - Budget wallet travel expenses
-       - Automatic available-balance calculation
-       - Budget transaction history
-       - Budget Travel Intelligence compatibility
-       - Generic dispatch and normalized mutations
-       - Backup, restore, import and export
   ====================================================== -->
 
   <script
@@ -166,12 +128,6 @@
 
   <!-- =====================================================
        4. Optional Document Reading Engines
-
-       Tesseract.js:
-       - OCR for ticket and hotel images
-
-       PDF.js:
-       - Text extraction from PDF bookings
   ====================================================== -->
 
   <script
@@ -199,8 +155,6 @@
 
   <!-- =====================================================
        5. Smart Document Import Layer
-
-       Required order:
        Reader → Ticket Import → Hotel Import → Trip Form
   ====================================================== -->
 
@@ -226,8 +180,6 @@
 
   <!-- =====================================================
        6. Unified Guide Intelligence Engines
-
-       Required order:
        Planner Engine → Travel AI → Guide Engine
   ====================================================== -->
 
@@ -248,15 +200,7 @@
 
   <!-- =====================================================
        7. Travel Intelligence Integration Layer
-
-       Required order:
-       TravelBrain
-       → TravelAssistant
-       → TravelImport
-       → TravelSync
-
-       This layer must load after Store, UI, document import,
-       Planner, Travel AI and Guide Engine, and before pages.
+       TravelBrain → TravelAssistant → TravelImport → TravelSync
   ====================================================== -->
 
   <script
@@ -281,147 +225,157 @@
 
   <!-- =====================================================
        8. Legacy Budget Intelligence Engines
-
-       These files remain loaded for compatibility with existing
-       project modules and historical data.
-
-       Required order:
-       Budget Core
-       → Expense Engine
-       → Savings Engine
-       → Analytics
-       → Budget AI
-       → Payment Tracker
-       → Expense Alerts
-       → Export Engine
-       → Notification Engine
-       → Integration Engine
-       → Budget Travel Intelligence
   ====================================================== -->
 
-  <script
-    defer
-    src="js/features/budget-engine.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/expense-engine.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/savings-engine.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/budget-analytics.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/budget-ai.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/payment-tracker.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/expense-alert-engine.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/budget-export-engine.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/budget-notification-engine.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/budget-integration-engine.js?v=1.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/features/budget-travel-intelligence.js?v=1.0.0"
-  ></script>
+  <script defer src="js/features/budget-engine.js?v=1.0.0"></script>
+  <script defer src="js/features/expense-engine.js?v=1.0.0"></script>
+  <script defer src="js/features/savings-engine.js?v=1.0.0"></script>
+  <script defer src="js/features/budget-analytics.js?v=1.0.0"></script>
+  <script defer src="js/features/budget-ai.js?v=1.0.0"></script>
+  <script defer src="js/features/payment-tracker.js?v=1.0.0"></script>
+  <script defer src="js/features/expense-alert-engine.js?v=1.0.0"></script>
+  <script defer src="js/features/budget-export-engine.js?v=1.0.0"></script>
+  <script defer src="js/features/budget-notification-engine.js?v=1.0.0"></script>
+  <script defer src="js/features/budget-integration-engine.js?v=1.0.0"></script>
+  <script defer src="js/features/budget-travel-intelligence.js?v=1.0.0"></script>
 
   <!-- =====================================================
        9. Application Pages
-
-       All core services, data layers and feature engines
-       must load before the page modules.
-
-       Current integrated versions:
-       - Home V2.5.0
-       - Trips V3.7.0
-       - Guide V4.4.0
-       - Budget V4.0.0
-       - More V2.0.0
   ====================================================== -->
 
-  <script
-    defer
-    src="js/pages/home.js?v=2.5.0"
-  ></script>
-
-  <script
-    defer
-    src="js/pages/trips.js?v=3.7.0"
-  ></script>
-
-  <script
-    defer
-    src="js/pages/guide.js?v=4.4.0"
-  ></script>
-
-  <script
-    defer
-    src="js/pages/budget.js?v=4.0.0"
-  ></script>
-
-  <script
-    defer
-    src="js/pages/more.js?v=2.0.0"
-  ></script>
+  <script defer src="js/pages/home.js?v=2.5.0"></script>
+  <script defer src="js/pages/trips.js?v=3.7.0"></script>
+  <script defer src="js/pages/guide.js?v=4.4.0"></script>
+  <script defer src="js/pages/budget.js?v=4.0.0"></script>
+  <script defer src="js/pages/more.js?v=2.0.0"></script>
 
   <!-- =====================================================
-       10. Application Bootstrap
+       10. Legacy Application Bootstrap
 
-       Application Bootstrap V4.2.0:
-       - Initializes WorldGuideData
-       - Initializes PlannerEngine
-       - Initializes TravelAI
-       - Initializes GuideEngine
-       - Initializes TravelBrain
-       - Initializes TravelAssistant
-       - Initializes TravelImport
-       - Initializes TravelSync
-       - Preserves compatible Budget Intelligence engines
-       - Registers all pages
-       - Starts the Router once
-       - Synchronizes Trip Passport lifecycle
-       - Synchronizes plannedTrips lifecycle
-       - Automatically promotes ready planned trips
-       - Prevents duplicate initialization and event bindings
-       - Prevents refresh loops
-       - Defers updates during scroll, swipe and active input
-       - Supports async page and feature initialization
-
-       This must remain the final JavaScript file.
+       app.js remains frozen and loads before the new extension
+       layer. The performance files extend the existing app
+       without editing app.js, trips.js or guide.js.
   ====================================================== -->
 
   <script
     defer
     src="js/app.js?v=4.2.0"
+  ></script>
+
+  <!-- =====================================================
+       11. Performance Layer V1.0.0 — 10 New Files
+
+       Folder:
+       js/extensions/performance/
+
+       Required order:
+       Core
+       → Route Performance
+       → Page Cache
+       → Render Optimizer
+       → Virtual Scroll
+       → Image Lazy Loader
+       → Data Prefetch
+       → Memory Manager
+       → Performance Monitor
+       → Performance Bootstrap
+  ====================================================== -->
+
+  <script
+    defer
+    src="js/extensions/performance/performance-core.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/route-performance.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/page-cache.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/render-optimizer.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/virtual-scroll.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/image-lazy-loader.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/data-prefetch.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/memory-manager.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/performance-monitor.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance/performance-bootstrap.js?v=1.0.0"
+  ></script>
+
+  <!-- =====================================================
+       12. Performance Integration Layer V1.0.0 — 6 New Files
+
+       Folder:
+       js/extensions/performance-integration/
+
+       Required order:
+       Integration Core
+       → App Route Adapter
+       → Trips Adapter
+       → Guide Adapter
+       → Cache Invalidation Adapter
+       → Integration Bootstrap
+
+       integration-bootstrap.js must remain the final script.
+  ====================================================== -->
+
+  <script
+    defer
+    src="js/extensions/performance-integration/integration-core.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance-integration/app-route-adapter.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance-integration/trips-performance-adapter.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance-integration/guide-performance-adapter.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance-integration/cache-invalidation-adapter.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/performance-integration/integration-bootstrap.js?v=1.0.0"
   ></script>
 </head>
 
