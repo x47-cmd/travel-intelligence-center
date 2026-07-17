@@ -1,30 +1,33 @@
 /* =========================================================
    Travel Intelligence Center
-   Guide Intelligence Platform Page V4.5.0
+   Guide Intelligence Platform Page V5.0.0
 
    File Path:
    js/pages/guide.js
 
-   Purpose:
-   - Preserves the complete Guide Intelligence Platform experience.
-   - Fixes iPhone horizontal recommendation rail snapping and RTL conflicts.
-   - Preserves the active recommendation card across page refreshes.
-   - Prevents Store refreshes while the user is scrolling or swiping.
-   - Coalesces repeated Store updates into one controlled refresh.
-   - Reduces unnecessary deep cloning of the full 195-country snapshot.
-   - Keeps one delegated page event layer and one isolated rail event layer.
-   - Preserves GuideEngine, TravelAI, PlannerEngine, Store, Router and UI integration.
-   - Preserves wishlist, annual planning, country details and trip creation flows.
+   Based on:
+   - Guide Intelligence Platform Page V4.5.0
 
-   Dependencies:
-   - js/config.js
-   - js/store.js
-   - js/router.js
-   - js/ui.js
-   - js/data/world-data.js
-   - js/features/guide-engine.js
-   - js/features/travel-ai.js
-   - js/features/planner-engine.js
+   Integration:
+   - TravelBrain
+   - TravelAssistant
+   - TravelImport
+   - TravelSync
+   - Store V2.5.0
+   - App V4.2.0
+   - GuideEngine
+   - TravelAI
+   - PlannerEngine
+
+   Stability:
+   - Existing CSS hooks preserved.
+   - iPhone-first and RTL behavior preserved.
+   - Horizontal recommendation rail preserved.
+   - Active recommendation position preserved.
+   - Country bottom sheet preserved.
+   - Store refreshes are deferred during scrolling/swiping.
+   - Duplicate subscriptions/actions/events are prevented.
+   - Refresh loops are coalesced and guarded.
 
    Global APIs:
    - window.TIC.Pages.guide
@@ -35,12 +38,14 @@
   "use strict";
 
   const PAGE_ID = "guide";
-  const PAGE_VERSION = "4.5.0";
+  const PAGE_VERSION = "5.0.0";
+  const BASE_VERSION = "4.5.0";
   const RECOMMENDATION_LIMIT = 8;
   const SEARCH_RESULT_LIMIT = 300;
   const STORE_REFRESH_DELAY = 650;
   const SCROLL_IDLE_DELAY = 420;
   const RAIL_IDLE_DELAY = 180;
+  const INTEGRATION_REFRESH_DELAY = 320;
 
   const MONTHS_AR = Object.freeze([
     "",
@@ -69,7 +74,9 @@
 
   const state = {
     initialized: false,
+    initializing: null,
     mounted: false,
+    destroyed: false,
     container: null,
 
     activeView: "discover",
@@ -92,6 +99,7 @@
     cacheSnapshot: null,
 
     unsubscribeStore: null,
+    integrationUnsubscribers: [],
     actionUnsubscribers: [],
     subscribers: new Set(),
 
@@ -101,8 +109,12 @@
     isRailInteracting: false,
     recommendationIndex: 0,
     pendingForceRefresh: false,
+    refreshGeneration: 0,
+    lastIntegrationEventKey: "",
+    lastIntegrationEventAt: 0,
 
     storeRefreshTimer: null,
+    integrationRefreshTimer: null,
     scrollTimer: null,
     searchTimer: null,
     scrollFrame: null,
@@ -124,7 +136,7 @@
   };
 
   /* =========================================================
-     Utilities
+     Utilities and service resolution
   ========================================================= */
 
   const clone = (value) => {
@@ -180,6 +192,22 @@
   const monthLabel = (month) =>
     MONTHS_AR[clamp(number(month, 1), 1, 12)] || "";
 
+  const callFirst = async (service, methods, ...args) => {
+    if (!service) return undefined;
+
+    for (const method of methods) {
+      if (typeof service?.[method] !== "function") continue;
+
+      try {
+        return await service[method](...args);
+      } catch (error) {
+        console.error(`TIC Guide integration method ${method} failed:`, error);
+      }
+    }
+
+    return undefined;
+  };
+
   const getStore = () =>
     window.TIC?.Store ||
     window.TICStore ||
@@ -197,27 +225,56 @@
     window.TICUI ||
     null;
 
+  const getApp = () =>
+    window.TIC?.App ||
+    window.TICApp ||
+    window.TravelApp ||
+    null;
+
+  const getTravelBrain = () =>
+    window.TIC?.TravelBrain ||
+    window.TravelBrain ||
+    window.TICTravelBrain ||
+    null;
+
+  const getTravelAssistant = () =>
+    window.TIC?.TravelAssistant ||
+    window.TravelAssistant ||
+    window.TICTravelAssistant ||
+    null;
+
+  const getTravelImport = () =>
+    window.TIC?.TravelImport ||
+    window.TravelImport ||
+    window.TICTravelImport ||
+    null;
+
+  const getTravelSync = () =>
+    window.TIC?.TravelSync ||
+    window.TravelSync ||
+    window.TICTravelSync ||
+    null;
+
   const getGuideEngine = () =>
-    window.GuideEngine || null;
+    window.GuideEngine ||
+    window.TIC?.GuideEngine ||
+    null;
 
   const getTravelAI = () =>
     window.TravelAI ||
     window.TravelIntelligence ||
+    window.TIC?.TravelAI ||
     null;
 
   const getPlannerEngine = () =>
     window.PlannerEngine ||
     window.TravelPlannerEngine ||
+    window.TIC?.PlannerEngine ||
     null;
 
   const resolveContainer = (container) => {
-    if (container instanceof window.Element) {
-      return container;
-    }
-
-    if (typeof container === "string") {
-      return document.querySelector(container);
-    }
+    if (container instanceof window.Element) return container;
+    if (typeof container === "string") return document.querySelector(container);
 
     return (
       document.querySelector("[data-router-view]") ||
@@ -252,6 +309,7 @@
       type,
       page: PAGE_ID,
       version: PAGE_VERSION,
+      baseVersion: BASE_VERSION,
       timestamp: new Date().toISOString(),
       ...clone(detail)
     };
@@ -266,9 +324,11 @@
 
     try {
       window.dispatchEvent(
-        new CustomEvent(`tic:page:${PAGE_ID}:${type}`, {
-          detail: payload
-        })
+        new CustomEvent(`tic:page:${PAGE_ID}:${type}`, { detail: payload })
+      );
+
+      window.dispatchEvent(
+        new CustomEvent("tic:guide:event", { detail: payload })
       );
     } catch (_) {
       // Ignore unsupported test environments.
@@ -361,8 +421,56 @@
     });
   };
 
+  const buildTravelContext = (extra = {}) => ({
+    source: "guide-page",
+    page: PAGE_ID,
+    pageVersion: PAGE_VERSION,
+    countryCode: state.selectedCountryCode,
+    days: state.selectedDays,
+    travelers: state.selectedTravelers,
+    month: state.selectedMonth,
+    budgetAED: state.selectedBudget,
+    activeView: state.activeView,
+    activeSection: state.activeSection,
+    ...clone(extra)
+  });
+
+  const notifyIntegration = async (eventName, detail = {}) => {
+    const payload = buildTravelContext({
+      eventName,
+      ...detail
+    });
+
+    const services = [
+      getTravelBrain(),
+      getTravelAssistant(),
+      getTravelImport(),
+      getTravelSync(),
+      getApp()
+    ];
+
+    await Promise.allSettled(
+      services.map((service) =>
+        callFirst(
+          service,
+          [
+            "handleGuideEvent",
+            "handlePageEvent",
+            "handleEvent",
+            "notify",
+            "emit"
+          ],
+          eventName,
+          payload
+        )
+      )
+    );
+
+    return payload;
+  };
+
   /* =========================================================
-     Snapshot
+     Snapshot and intelligence enrichment
   ========================================================= */
 
   const getAllCountries = (guide) => {
@@ -399,14 +507,30 @@
       .slice(0, SEARCH_RESULT_LIMIT);
   };
 
+  const enrichRecommendations = async (recommendations, context) => {
+    const brain = getTravelBrain();
+    if (!brain || !recommendations.length) return recommendations;
+
+    const enriched = await callFirst(
+      brain,
+      [
+        "enrichGuideRecommendations",
+        "rankDestinations",
+        "analyzeRecommendations"
+      ],
+      recommendations,
+      context
+    );
+
+    return safeArray(enriched).length
+      ? safeArray(enriched)
+      : recommendations;
+  };
+
   const buildSnapshot = async ({ force = false } = {}) => {
     const signature = cacheSignature();
 
-    if (
-      !force &&
-      state.cacheSnapshot &&
-      state.cacheKey === signature
-    ) {
+    if (!force && state.cacheSnapshot && state.cacheKey === signature) {
       return state.cacheSnapshot;
     }
 
@@ -430,7 +554,11 @@
       ? guide.getCountry?.(state.selectedCountryCode)
       : null;
 
-    const countryGuide = selectedCountry
+    const context = buildTravelContext({
+      country: selectedCountry || null
+    });
+
+    let countryGuide = selectedCountry
       ? guide.getCountryGuide?.(
           selectedCountry.code,
           {
@@ -441,6 +569,28 @@
           }
         )
       : null;
+
+    try {
+      const brainGuide = await callFirst(
+        getTravelBrain(),
+        [
+          "buildCountryIntelligence",
+          "analyzeCountry",
+          "getCountryIntelligence"
+        ],
+        selectedCountry,
+        context
+      );
+
+      if (brainGuide && typeof brainGuide === "object") {
+        countryGuide = {
+          ...(countryGuide || {}),
+          travelBrain: brainGuide
+        };
+      }
+    } catch (error) {
+      console.error("TIC Guide TravelBrain country enrichment error:", error);
+    }
 
     let recommendations = [];
 
@@ -455,6 +605,11 @@
           useRatings: true,
           useTravelDNA: true
         })) || [];
+
+      recommendations = await enrichRecommendations(
+        safeArray(recommendations),
+        context
+      );
     } catch (error) {
       console.error("TIC Guide recommendations error:", error);
     }
@@ -464,6 +619,16 @@
     if (selectedCountry && state.activeSection === "planner") {
       try {
         itinerary =
+          (await callFirst(
+            getTravelBrain(),
+            [
+              "generateGuideItinerary",
+              "buildItinerary",
+              "planTrip"
+            ],
+            selectedCountry,
+            context
+          )) ||
           ai?.generateItinerary?.(
             selectedCountry,
             {
@@ -472,7 +637,8 @@
               month: state.selectedMonth,
               budget: state.selectedBudget
             }
-          ) || null;
+          ) ||
+          null;
       } catch (error) {
         console.error("TIC Guide itinerary error:", error);
       }
@@ -494,10 +660,21 @@
       countries: filterCountries(allCountries, state.search),
       selectedCountry,
       countryGuide,
-      recommendations: safeArray(recommendations),
+      recommendations: safeArray(recommendations).slice(
+        0,
+        RECOMMENDATION_LIMIT
+      ),
       itinerary,
       wishlist: safeArray(wishlist),
-      annualPlans: safeArray(annualPlans)
+      annualPlans: safeArray(annualPlans),
+      integrations: {
+        travelBrain: Boolean(getTravelBrain()),
+        travelAssistant: Boolean(getTravelAssistant()),
+        travelImport: Boolean(getTravelImport()),
+        travelSync: Boolean(getTravelSync()),
+        store: Boolean(getStore()),
+        app: Boolean(getApp())
+      }
     };
 
     state.cacheKey = signature;
@@ -507,7 +684,7 @@
   };
 
   /* =========================================================
-     Shared renderers
+     Shared renderers — CSS hooks preserved from V4.5.0
   ========================================================= */
 
   const renderSection = ({
@@ -532,12 +709,7 @@
     </section>
   `;
 
-  const renderEmpty = (
-    title,
-    message,
-    icon = "⌕",
-    compact = false
-  ) => `
+  const renderEmpty = (title, message, icon = "⌕", compact = false) => `
     <div class="tic-empty guide-empty ${compact ? "is-compact" : ""}">
       <span>${escapeHTML(icon)}</span>
       <div>
@@ -551,9 +723,7 @@
     const stats = [
       {
         icon: "🌍",
-        value:
-          snapshot.summary.totalCountries ||
-          snapshot.allCountries.length,
+        value: snapshot.summary.totalCountries || snapshot.allCountries.length,
         label: "دولة"
       },
       {
@@ -583,9 +753,7 @@
           .map(
             (item) => `
               <article class="guide-overview-item">
-                <span class="guide-overview-icon">
-                  ${escapeHTML(item.icon)}
-                </span>
+                <span class="guide-overview-icon">${escapeHTML(item.icon)}</span>
                 <strong>${escapeHTML(item.value)}</strong>
                 <small>${escapeHTML(item.label)}</small>
               </article>
@@ -596,34 +764,22 @@
     `;
   };
 
-  const renderPlannerControls = ({
-    compact = true
-  } = {}) => `
+  const renderPlannerControls = ({ compact = true } = {}) => `
     <div class="tic-card guide-planner-card ${compact ? "is-compact" : ""}">
       <div class="tic-card-body">
         <div class="guide-quick-grid">
           <label class="guide-quick-field">
             <span>الأيام</span>
-            <input
-              type="number"
-              min="1"
-              max="30"
+            <input type="number" min="1" max="30"
               value="${escapeHTML(state.selectedDays)}"
-              data-guide-days
-              inputmode="numeric"
-            >
+              data-guide-days inputmode="numeric">
           </label>
 
           <label class="guide-quick-field">
             <span>المسافرون</span>
-            <input
-              type="number"
-              min="1"
-              max="20"
+            <input type="number" min="1" max="20"
               value="${escapeHTML(state.selectedTravelers)}"
-              data-guide-travelers
-              inputmode="numeric"
-            >
+              data-guide-travelers inputmode="numeric">
           </label>
 
           <label class="guide-quick-field">
@@ -632,10 +788,8 @@
               ${MONTHS_AR.slice(1)
                 .map(
                   (label, index) => `
-                    <option
-                      value="${index + 1}"
-                      ${state.selectedMonth === index + 1 ? "selected" : ""}
-                    >
+                    <option value="${index + 1}"
+                      ${state.selectedMonth === index + 1 ? "selected" : ""}>
                       ${escapeHTML(label)}
                     </option>
                   `
@@ -646,15 +800,9 @@
 
           <label class="guide-quick-field">
             <span>الميزانية</span>
-            <input
-              type="number"
-              min="0"
-              step="500"
+            <input type="number" min="0" step="500"
               value="${escapeHTML(state.selectedBudget || "")}"
-              placeholder="15000"
-              data-guide-budget
-              inputmode="numeric"
-            >
+              placeholder="15000" data-guide-budget inputmode="numeric">
           </label>
         </div>
       </div>
@@ -706,20 +854,13 @@
     return countries
       .map(
         (country) => `
-          <button
-            type="button"
-            class="guide-country-option"
-            data-guide-country-option="${escapeHTML(country.code)}"
-          >
-            <span class="guide-country-flag">
-              ${escapeHTML(country.flag || "🌍")}
-            </span>
-
+          <button type="button" class="guide-country-option"
+            data-guide-country-option="${escapeHTML(country.code)}">
+            <span class="guide-country-flag">${escapeHTML(country.flag || "🌍")}</span>
             <span class="guide-country-option-copy">
               <strong>${escapeHTML(country.nameAr)}</strong>
               <small>${escapeHTML(country.nameEn || country.code)}</small>
             </span>
-
             <span aria-hidden="true">‹</span>
           </button>
         `
@@ -730,8 +871,7 @@
   const renderCountryPicker = (snapshot) => {
     const selected =
       snapshot.allCountries.find(
-        (country) =>
-          country.code === state.selectedCountryCode
+        (country) => country.code === state.selectedCountryCode
       ) || null;
 
     return `
@@ -749,26 +889,14 @@
               </strong>
               <small>ابحث واختر من قائمة الدول الكاملة.</small>
             </div>
-
-            <span
-              class="guide-picker-summary-icon"
-              aria-hidden="true"
-            >
-              🌍
-            </span>
+            <span class="guide-picker-summary-icon" aria-hidden="true">🌍</span>
           </div>
 
-          <button
-            type="button"
-            class="guide-country-open-button"
-            data-guide-open-country-sheet
-            aria-haspopup="dialog"
-            aria-expanded="${state.countryPickerOpen ? "true" : "false"}"
-          >
+          <button type="button" class="guide-country-open-button"
+            data-guide-open-country-sheet aria-haspopup="dialog"
+            aria-expanded="${state.countryPickerOpen ? "true" : "false"}">
             <span aria-hidden="true">⌕</span>
-            <span>
-              ${selected ? "تغيير الدولة" : "ابحث واختر الدولة"}
-            </span>
+            <span>${selected ? "تغيير الدولة" : "ابحث واختر الدولة"}</span>
             <span aria-hidden="true">‹</span>
           </button>
         </div>
@@ -780,22 +908,11 @@
     if (!state.countryPickerOpen) return "";
 
     return `
-      <div
-        class="guide-country-sheet-backdrop"
-        data-guide-country-sheet-backdrop
-        role="presentation"
-      >
-        <section
-          class="guide-country-sheet"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="guide-country-sheet-title"
-          data-guide-country-sheet
-        >
-          <div
-            class="guide-country-sheet-handle"
-            aria-hidden="true"
-          ></div>
+      <div class="guide-country-sheet-backdrop"
+        data-guide-country-sheet-backdrop role="presentation">
+        <section class="guide-country-sheet" role="dialog" aria-modal="true"
+          aria-labelledby="guide-country-sheet-title" data-guide-country-sheet>
+          <div class="guide-country-sheet-handle" aria-hidden="true"></div>
 
           <header class="guide-country-sheet-header">
             <div>
@@ -803,57 +920,31 @@
               <h2 id="guide-country-sheet-title">اختر الدولة</h2>
               <p>ابحث بالعربي أو الإنجليزي ثم اضغط على الدولة.</p>
             </div>
-
-            <button
-              type="button"
-              class="guide-country-sheet-close"
-              data-guide-close-country-sheet
-              aria-label="إغلاق قائمة الدول"
-            >
-              ×
-            </button>
+            <button type="button" class="guide-country-sheet-close"
+              data-guide-close-country-sheet aria-label="إغلاق قائمة الدول">×</button>
           </header>
 
           <div class="guide-country-sheet-search">
             <span aria-hidden="true">⌕</span>
-
-            <input
-              type="search"
-              data-guide-sheet-search
+            <input type="search" data-guide-sheet-search
               value="${escapeHTML(state.search)}"
-              placeholder="اكتب اسم الدولة..."
-              autocomplete="off"
-              enterkeyhint="search"
-              aria-label="البحث عن دولة"
-            >
-
+              placeholder="اكتب اسم الدولة..." autocomplete="off"
+              enterkeyhint="search" aria-label="البحث عن دولة">
             ${
               state.search
-                ? `
-                  <button
-                    type="button"
-                    data-guide-clear-sheet-search
-                    aria-label="مسح البحث"
-                  >
-                    ×
-                  </button>
-                `
+                ? `<button type="button" data-guide-clear-sheet-search
+                    aria-label="مسح البحث">×</button>`
                 : ""
             }
           </div>
 
           <div class="guide-country-sheet-count">
-            <span>
-              ${escapeHTML(snapshot.countries.length)}
-              ${snapshot.countries.length === 1 ? "نتيجة" : "دولة"}
-            </span>
+            <span>${escapeHTML(snapshot.countries.length)}
+              ${snapshot.countries.length === 1 ? "نتيجة" : "دولة"}</span>
             <small>مرر داخل القائمة فقط</small>
           </div>
 
-          <div
-            class="guide-country-sheet-list"
-            data-guide-country-sheet-list
-          >
+          <div class="guide-country-sheet-list" data-guide-country-sheet-list>
             ${renderCountryOptions(snapshot.countries)}
           </div>
         </section>
@@ -864,10 +955,7 @@
   const renderRecommendationCard = (item, index) => {
     const country = item.country || item;
     const score = Math.round(
-      number(
-        item.score || country.recommendationScore,
-        0
-      )
+      number(item.score || country.recommendationScore, 0)
     );
 
     const estimate =
@@ -876,64 +964,40 @@
       item.budgetFit?.estimate ||
       {};
 
-    const bestMonths = safeArray(
-      item.bestMonths || country.bestMonths
-    )
+    const bestMonths = safeArray(item.bestMonths || country.bestMonths)
       .slice(0, 2)
       .map(monthLabel)
       .filter(Boolean)
       .join("، ");
 
     const firstReason =
-      safeArray(item.reasons)
-        .filter(Boolean)
-        .slice(0, 1)[0] ||
+      safeArray(item.reasons).filter(Boolean).slice(0, 1)[0] ||
+      item.reason ||
       "قريبة من إعدادات رحلتك الحالية.";
 
     return `
-      <article
-        class="tic-card guide-recommendation-card is-compact"
-        data-guide-recommendation-index="${escapeHTML(index)}"
-        dir="rtl"
-      >
+      <article class="tic-card guide-recommendation-card is-compact"
+        data-guide-recommendation-index="${escapeHTML(index)}" dir="rtl">
         <div class="tic-card-body">
           <div class="guide-recommendation-head">
-            <span class="guide-recommendation-rank">
-              ${escapeHTML(index + 1)}
-            </span>
-
-            <button
-              type="button"
+            <span class="guide-recommendation-rank">${escapeHTML(index + 1)}</span>
+            <button type="button"
               class="tic-icon-button guide-wishlist-button"
               data-action="guide-toggle-wishlist"
               data-param-country-code="${escapeHTML(country.code)}"
-              aria-label="إضافة أو إزالة من الأمنيات"
-            >
+              aria-label="إضافة أو إزالة من الأمنيات">
               ${country.wishlisted ? "★" : "☆"}
             </button>
           </div>
 
-          <button
-            type="button"
-            class="guide-recommendation-main"
+          <button type="button" class="guide-recommendation-main"
             data-action="guide-open-country"
-            data-param-country-code="${escapeHTML(country.code)}"
-          >
-            <span class="guide-recommendation-flag">
-              ${escapeHTML(country.flag || "🌍")}
-            </span>
-
-            <strong>
-              ${escapeHTML(
-                country.nameAr ||
-                country.countryName ||
-                country.code
-              )}
-            </strong>
-
-            <small>
-              ${escapeHTML(firstReason)}
-            </small>
+            data-param-country-code="${escapeHTML(country.code)}">
+            <span class="guide-recommendation-flag">${escapeHTML(country.flag || "🌍")}</span>
+            <strong>${escapeHTML(
+              country.nameAr || country.countryName || country.code
+            )}</strong>
+            <small>${escapeHTML(firstReason)}</small>
           </button>
 
           <div class="guide-recommendation-score">
@@ -942,12 +1006,7 @@
           </div>
 
           <div class="guide-recommendation-meta is-compact">
-            ${
-              bestMonths
-                ? `<span>🗓️ ${escapeHTML(bestMonths)}</span>`
-                : ""
-            }
-
+            ${bestMonths ? `<span>🗓️ ${escapeHTML(bestMonths)}</span>` : ""}
             ${
               estimate.totalAED
                 ? `<span>💳 ${escapeHTML(formatAED(estimate.totalAED))}</span>`
@@ -980,12 +1039,9 @@
 
     return `
       <div class="guide-recommendation-shell">
-        <div
-          class="guide-recommendation-rail"
+        <div class="guide-recommendation-rail"
           data-guide-recommendation-rail
-          aria-label="اقتراحات السفر"
-          dir="ltr"
-        >
+          aria-label="اقتراحات السفر" dir="ltr">
           ${snapshot.recommendations
             .slice(0, RECOMMENDATION_LIMIT)
             .map(renderRecommendationCard)
@@ -993,26 +1049,12 @@
         </div>
 
         <div class="guide-rail-footer">
-          <span>
-            اسحب يمين ويسار لمشاهدة بقية الاقتراحات
-          </span>
-
+          <span>اسحب يمين ويسار لمشاهدة بقية الاقتراحات</span>
           <div class="guide-rail-controls">
-            <button
-              type="button"
-              data-guide-rail-next
-              aria-label="الاقتراح التالي"
-            >
-              ›
-            </button>
-
-            <button
-              type="button"
-              data-guide-rail-previous
-              aria-label="الاقتراح السابق"
-            >
-              ‹
-            </button>
+            <button type="button" data-guide-rail-next
+              aria-label="الاقتراح التالي">›</button>
+            <button type="button" data-guide-rail-previous
+              aria-label="الاقتراح السابق">‹</button>
           </div>
         </div>
       </div>
@@ -1037,25 +1079,17 @@
             const country =
               item.country ||
               snapshot.allCountries.find(
-                (entry) =>
-                  entry.code === item.countryCode
+                (entry) => entry.code === item.countryCode
               );
 
             return `
-              <button
-                type="button"
-                class="guide-mini-card"
+              <button type="button" class="guide-mini-card"
                 data-action="guide-open-country"
-                data-param-country-code="${escapeHTML(item.countryCode)}"
-              >
+                data-param-country-code="${escapeHTML(item.countryCode)}">
                 <span>${escapeHTML(country?.flag || "🌍")}</span>
-                <strong>
-                  ${escapeHTML(
-                    country?.nameAr ||
-                    item.countryName ||
-                    item.countryCode
-                  )}
-                </strong>
+                <strong>${escapeHTML(
+                  country?.nameAr || item.countryName || item.countryCode
+                )}</strong>
                 <small>فتح الدليل</small>
               </button>
             `;
@@ -1092,7 +1126,6 @@
                         plan.countryCode
                       )}
                     </strong>
-
                     <small>
                       ${escapeHTML(
                         `${plan.month ? monthLabel(plan.month) : "غير محدد"} ${plan.year || ""}`
@@ -1122,25 +1155,15 @@
     const budget = snapshot.summary.budget || {};
 
     const items = [
-      {
-        label: "أسلوب السفر",
-        value: profile.travelStyle || "غير محدد"
-      },
-      {
-        label: "المطار الأساسي",
-        value: profile.homeAirport || "أبوظبي"
-      },
+      { label: "أسلوب السفر", value: profile.travelStyle || "غير محدد" },
+      { label: "المطار الأساسي", value: profile.homeAirport || "أبوظبي" },
       {
         label: "الميزانية السنوية",
-        value: formatAED(
-          budget.annualTravelBudget || 0
-        )
+        value: formatAED(budget.annualTravelBudget || 0)
       },
       {
         label: "الادخار الشهري",
-        value: formatAED(
-          budget.monthlySaving || 0
-        )
+        value: formatAED(budget.monthlySaving || 0)
       }
     ];
 
@@ -1231,12 +1254,10 @@
     <div class="guide-country-tabs">
       ${VIEW_SECTIONS.map(
         (section) => `
-          <button
-            type="button"
+          <button type="button"
             class="${state.activeSection === section.id ? "is-active" : ""}"
             data-action="guide-set-section"
-            data-param-section="${escapeHTML(section.id)}"
-          >
+            data-param-section="${escapeHTML(section.id)}">
             <span>${escapeHTML(section.icon)}</span>
             ${escapeHTML(section.label)}
           </button>
@@ -1248,8 +1269,8 @@
   const renderCountryHero = (snapshot) => {
     const country = snapshot.selectedCountry;
     const guide = snapshot.countryGuide;
-
     const score =
+      guide?.travelBrain?.matchScore ||
       guide?.aiInsights?.matchScore ||
       country?.recommendationScore ||
       0;
@@ -1262,33 +1283,21 @@
               ${escapeHTML(country.flag || "🌍")}
               ${escapeHTML(country.nameEn || country.code)}
             </span>
-
             <h1>${escapeHTML(country.nameAr)}</h1>
-
-            <p>
-              ${escapeHTML(
-                country.summary ||
-                "دليل عملي لهذه الوجهة."
-              )}
-            </p>
+            <p>${escapeHTML(country.summary || "دليل عملي لهذه الوجهة.")}</p>
           </div>
 
-          <button
-            type="button"
-            class="tic-icon-button"
+          <button type="button" class="tic-icon-button"
             data-action="guide-toggle-wishlist"
             data-param-country-code="${escapeHTML(country.code)}"
-            aria-label="إضافة أو إزالة من الأمنيات"
-          >
+            aria-label="إضافة أو إزالة من الأمنيات">
             ${country.wishlisted ? "★" : "☆"}
           </button>
         </div>
 
         <div class="guide-country-score">
           <span>التطابق معك</span>
-          <strong>
-            ${escapeHTML(Math.round(number(score)))}%
-          </strong>
+          <strong>${escapeHTML(Math.round(number(score)))}%</strong>
         </div>
 
         <div class="guide-country-actions">
@@ -1323,17 +1332,13 @@
   };
 
   const renderInfoRows = (title, rows) => {
-    const visible = rows.filter((row) =>
-      text(row.value)
-    );
-
+    const visible = rows.filter((row) => text(row.value));
     if (!visible.length) return "";
 
     return `
       <section class="tic-card guide-info-card">
         <div class="tic-card-body">
           <h3>${escapeHTML(title)}</h3>
-
           <div class="guide-info-list">
             ${visible
               .map(
@@ -1351,11 +1356,7 @@
     `;
   };
 
-  const renderSimpleList = (
-    title,
-    items,
-    emptyText = ""
-  ) => {
+  const renderSimpleList = (title, items, emptyText = "") => {
     const normalized = safeArray(items);
 
     if (!normalized.length) {
@@ -1364,9 +1365,7 @@
           <section class="tic-card guide-info-card">
             <div class="tic-card-body">
               <h3>${escapeHTML(title)}</h3>
-              <p class="tic-subtitle">
-                ${escapeHTML(emptyText)}
-              </p>
+              <p class="tic-subtitle">${escapeHTML(emptyText)}</p>
             </div>
           </section>
         `
@@ -1377,7 +1376,6 @@
       <section class="tic-card guide-info-card">
         <div class="tic-card-body">
           <h3>${escapeHTML(title)}</h3>
-
           <div class="guide-list">
             ${normalized
               .map((item) => {
@@ -1401,11 +1399,7 @@
                 return `
                   <div>
                     <strong>${escapeHTML(value)}</strong>
-                    ${
-                      secondary
-                        ? `<small>${escapeHTML(secondary)}</small>`
-                        : ""
-                    }
+                    ${secondary ? `<small>${escapeHTML(secondary)}</small>` : ""}
                   </div>
                 `;
               })
@@ -1420,50 +1414,31 @@
     const country = snapshot.selectedCountry;
     const guide = snapshot.countryGuide;
     const estimate = guide?.cost || {};
-
-    const idealDays =
-      country.recommendedDays?.ideal ||
-      state.selectedDays;
+    const idealDays = country.recommendedDays?.ideal || state.selectedDays;
 
     return `
       <div class="guide-country-grid">
         ${renderInfoRows("نظرة سريعة", [
-          {
-            label: "العاصمة",
-            value: country.capital
-          },
-          {
-            label: "القارة",
-            value: country.continent
-          },
-          {
-            label: "العملة",
-            value: country.currency
-          },
+          { label: "العاصمة", value: country.capital },
+          { label: "القارة", value: country.continent },
+          { label: "العملة", value: country.currency },
           {
             label: "مدة الطيران من أبوظبي",
             value: country.flightDurationFromAbuDhabiHours
               ? `${country.flightDurationFromAbuDhabiHours} ساعات تقريباً`
               : ""
           },
-          {
-            label: "المدة المثالية",
-            value: `${idealDays} أيام`
-          }
+          { label: "المدة المثالية", value: `${idealDays} أيام` }
         ])}
 
         ${renderInfoRows("التكلفة التقريبية", [
           {
             label: "الطيران",
-            value: estimate.flightAED
-              ? formatAED(estimate.flightAED)
-              : ""
+            value: estimate.flightAED ? formatAED(estimate.flightAED) : ""
           },
           {
             label: "الفندق",
-            value: estimate.hotelAED
-              ? formatAED(estimate.hotelAED)
-              : ""
+            value: estimate.hotelAED ? formatAED(estimate.hotelAED) : ""
           },
           {
             label: "المصروف اليومي",
@@ -1473,21 +1448,12 @@
           },
           {
             label: "الإجمالي",
-            value: estimate.totalAED
-              ? formatAED(estimate.totalAED)
-              : ""
+            value: estimate.totalAED ? formatAED(estimate.totalAED) : ""
           }
         ])}
 
-        ${renderSimpleList(
-          "أفضل المدن",
-          country.cities
-        )}
-
-        ${renderSimpleList(
-          "أنسب أنماط السفر",
-          country.travelStyles
-        )}
+        ${renderSimpleList("أفضل المدن", country.cities)}
+        ${renderSimpleList("أنسب أنماط السفر", country.travelStyles)}
       </div>
     `;
   };
@@ -1499,10 +1465,7 @@
     return `
       <div class="guide-country-grid">
         ${renderInfoRows("طقس الشهر المختار", [
-          {
-            label: "الشهر",
-            value: monthLabel(state.selectedMonth)
-          },
+          { label: "الشهر", value: monthLabel(state.selectedMonth) },
           {
             label: "أقل درجة",
             value:
@@ -1533,12 +1496,7 @@
           "أفضل أشهر السفر",
           safeArray(guide?.bestMonths).map(monthLabel)
         )}
-
-        ${renderSimpleList(
-          "المواسم المناسبة",
-          country.seasons
-        )}
-
+        ${renderSimpleList("المواسم المناسبة", country.seasons)}
         ${renderSimpleList(
           "أشهر يفضل تجنبها",
           safeArray(country.monthsToAvoid).map(monthLabel),
@@ -1550,68 +1508,45 @@
 
   const renderStaySection = (snapshot) => {
     const country = snapshot.selectedCountry;
-
     const recommendations =
-      snapshot.countryGuide?.aiInsights
-        ?.hotelRecommendations || [];
+      snapshot.countryGuide?.aiInsights?.hotelRecommendations ||
+      snapshot.countryGuide?.travelBrain?.hotelRecommendations ||
+      [];
 
     return `
       <div class="guide-country-grid">
         ${
           recommendations.length
             ? recommendations
-                .map(
-                  (item) => `
+                .map((item) => {
+                  const hotel = item.hotel || item;
+                  return `
                     <article class="tic-card guide-info-card">
                       <div class="tic-card-body">
-                        <span class="tic-chip">
-                          ${escapeHTML(
-                            item.hotel.city ||
-                            country.nameAr
-                          )}
-                        </span>
-
-                        <h3>
-                          ${escapeHTML(
-                            item.hotel.nameAr ||
-                            item.hotel.name
-                          )}
-                        </h3>
-
+                        <span class="tic-chip">${escapeHTML(
+                          hotel.city || country.nameAr
+                        )}</span>
+                        <h3>${escapeHTML(hotel.nameAr || hotel.name)}</h3>
                         <div class="guide-info-list">
                           <div>
                             <span>التقييم الذكي</span>
-                            <strong>
-                              ${escapeHTML(item.score)}%
-                            </strong>
+                            <strong>${escapeHTML(item.score || hotel.score || 0)}%</strong>
                           </div>
-
                           <div>
                             <span>الشطاف</span>
-                            <strong>
-                              ${
-                                item.hotel.hasShattaf
-                                  ? "متوفر"
-                                  : "يحتاج تأكيد"
-                              }
-                            </strong>
+                            <strong>${hotel.hasShattaf ? "متوفر" : "يحتاج تأكيد"}</strong>
                           </div>
-
                           <div>
                             <span>السعر لليلة</span>
-                            <strong>
-                              ${escapeHTML(
-                                formatAED(
-                                  item.hotel.estimatedNightlyAED
-                                )
-                              )}
-                            </strong>
+                            <strong>${escapeHTML(
+                              formatAED(hotel.estimatedNightlyAED || 0)
+                            )}</strong>
                           </div>
                         </div>
                       </div>
                     </article>
-                  `
-                )
+                  `;
+                })
                 .join("")
             : renderEmpty(
                 "لا توجد فنادق مفصلة حالياً",
@@ -1622,10 +1557,7 @@
         }
 
         ${renderSimpleList("معلومات الإقامة", [
-          `توفر الشطاف: ${
-            country.shattafAvailability ||
-            "غير معروف"
-          }`,
+          `توفر الشطاف: ${country.shattafAvailability || "غير معروف"}`,
           country.familyFriendly
             ? "مناسبة للعائلات"
             : "راجع ملاءمتها للعائلة",
@@ -1642,29 +1574,22 @@
 
     return `
       <div class="guide-country-grid">
-        ${renderSimpleList(
-          "أفضل المدن",
-          country.cities
-        )}
-
+        ${renderSimpleList("أفضل المدن", country.cities)}
         ${renderSimpleList(
           "الأماكن السياحية",
           country.attractions,
           "لا توجد أماكن مفصلة لهذه الوجهة حالياً."
         )}
-
         ${renderSimpleList(
           "الشواطئ",
           country.beaches,
           "لا توجد شواطئ مضافة لهذه الوجهة."
         )}
-
         ${renderSimpleList(
           "الأنشطة والتجارب",
           country.experiences,
           "لا توجد تجارب مضافة لهذه الوجهة."
         )}
-
         ${renderSimpleList(
           "المطاعم الحلال",
           country.halalRestaurants,
@@ -1680,67 +1605,36 @@
     return `
       <div class="guide-country-grid">
         ${renderInfoRows("التأشيرة والدخول", [
-          {
-            label: "الحالة",
-            value: country.visa?.status
-          },
-          {
-            label: "ملاحظة",
-            value: country.visa?.note
-          }
+          { label: "الحالة", value: country.visa?.status },
+          { label: "ملاحظة", value: country.visa?.note }
         ])}
 
-        ${renderSimpleList(
-          "متطلبات الدخول",
-          country.entryRequirements
-        )}
+        ${renderSimpleList("متطلبات الدخول", country.entryRequirements)}
 
         ${renderInfoRows("اللغة والعملة", [
-          {
-            label: "اللغات",
-            value: safeArray(country.languages).join("، ")
-          },
-          {
-            label: "العملة",
-            value: country.currency
-          },
-          {
-            label: "فرق التوقيت",
-            value: country.timezone
-          }
+          { label: "اللغات", value: safeArray(country.languages).join("، ") },
+          { label: "العملة", value: country.currency },
+          { label: "فرق التوقيت", value: country.timezone }
         ])}
 
         ${renderInfoRows("المواصلات", [
           {
             label: "المواصلات العامة",
-            value:
-              country.transport?.publicTransport
+            value: country.transport?.publicTransport
           },
           {
             label: "هل السيارة مطلوبة؟",
-            value: country.transport?.carRecommended
-              ? "نعم"
-              : "غالباً لا"
+            value: country.transport?.carRecommended ? "نعم" : "غالباً لا"
           },
-          {
-            label: "ملاحظات",
-            value: country.transport?.notes
-          }
+          { label: "ملاحظات", value: country.transport?.notes }
         ])}
 
         ${renderInfoRows("الاتصال والكهرباء", [
-          {
-            label: "eSIM",
-            value: country.connectivity?.esim
-          },
-          {
-            label: "SIM",
-            value: country.connectivity?.sim
-          },
+          { label: "eSIM", value: country.connectivity?.esim },
+          { label: "SIM", value: country.connectivity?.sim },
           {
             label: "المحول الكهربائي",
-            value: country.electricity
-              ?.adapterRecommended
+            value: country.electricity?.adapterRecommended
               ? "يفضل حمله"
               : "غالباً غير مطلوب"
           }
@@ -1749,21 +1643,15 @@
         ${renderInfoRows("الملاءمة", [
           {
             label: "الحلال",
-            value: country.halal?.friendly
-              ? "متوفر"
-              : "يحتاج تخطيط"
+            value: country.halal?.friendly ? "متوفر" : "يحتاج تخطيط"
           },
           {
             label: "الشطاف",
-            value:
-              country.shattafAvailability ||
-              "غير معروف"
+            value: country.shattafAvailability || "غير معروف"
           },
           {
             label: "العائلة",
-            value: country.familyFriendly
-              ? "مناسبة"
-              : "راجع التفاصيل"
+            value: country.familyFriendly ? "مناسبة" : "راجع التفاصيل"
           }
         ])}
       </div>
@@ -1793,43 +1681,26 @@
                 <div class="tic-card-body">
                   <span class="tic-chip">
                     اليوم ${escapeHTML(day.day)}
-                    ${
-                      day.city
-                        ? ` · ${escapeHTML(day.city)}`
-                        : ""
-                    }
+                    ${day.city ? ` · ${escapeHTML(day.city)}` : ""}
                   </span>
-
                   <h3>${escapeHTML(day.theme)}</h3>
-
                   <div class="guide-list">
                     ${safeArray(day.activities)
                       .map(
                         (activity) => `
                           <div>
-                            <strong>
-                              ${escapeHTML(activity.name)}
-                            </strong>
-                            <small>
-                              ${escapeHTML(
-                                activity.period ||
-                                activity.type ||
-                                ""
-                              )}
-                            </small>
+                            <strong>${escapeHTML(activity.name)}</strong>
+                            <small>${escapeHTML(
+                              activity.period || activity.type || ""
+                            )}</small>
                           </div>
                         `
                       )
                       .join("")}
                   </div>
-
                   ${
                     day.notes
-                      ? `
-                        <p class="tic-subtitle">
-                          ${escapeHTML(day.notes)}
-                        </p>
-                      `
+                      ? `<p class="tic-subtitle">${escapeHTML(day.notes)}</p>`
                       : ""
                   }
                 </div>
@@ -1845,19 +1716,14 @@
     switch (state.activeSection) {
       case "weather":
         return renderWeatherSection(snapshot);
-
       case "stay":
         return renderStaySection(snapshot);
-
       case "explore":
         return renderExploreSection(snapshot);
-
       case "essentials":
         return renderEssentialsSection(snapshot);
-
       case "planner":
         return renderPlannerSection(snapshot);
-
       case "overview":
       default:
         return renderOverviewSection(snapshot);
@@ -1881,9 +1747,7 @@
         title: "إعدادات رحلتك",
         subtitle: "غيّر الأيام والشهر والميزانية.",
         compact: true,
-        content: renderPlannerControls({
-          compact: true
-        })
+        content: renderPlannerControls({ compact: true })
       })}
 
       ${renderCountryTabs()}
@@ -1900,15 +1764,11 @@
   const renderPage = (snapshot) => {
     if (!snapshot.ready) {
       return `
-        <div
-          class="tic-module guide-page"
-          data-page="${PAGE_ID}"
-          data-page-version="${PAGE_VERSION}"
-        >
+        <div class="tic-module guide-page"
+          data-page="${PAGE_ID}" data-page-version="${PAGE_VERSION}">
           ${renderEmpty(
             "الدليل غير جاهز",
-            snapshot.error ||
-              "تأكد من تحميل ملفات الدليل.",
+            snapshot.error || "تأكد من تحميل ملفات الدليل.",
             "⚠️"
           )}
         </div>
@@ -1916,12 +1776,9 @@
     }
 
     return `
-      <div
-        class="tic-module guide-page"
-        data-page="${PAGE_ID}"
-        data-page-version="${PAGE_VERSION}"
-        data-guide-view="${escapeHTML(state.activeView)}"
-      >
+      <div class="tic-module guide-page"
+        data-page="${PAGE_ID}" data-page-version="${PAGE_VERSION}"
+        data-guide-view="${escapeHTML(state.activeView)}">
         ${
           state.activeView === "country"
             ? renderCountryView(snapshot)
@@ -1932,19 +1789,15 @@
   };
 
   /* =========================================================
-     Country sheet
+     Country bottom sheet
   ========================================================= */
 
   const getCountrySheetRoot = () =>
     state.countrySheetRoot ||
-    document.querySelector(
-      "[data-guide-country-sheet-portal]"
-    );
+    document.querySelector("[data-guide-country-sheet-portal]");
 
   const syncCountrySheetBodyLock = () => {
-    const shouldLock = Boolean(
-      state.countryPickerOpen
-    );
+    const shouldLock = Boolean(state.countryPickerOpen);
 
     document.body.classList.toggle(
       "guide-country-sheet-open",
@@ -1958,15 +1811,12 @@
           document.documentElement.scrollTop ||
           0;
 
-        document.body.dataset.guideSheetLocked =
-          "true";
+        document.body.dataset.guideSheetLocked = "true";
         document.body.style.position = "fixed";
-        document.body.style.top =
-          `-${state.bodyScrollY}px`;
+        document.body.style.top = `-${state.bodyScrollY}px`;
         document.body.style.insetInline = "0";
         document.body.style.width = "100%";
       }
-
       return;
     }
 
@@ -1979,26 +1829,19 @@
       document.body.style.insetInline = "";
       document.body.style.width = "";
 
-      window.requestAnimationFrame(() => {
-        window.scrollTo(0, restoreY);
-      });
+      window.requestAnimationFrame(() => window.scrollTo(0, restoreY));
     }
   };
 
   const removeCountrySheetPortal = () => {
     const root = getCountrySheetRoot();
-
-    if (root?.parentNode) {
-      root.parentNode.removeChild(root);
-    }
-
+    if (root?.parentNode) root.parentNode.removeChild(root);
     state.countrySheetRoot = null;
     return true;
   };
 
   const updateSearchResultsOnly = () => {
     const root = getCountrySheetRoot();
-
     if (!root || !state.snapshot) return;
 
     const allCountries =
@@ -2006,54 +1849,26 @@
         ? state.snapshot.allCountries
         : getAllCountries(getGuideEngine());
 
-    const countries = filterCountries(
-      allCountries,
-      state.search
-    );
-
-    const list = root.querySelector(
-      "[data-guide-country-sheet-list]"
-    );
-
-    const count = root.querySelector(
-      ".guide-country-sheet-count span"
-    );
-
-    const clearHost = root.querySelector(
-      ".guide-country-sheet-search"
-    );
-
+    const countries = filterCountries(allCountries, state.search);
+    const list = root.querySelector("[data-guide-country-sheet-list]");
+    const count = root.querySelector(".guide-country-sheet-count span");
+    const clearHost = root.querySelector(".guide-country-sheet-search");
     const existingClear = root.querySelector(
       "[data-guide-clear-sheet-search]"
     );
 
     if (count) {
       count.textContent =
-        `${countries.length} ${
-          countries.length === 1
-            ? "نتيجة"
-            : "دولة"
-        }`;
+        `${countries.length} ${countries.length === 1 ? "نتيجة" : "دولة"}`;
     }
 
-    if (list) {
-      list.innerHTML =
-        renderCountryOptions(countries);
-    }
+    if (list) list.innerHTML = renderCountryOptions(countries);
 
     if (state.search && !existingClear && clearHost) {
-      const clearButton =
-        document.createElement("button");
-
+      const clearButton = document.createElement("button");
       clearButton.type = "button";
-      clearButton.setAttribute(
-        "data-guide-clear-sheet-search",
-        ""
-      );
-      clearButton.setAttribute(
-        "aria-label",
-        "مسح البحث"
-      );
+      clearButton.setAttribute("data-guide-clear-sheet-search", "");
+      clearButton.setAttribute("aria-label", "مسح البحث");
       clearButton.textContent = "×";
       clearHost.appendChild(clearButton);
     } else if (!state.search && existingClear) {
@@ -2061,185 +1876,21 @@
     }
   };
 
-  const bindCountrySheetListeners = (root) => {
-    if (!root) return;
-
-    root.addEventListener("click", (event) => {
-      const closeButton = event.target.closest(
-        "[data-guide-close-country-sheet]"
-      );
-
-      if (closeButton) {
-        closeCountrySheet();
-        return;
-      }
-
-      const clearButton = event.target.closest(
-        "[data-guide-clear-sheet-search]"
-      );
-
-      if (clearButton) {
-        state.search = "";
-
-        const input = root.querySelector(
-          "[data-guide-sheet-search]"
-        );
-
-        if (input) {
-          input.value = "";
-          input.focus();
-        }
-
-        updateSearchResultsOnly();
-        return;
-      }
-
-      const countryButton = event.target.closest(
-        "[data-guide-country-option]"
-      );
-
-      if (countryButton) {
-        openCountry(
-          countryButton.getAttribute(
-            "data-guide-country-option"
-          )
-        );
-        return;
-      }
-
-      const backdrop = event.target.closest(
-        "[data-guide-country-sheet-backdrop]"
-      );
-
-      if (
-        backdrop &&
-        event.target === backdrop
-      ) {
-        closeCountrySheet();
-      }
-    });
-
-    root.addEventListener("input", (event) => {
-      if (
-        !event.target.matches(
-          "[data-guide-sheet-search]"
-        )
-      ) {
-        return;
-      }
-
-      state.search = event.target.value;
-
-      window.clearTimeout(state.searchTimer);
-
-      state.searchTimer = window.setTimeout(
-        updateSearchResultsOnly,
-        70
-      );
-    });
-  };
-
-  const mountCountrySheetPortal = ({
-    focusSearch = true
-  } = {}) => {
-    removeCountrySheetPortal();
-
-    if (!state.snapshot?.ready) return false;
-
-    const root = document.createElement("div");
-
-    root.setAttribute(
-      "data-guide-country-sheet-portal",
-      ""
-    );
-
-    root.innerHTML = renderCountrySheet({
-      ...state.snapshot,
-      countries: filterCountries(
-        state.snapshot.allCountries || [],
-        state.search
-      )
-    });
-
-    document.body.appendChild(root);
-    state.countrySheetRoot = root;
-
-    bindCountrySheetListeners(root);
-    syncCountrySheetBodyLock();
-
-    if (focusSearch) {
-      window.setTimeout(() => {
-        root
-          .querySelector(
-            "[data-guide-sheet-search]"
-          )
-          ?.focus?.();
-      }, 80);
-    }
-
-    return true;
-  };
-
-  const openCountrySheet = async ({
-    focusSearch = true
-  } = {}) => {
-    if (state.countryPickerOpen) {
-      const root = getCountrySheetRoot();
-
-      if (!root) {
-        mountCountrySheetPortal({
-          focusSearch
-        });
-      } else if (focusSearch) {
-        root
-          .querySelector(
-            "[data-guide-sheet-search]"
-          )
-          ?.focus?.();
-      }
-
-      return true;
-    }
-
-    state.countryPickerOpen = true;
-    state.search = "";
-    state.countrySheetReturnFocus =
-      document.activeElement;
-
-    if (!state.snapshot?.ready) {
-      state.snapshot = await buildSnapshot();
-    }
-
-    mountCountrySheetPortal({ focusSearch });
-    emit("country-picker-opened");
-
-    return true;
-  };
-
   const closeCountrySheet = async ({
     preserveSearch = false,
     restoreFocus = true
   } = {}) => {
-    if (
-      !state.countryPickerOpen &&
-      !getCountrySheetRoot()
-    ) {
-      return true;
-    }
+    if (!state.countryPickerOpen && !getCountrySheetRoot()) return true;
 
     state.countryPickerOpen = false;
-
-    if (!preserveSearch) {
-      state.search = "";
-    }
+    if (!preserveSearch) state.search = "";
 
     removeCountrySheetPortal();
     syncCountrySheetBodyLock();
 
     if (
       restoreFocus &&
-      state.countrySheetReturnFocus instanceof
-        window.HTMLElement
+      state.countrySheetReturnFocus instanceof window.HTMLElement
     ) {
       window.setTimeout(() => {
         state.countrySheetReturnFocus?.focus?.();
@@ -2250,6 +1901,109 @@
     }
 
     emit("country-picker-closed");
+    notifyIntegration("country-picker-closed");
+    return true;
+  };
+
+  const bindCountrySheetListeners = (root) => {
+    if (!root || root.dataset.guideListenersBound === "true") return;
+    root.dataset.guideListenersBound = "true";
+
+    root.addEventListener("click", (event) => {
+      if (event.target.closest("[data-guide-close-country-sheet]")) {
+        closeCountrySheet();
+        return;
+      }
+
+      if (event.target.closest("[data-guide-clear-sheet-search]")) {
+        state.search = "";
+        const input = root.querySelector("[data-guide-sheet-search]");
+        if (input) {
+          input.value = "";
+          input.focus();
+        }
+        updateSearchResultsOnly();
+        return;
+      }
+
+      const countryButton = event.target.closest(
+        "[data-guide-country-option]"
+      );
+
+      if (countryButton) {
+        openCountry(
+          countryButton.getAttribute("data-guide-country-option")
+        );
+        return;
+      }
+
+      const backdrop = event.target.closest(
+        "[data-guide-country-sheet-backdrop]"
+      );
+
+      if (backdrop && event.target === backdrop) closeCountrySheet();
+    });
+
+    root.addEventListener("input", (event) => {
+      if (!event.target.matches("[data-guide-sheet-search]")) return;
+
+      state.search = event.target.value;
+      window.clearTimeout(state.searchTimer);
+      state.searchTimer = window.setTimeout(updateSearchResultsOnly, 70);
+    });
+  };
+
+  const mountCountrySheetPortal = ({ focusSearch = true } = {}) => {
+    removeCountrySheetPortal();
+    if (!state.snapshot?.ready) return false;
+
+    const root = document.createElement("div");
+    root.setAttribute("data-guide-country-sheet-portal", "");
+    root.innerHTML = renderCountrySheet({
+      ...state.snapshot,
+      countries: filterCountries(
+        state.snapshot.allCountries || [],
+        state.search
+      )
+    });
+
+    document.body.appendChild(root);
+    state.countrySheetRoot = root;
+    bindCountrySheetListeners(root);
+    syncCountrySheetBodyLock();
+
+    if (focusSearch) {
+      window.setTimeout(() => {
+        root.querySelector("[data-guide-sheet-search]")?.focus?.();
+      }, 80);
+    }
+
+    return true;
+  };
+
+  const openCountrySheet = async ({ focusSearch = true } = {}) => {
+    if (state.countryPickerOpen) {
+      const root = getCountrySheetRoot();
+
+      if (!root) {
+        mountCountrySheetPortal({ focusSearch });
+      } else if (focusSearch) {
+        root.querySelector("[data-guide-sheet-search]")?.focus?.();
+      }
+
+      return true;
+    }
+
+    state.countryPickerOpen = true;
+    state.search = "";
+    state.countrySheetReturnFocus = document.activeElement;
+
+    if (!state.snapshot?.ready) state.snapshot = await buildSnapshot();
+
+    mountCountrySheetPortal({ focusSearch });
+    emit("country-picker-opened");
+    notifyIntegration("country-picker-opened");
+
     return true;
   };
 
@@ -2258,18 +2012,13 @@
   ========================================================= */
 
   const getRecommendationRail = () =>
-    state.container?.querySelector(
-      "[data-guide-recommendation-rail]"
-    ) || null;
+    state.container?.querySelector("[data-guide-recommendation-rail]") ||
+    null;
 
-  const getRecommendationCards = (
-    rail = getRecommendationRail()
-  ) =>
+  const getRecommendationCards = (rail = getRecommendationRail()) =>
     rail
       ? Array.from(
-          rail.querySelectorAll(
-            "[data-guide-recommendation-index]"
-          )
+          rail.querySelectorAll("[data-guide-recommendation-index]")
         )
       : [];
 
@@ -2278,14 +2027,8 @@
     rail = getRecommendationRail()
   ) => {
     const cards = getRecommendationCards(rail);
-
     if (!cards.length) return 0;
-
-    return clamp(
-      number(value, 0),
-      0,
-      cards.length - 1
-    );
+    return clamp(number(value, 0), 0, cards.length - 1);
   };
 
   const getNearestRecommendationIndex = (
@@ -2294,13 +2037,10 @@
     if (!rail) return 0;
 
     const cards = getRecommendationCards(rail);
-
     if (!cards.length) return 0;
 
     const railRect = rail.getBoundingClientRect();
-    const railCenter =
-      railRect.left + railRect.width / 2;
-
+    const railCenter = railRect.left + railRect.width / 2;
     let nearestIndex = 0;
     let nearestDistance = Number.POSITIVE_INFINITY;
 
@@ -2318,25 +2058,19 @@
     return nearestIndex;
   };
 
-  const restoreRecommendationPosition = ({
-    behavior = "auto"
-  } = {}) => {
+  const restoreRecommendationPosition = ({ behavior = "auto" } = {}) => {
     const rail = getRecommendationRail();
-
     if (!rail) return false;
 
     const cards = getRecommendationCards(rail);
-
     if (!cards.length) return false;
 
-    state.recommendationIndex =
-      clampRecommendationIndex(
-        state.recommendationIndex,
-        rail
-      );
+    state.recommendationIndex = clampRecommendationIndex(
+      state.recommendationIndex,
+      rail
+    );
 
     const card = cards[state.recommendationIndex];
-
     if (!card) return false;
 
     window.requestAnimationFrame(() => {
@@ -2351,37 +2085,30 @@
   };
 
   const finishRailInteraction = () => {
-    window.clearTimeout(
-      state.railScrollTimer
-    );
+    window.clearTimeout(state.railScrollTimer);
 
-    state.railScrollTimer =
-      window.setTimeout(() => {
-        state.recommendationIndex =
-          getNearestRecommendationIndex();
+    state.railScrollTimer = window.setTimeout(() => {
+      state.recommendationIndex = getNearestRecommendationIndex();
+      state.isRailInteracting = false;
 
-        state.isRailInteracting = false;
+      if (
+        state.refreshQueued &&
+        !state.rendering &&
+        !state.isUserScrolling
+      ) {
+        const force = state.pendingForceRefresh;
+        state.refreshQueued = false;
+        state.pendingForceRefresh = false;
 
-        if (
-          state.refreshQueued &&
-          !state.rendering &&
-          !state.isUserScrolling
-        ) {
-          const force =
-            state.pendingForceRefresh;
-
-          state.refreshQueued = false;
-          state.pendingForceRefresh = false;
-
-          refresh({
-            force,
-            preserveScroll: true,
-            preserveRail: true,
-            allowDuringScroll: false,
-            allowDuringRail: true
-          });
-        }
-      }, RAIL_IDLE_DELAY);
+        refresh({
+          force,
+          preserveScroll: true,
+          preserveRail: true,
+          allowDuringScroll: false,
+          allowDuringRail: true
+        });
+      }
+    }, RAIL_IDLE_DELAY);
   };
 
   const unbindRecommendationRail = () => {
@@ -2389,44 +2116,23 @@
 
     if (rail) {
       if (state.railScrollHandler) {
-        rail.removeEventListener(
-          "scroll",
-          state.railScrollHandler
-        );
+        rail.removeEventListener("scroll", state.railScrollHandler);
       }
-
       if (state.railTouchStartHandler) {
-        rail.removeEventListener(
-          "touchstart",
-          state.railTouchStartHandler
-        );
+        rail.removeEventListener("touchstart", state.railTouchStartHandler);
       }
-
       if (state.railTouchEndHandler) {
-        rail.removeEventListener(
-          "touchend",
-          state.railTouchEndHandler
-        );
-
-        rail.removeEventListener(
-          "touchcancel",
-          state.railTouchEndHandler
-        );
+        rail.removeEventListener("touchend", state.railTouchEndHandler);
+        rail.removeEventListener("touchcancel", state.railTouchEndHandler);
       }
-
       if (state.railPointerDownHandler) {
         rail.removeEventListener(
           "pointerdown",
           state.railPointerDownHandler
         );
       }
-
       if (state.railPointerUpHandler) {
-        rail.removeEventListener(
-          "pointerup",
-          state.railPointerUpHandler
-        );
-
+        rail.removeEventListener("pointerup", state.railPointerUpHandler);
         rail.removeEventListener(
           "pointercancel",
           state.railPointerUpHandler
@@ -2435,14 +2141,10 @@
     }
 
     if (state.railScrollFrame) {
-      window.cancelAnimationFrame(
-        state.railScrollFrame
-      );
+      window.cancelAnimationFrame(state.railScrollFrame);
     }
 
-    window.clearTimeout(
-      state.railScrollTimer
-    );
+    window.clearTimeout(state.railScrollTimer);
 
     state.railElement = null;
     state.railScrollHandler = null;
@@ -2459,118 +2161,70 @@
     unbindRecommendationRail();
 
     const rail = getRecommendationRail();
-
     if (!rail) return;
 
     state.railElement = rail;
 
     state.railScrollHandler = () => {
       state.isRailInteracting = true;
-
       if (state.railScrollFrame) return;
 
-      state.railScrollFrame =
-        window.requestAnimationFrame(() => {
-          state.railScrollFrame = null;
-          state.recommendationIndex =
-            getNearestRecommendationIndex(rail);
-          finishRailInteraction();
-        });
+      state.railScrollFrame = window.requestAnimationFrame(() => {
+        state.railScrollFrame = null;
+        state.recommendationIndex = getNearestRecommendationIndex(rail);
+        finishRailInteraction();
+      });
     };
 
     state.railTouchStartHandler = () => {
       state.isRailInteracting = true;
-      window.clearTimeout(
-        state.railScrollTimer
-      );
+      window.clearTimeout(state.railScrollTimer);
     };
 
-    state.railTouchEndHandler = () => {
-      finishRailInteraction();
-    };
+    state.railTouchEndHandler = finishRailInteraction;
 
     state.railPointerDownHandler = () => {
       state.isRailInteracting = true;
-      window.clearTimeout(
-        state.railScrollTimer
-      );
+      window.clearTimeout(state.railScrollTimer);
     };
 
-    state.railPointerUpHandler = () => {
-      finishRailInteraction();
-    };
+    state.railPointerUpHandler = finishRailInteraction;
 
-    rail.addEventListener(
-      "scroll",
-      state.railScrollHandler,
-      { passive: true }
-    );
-
-    rail.addEventListener(
-      "touchstart",
-      state.railTouchStartHandler,
-      { passive: true }
-    );
-
-    rail.addEventListener(
-      "touchend",
-      state.railTouchEndHandler,
-      { passive: true }
-    );
-
-    rail.addEventListener(
-      "touchcancel",
-      state.railTouchEndHandler,
-      { passive: true }
-    );
-
-    rail.addEventListener(
-      "pointerdown",
-      state.railPointerDownHandler,
-      { passive: true }
-    );
-
-    rail.addEventListener(
-      "pointerup",
-      state.railPointerUpHandler,
-      { passive: true }
-    );
-
-    rail.addEventListener(
-      "pointercancel",
-      state.railPointerUpHandler,
-      { passive: true }
-    );
+    rail.addEventListener("scroll", state.railScrollHandler, {
+      passive: true
+    });
+    rail.addEventListener("touchstart", state.railTouchStartHandler, {
+      passive: true
+    });
+    rail.addEventListener("touchend", state.railTouchEndHandler, {
+      passive: true
+    });
+    rail.addEventListener("touchcancel", state.railTouchEndHandler, {
+      passive: true
+    });
+    rail.addEventListener("pointerdown", state.railPointerDownHandler, {
+      passive: true
+    });
+    rail.addEventListener("pointerup", state.railPointerUpHandler, {
+      passive: true
+    });
+    rail.addEventListener("pointercancel", state.railPointerUpHandler, {
+      passive: true
+    });
 
     restoreRecommendationPosition();
   };
 
-  /* =========================================================
-     Page events
-  ========================================================= */
-
-  const scrollRecommendationRail = (
-    direction
-  ) => {
+  const scrollRecommendationRail = (direction) => {
     const rail = getRecommendationRail();
-
     if (!rail) return false;
 
     const cards = getRecommendationCards(rail);
-
     if (!cards.length) return false;
 
-    const current =
-      getNearestRecommendationIndex(rail);
-
-    const delta =
-      direction === "next" ? 1 : -1;
-
-    const targetIndex = clamp(
-      current + delta,
-      0,
-      cards.length - 1
-    );
+    const current = getNearestRecommendationIndex(rail);
+    const delta = direction === "next" ? 1 : -1;
+    const targetIndex = clamp(current + delta, 0, cards.length - 1);
 
     state.recommendationIndex = targetIndex;
     state.isRailInteracting = true;
@@ -2585,98 +2239,9 @@
     return true;
   };
 
-  const bindDelegatedPageEvents = () => {
-    if (!state.container) return;
-
-    unbindDelegatedPageEvents();
-
-    state.delegatedClickHandler = (event) => {
-      if (
-        event.target.closest(
-          "[data-guide-open-country-sheet]"
-        )
-      ) {
-        openCountrySheet({
-          focusSearch: true
-        });
-        return;
-      }
-
-      if (
-        event.target.closest(
-          "[data-guide-rail-next]"
-        )
-      ) {
-        scrollRecommendationRail("next");
-        return;
-      }
-
-      if (
-        event.target.closest(
-          "[data-guide-rail-previous]"
-        )
-      ) {
-        scrollRecommendationRail("previous");
-      }
-    };
-
-    state.delegatedChangeHandler = (event) => {
-      const target = event.target;
-
-      if (target.matches("[data-guide-days]")) {
-        state.selectedDays = clamp(
-          number(target.value, 7),
-          1,
-          30
-        );
-      } else if (
-        target.matches("[data-guide-travelers]")
-      ) {
-        state.selectedTravelers = clamp(
-          number(target.value, 2),
-          1,
-          20
-        );
-      } else if (
-        target.matches("[data-guide-month]")
-      ) {
-        state.selectedMonth = clamp(
-          number(target.value, 1),
-          1,
-          12
-        );
-      } else if (
-        target.matches("[data-guide-budget]")
-      ) {
-        state.selectedBudget = Math.max(
-          0,
-          number(target.value, 0)
-        );
-      } else {
-        return;
-      }
-
-      invalidateSnapshotCache();
-
-      refresh({
-        force: true,
-        preserveScroll: true,
-        preserveRail: true,
-        allowDuringScroll: false,
-        allowDuringRail: false
-      });
-    };
-
-    state.container.addEventListener(
-      "click",
-      state.delegatedClickHandler
-    );
-
-    state.container.addEventListener(
-      "change",
-      state.delegatedChangeHandler
-    );
-  };
+  /* =========================================================
+     Page events and scroll guards
+  ========================================================= */
 
   const unbindDelegatedPageEvents = () => {
     if (!state.container) return;
@@ -2699,13 +2264,77 @@
     state.delegatedChangeHandler = null;
   };
 
+  const bindDelegatedPageEvents = () => {
+    if (!state.container) return;
+    unbindDelegatedPageEvents();
+
+    state.delegatedClickHandler = (event) => {
+      if (event.target.closest("[data-guide-open-country-sheet]")) {
+        openCountrySheet({ focusSearch: true });
+        return;
+      }
+
+      if (event.target.closest("[data-guide-rail-next]")) {
+        scrollRecommendationRail("next");
+        return;
+      }
+
+      if (event.target.closest("[data-guide-rail-previous]")) {
+        scrollRecommendationRail("previous");
+      }
+    };
+
+    state.delegatedChangeHandler = (event) => {
+      const target = event.target;
+
+      if (target.matches("[data-guide-days]")) {
+        state.selectedDays = clamp(number(target.value, 7), 1, 30);
+      } else if (target.matches("[data-guide-travelers]")) {
+        state.selectedTravelers = clamp(number(target.value, 2), 1, 20);
+      } else if (target.matches("[data-guide-month]")) {
+        state.selectedMonth = clamp(number(target.value, 1), 1, 12);
+      } else if (target.matches("[data-guide-budget]")) {
+        state.selectedBudget = Math.max(0, number(target.value, 0));
+      } else {
+        return;
+      }
+
+      invalidateSnapshotCache();
+      notifyIntegration("trip-settings-changed");
+
+      refresh({
+        force: true,
+        preserveScroll: true,
+        preserveRail: true,
+        allowDuringScroll: false,
+        allowDuringRail: false
+      });
+    };
+
+    state.container.addEventListener("click", state.delegatedClickHandler);
+    state.container.addEventListener("change", state.delegatedChangeHandler);
+  };
+
+  const unregisterScrollState = () => {
+    if (state.scrollTarget && state.scrollHandler) {
+      state.scrollTarget.removeEventListener("scroll", state.scrollHandler);
+    }
+
+    if (state.scrollFrame) {
+      window.cancelAnimationFrame(state.scrollFrame);
+    }
+
+    state.scrollTarget = null;
+    state.scrollHandler = null;
+    state.scrollFrame = null;
+  };
+
   const registerScrollState = () => {
     unregisterScrollState();
 
     const target =
       state.container &&
-      state.container.scrollHeight >
-        state.container.clientHeight
+      state.container.scrollHeight > state.container.clientHeight
         ? state.container
         : window;
 
@@ -2714,88 +2343,53 @@
     state.scrollHandler = () => {
       if (state.scrollFrame) return;
 
-      state.scrollFrame =
-        window.requestAnimationFrame(() => {
-          state.scrollFrame = null;
-          state.isUserScrolling = true;
+      state.scrollFrame = window.requestAnimationFrame(() => {
+        state.scrollFrame = null;
+        state.isUserScrolling = true;
+        window.clearTimeout(state.scrollTimer);
 
-          window.clearTimeout(
-            state.scrollTimer
-          );
+        state.scrollTimer = window.setTimeout(() => {
+          state.isUserScrolling = false;
 
-          state.scrollTimer =
-            window.setTimeout(() => {
-              state.isUserScrolling = false;
+          if (
+            state.refreshQueued &&
+            !state.rendering &&
+            !state.isRailInteracting
+          ) {
+            const force = state.pendingForceRefresh;
+            state.refreshQueued = false;
+            state.pendingForceRefresh = false;
 
-              if (
-                state.refreshQueued &&
-                !state.rendering &&
-                !state.isRailInteracting
-              ) {
-                const force =
-                  state.pendingForceRefresh;
-
-                state.refreshQueued = false;
-                state.pendingForceRefresh = false;
-
-                refresh({
-                  force,
-                  preserveScroll: true,
-                  preserveRail: true,
-                  allowDuringScroll: true,
-                  allowDuringRail: false
-                });
-              }
-            }, SCROLL_IDLE_DELAY);
-        });
+            refresh({
+              force,
+              preserveScroll: true,
+              preserveRail: true,
+              allowDuringScroll: true,
+              allowDuringRail: false
+            });
+          }
+        }, SCROLL_IDLE_DELAY);
+      });
     };
 
-    target.addEventListener(
-      "scroll",
-      state.scrollHandler,
-      { passive: true }
-    );
-  };
-
-  const unregisterScrollState = () => {
-    if (
-      state.scrollTarget &&
-      state.scrollHandler
-    ) {
-      state.scrollTarget.removeEventListener(
-        "scroll",
-        state.scrollHandler
-      );
-    }
-
-    if (state.scrollFrame) {
-      window.cancelAnimationFrame(
-        state.scrollFrame
-      );
-    }
-
-    state.scrollTarget = null;
-    state.scrollHandler = null;
-    state.scrollFrame = null;
+    target.addEventListener("scroll", state.scrollHandler, {
+      passive: true
+    });
   };
 
   /* =========================================================
-     Refresh and navigation
+     Refresh, navigation and integration event queue
   ========================================================= */
 
   const refresh = async (options = {}) => {
-    if (!state.container || !state.mounted) {
-      return false;
-    }
+    if (!state.container || !state.mounted || state.destroyed) return false;
 
-    const requestedForce =
-      options.force === true;
+    const requestedForce = options.force === true;
 
     if (state.rendering) {
       state.refreshQueued = true;
       state.pendingForceRefresh =
-        state.pendingForceRefresh ||
-        requestedForce;
+        state.pendingForceRefresh || requestedForce;
       return false;
     }
 
@@ -2805,8 +2399,7 @@
     ) {
       state.refreshQueued = true;
       state.pendingForceRefresh =
-        state.pendingForceRefresh ||
-        requestedForce;
+        state.pendingForceRefresh || requestedForce;
       return false;
     }
 
@@ -2816,65 +2409,59 @@
     ) {
       state.refreshQueued = true;
       state.pendingForceRefresh =
-        state.pendingForceRefresh ||
-        requestedForce;
+        state.pendingForceRefresh || requestedForce;
       return false;
     }
 
     state.rendering = true;
-
+    const generation = ++state.refreshGeneration;
     const scrollTop = getScrollTop();
     const preservedRecommendationIndex =
       options.preserveRail === false
         ? 0
         : getNearestRecommendationIndex();
 
-    state.recommendationIndex =
-      preservedRecommendationIndex;
+    state.recommendationIndex = preservedRecommendationIndex;
 
     try {
-      const snapshot = await buildSnapshot({
-        force: requestedForce
-      });
+      const snapshot = await buildSnapshot({ force: requestedForce });
+
+      if (
+        generation !== state.refreshGeneration ||
+        !state.mounted ||
+        !state.container
+      ) {
+        return false;
+      }
 
       state.snapshot = snapshot;
-
       unbindRecommendationRail();
-
-      state.container.innerHTML =
-        renderPage(snapshot);
-
+      state.container.innerHTML = renderPage(snapshot);
       bindRecommendationRail();
 
-      if (options.preserveScroll !== false) {
-        restoreScrollTop(scrollTop);
-      }
-
-      if (options.preserveRail !== false) {
-        restoreRecommendationPosition();
-      }
+      if (options.preserveScroll !== false) restoreScrollTop(scrollTop);
+      if (options.preserveRail !== false) restoreRecommendationPosition();
 
       emit("refreshed", {
         activeView: state.activeView,
         activeSection: state.activeSection,
-        selectedCountryCode:
-          state.selectedCountryCode,
-        recommendationIndex:
-          state.recommendationIndex
+        selectedCountryCode: state.selectedCountryCode,
+        recommendationIndex: state.recommendationIndex
       });
 
       return true;
     } finally {
-      state.rendering = false;
+      if (generation === state.refreshGeneration) {
+        state.rendering = false;
+      }
 
       if (
         state.refreshQueued &&
         !state.isUserScrolling &&
-        !state.isRailInteracting
+        !state.isRailInteracting &&
+        !state.destroyed
       ) {
-        const force =
-          state.pendingForceRefresh;
-
+        const force = state.pendingForceRefresh;
         state.refreshQueued = false;
         state.pendingForceRefresh = false;
 
@@ -2891,35 +2478,67 @@
     }
   };
 
+  const scheduleIntegrationRefresh = (eventName, detail = {}) => {
+    if (!state.mounted || state.destroyed) return;
+
+    const now = Date.now();
+    const eventKey = `${eventName}|${text(
+      detail.countryCode || detail.tripId || detail.planId
+    )}`;
+
+    if (
+      eventKey === state.lastIntegrationEventKey &&
+      now - state.lastIntegrationEventAt < 250
+    ) {
+      return;
+    }
+
+    state.lastIntegrationEventKey = eventKey;
+    state.lastIntegrationEventAt = now;
+
+    window.clearTimeout(state.integrationRefreshTimer);
+    state.integrationRefreshTimer = window.setTimeout(() => {
+      invalidateSnapshotCache();
+
+      if (
+        state.rendering ||
+        state.isUserScrolling ||
+        state.isRailInteracting
+      ) {
+        state.refreshQueued = true;
+        state.pendingForceRefresh = true;
+        return;
+      }
+
+      refresh({
+        force: true,
+        preserveScroll: true,
+        preserveRail: true,
+        allowDuringScroll: false,
+        allowDuringRail: false
+      });
+    }, INTEGRATION_REFRESH_DELAY);
+  };
+
   const openCountry = async (countryCode) => {
     const guide = getGuideEngine();
-    const code = text(
-      countryCode
-    ).toUpperCase();
+    const code = text(countryCode).toUpperCase();
 
     if (!guide || !code) {
-      safeToast(
-        "تعذر فتح الدولة.",
-        "error"
-      );
+      safeToast("تعذر فتح الدولة.", "error");
       return false;
     }
 
-    const country =
-      guide.selectCountry?.(code);
+    const country = guide.selectCountry?.(code);
 
     if (!country) {
-      safeToast(
-        "لا توجد بيانات لهذه الدولة.",
-        "info"
-      );
+      safeToast("لا توجد بيانات لهذه الدولة.", "info");
       return false;
     }
 
     state.selectedCountryCode = code;
     state.selectedDays =
-      country.recommendedDays?.ideal ||
-      state.selectedDays;
+      country.recommendedDays?.ideal || state.selectedDays;
     state.activeView = "country";
     state.activeSection = "overview";
     state.recommendationIndex = 0;
@@ -2928,12 +2547,18 @@
 
     removeCountrySheetPortal();
     syncCountrySheetBodyLock();
-
     invalidateSnapshotCache();
 
-    getStore()?.setSelectedGuideCountry?.(
+    await callFirst(
+      getStore(),
+      ["setSelectedGuideCountry", "setGuideCountry"],
       code
     );
+
+    await notifyIntegration("country-opened", {
+      countryCode: code,
+      country
+    });
 
     await refresh({
       force: true,
@@ -2944,409 +2569,424 @@
     });
 
     restoreScrollTop(0);
-
-    emit("country-opened", {
-      countryCode: code
-    });
-
+    emit("country-opened", { countryCode: code });
     return true;
   };
 
   /* =========================================================
-     Actions
+     UI actions
   ========================================================= */
 
   const registerActions = () => {
     const ui = getUI();
 
-    if (
-      !ui ||
-      typeof ui.registerAction !== "function"
-    ) {
-      return;
-    }
+    if (!ui || typeof ui.registerAction !== "function") return;
 
     const register = (name, handler) => {
       if (ui.hasAction?.(name)) return;
 
-      const unsubscribe =
-        ui.registerAction(name, handler);
+      const unsubscribe = ui.registerAction(name, handler);
 
-      if (
-        typeof unsubscribe === "function"
-      ) {
-        state.actionUnsubscribers.push(
-          unsubscribe
-        );
+      if (typeof unsubscribe === "function") {
+        state.actionUnsubscribers.push(unsubscribe);
       }
     };
 
-    register(
-      "guide-show-discover",
-      async () => {
-        state.activeView = "discover";
-        state.activeSection = "overview";
-        state.selectedCountryCode = "";
-        state.search = "";
-        state.countryPickerOpen = false;
-        state.recommendationIndex = 0;
+    register("guide-show-discover", async () => {
+      state.activeView = "discover";
+      state.activeSection = "overview";
+      state.selectedCountryCode = "";
+      state.search = "";
+      state.countryPickerOpen = false;
+      state.recommendationIndex = 0;
 
-        removeCountrySheetPortal();
-        syncCountrySheetBodyLock();
+      removeCountrySheetPortal();
+      syncCountrySheetBodyLock();
+      invalidateSnapshotCache();
+
+      getGuideEngine()?.clearSelection?.();
+      await notifyIntegration("discover-opened");
+
+      await refresh({
+        force: true,
+        preserveScroll: false,
+        preserveRail: false,
+        allowDuringScroll: true,
+        allowDuringRail: true
+      });
+
+      restoreScrollTop(0);
+      return true;
+    });
+
+    register("guide-focus-country-search", async () => {
+      state.activeView = "discover";
+
+      await refresh({
+        preserveScroll: true,
+        preserveRail: true,
+        allowDuringScroll: true,
+        allowDuringRail: true
+      });
+
+      window.setTimeout(() => {
+        state.container
+          ?.querySelector("[data-guide-search-card]")
+          ?.scrollIntoView?.({
+            behavior: "smooth",
+            block: "center"
+          });
+
+        openCountrySheet({ focusSearch: true });
+      }, 80);
+
+      return true;
+    });
+
+    register("guide-scroll-annual-plans", async () => {
+      state.activeView = "discover";
+
+      await refresh({
+        preserveScroll: true,
+        preserveRail: true,
+        allowDuringScroll: true,
+        allowDuringRail: true
+      });
+
+      window.setTimeout(() => {
+        state.container
+          ?.querySelector("[data-guide-annual-plans]")
+          ?.scrollIntoView?.({
+            behavior: "smooth",
+            block: "start"
+          });
+      }, 50);
+
+      return true;
+    });
+
+    register("guide-open-country", ({ params }) =>
+      openCountry(params.countryCode || params.country || params.code)
+    );
+
+    register("guide-set-section", async ({ params }) => {
+      const section = text(params.section);
+
+      if (!VIEW_SECTIONS.some((item) => item.id === section)) {
+        return false;
+      }
+
+      state.activeSection = section;
+      invalidateSnapshotCache();
+
+      await notifyIntegration("section-changed", { section });
+
+      await refresh({
+        force: section === "planner",
+        preserveScroll: true,
+        preserveRail: true,
+        allowDuringScroll: true,
+        allowDuringRail: false
+      });
+
+      return true;
+    });
+
+    register("guide-toggle-wishlist", async ({ params }) => {
+      const code = text(params.countryCode).toUpperCase();
+      if (!code) return false;
+
+      try {
+        const result = await getGuideEngine()?.toggleWishlist?.(code);
+
+        safeToast(
+          result?.wishlisted
+            ? "تمت إضافة الدولة إلى الأمنيات."
+            : "تمت إزالة الدولة من الأمنيات.",
+          "success"
+        );
+
+        await notifyIntegration("wishlist-updated", {
+          countryCode: code,
+          wishlisted: Boolean(result?.wishlisted),
+          result
+        });
+
+        await callFirst(
+          getTravelSync(),
+          ["syncWishlist", "queueSync", "syncNow"],
+          buildTravelContext({
+            countryCode: code,
+            wishlistResult: result
+          })
+        );
+
         invalidateSnapshotCache();
-
-        getGuideEngine()?.clearSelection?.();
 
         await refresh({
           force: true,
-          preserveScroll: false,
-          preserveRail: false,
-          allowDuringScroll: true,
-          allowDuringRail: true
-        });
-
-        restoreScrollTop(0);
-        return true;
-      }
-    );
-
-    register(
-      "guide-focus-country-search",
-      async () => {
-        state.activeView = "discover";
-
-        await refresh({
-          preserveScroll: true,
-          preserveRail: true,
-          allowDuringScroll: true,
-          allowDuringRail: true
-        });
-
-        window.setTimeout(() => {
-          state.container
-            ?.querySelector(
-              "[data-guide-search-card]"
-            )
-            ?.scrollIntoView?.({
-              behavior: "smooth",
-              block: "center"
-            });
-
-          openCountrySheet({
-            focusSearch: true
-          });
-        }, 80);
-
-        return true;
-      }
-    );
-
-    register(
-      "guide-scroll-annual-plans",
-      async () => {
-        state.activeView = "discover";
-
-        await refresh({
-          preserveScroll: true,
-          preserveRail: true,
-          allowDuringScroll: true,
-          allowDuringRail: true
-        });
-
-        window.setTimeout(() => {
-          state.container
-            ?.querySelector(
-              "[data-guide-annual-plans]"
-            )
-            ?.scrollIntoView?.({
-              behavior: "smooth",
-              block: "start"
-            });
-        }, 50);
-
-        return true;
-      }
-    );
-
-    register(
-      "guide-open-country",
-      ({ params }) =>
-        openCountry(
-          params.countryCode ||
-          params.country ||
-          params.code
-        )
-    );
-
-    register(
-      "guide-set-section",
-      async ({ params }) => {
-        const section = text(
-          params.section
-        );
-
-        if (
-          !VIEW_SECTIONS.some(
-            (item) => item.id === section
-          )
-        ) {
-          return false;
-        }
-
-        state.activeSection = section;
-        invalidateSnapshotCache();
-
-        await refresh({
-          force: section === "planner",
           preserveScroll: true,
           preserveRail: true,
           allowDuringScroll: true,
           allowDuringRail: false
         });
 
-        return true;
+        return result || true;
+      } catch (error) {
+        console.error("TIC Guide wishlist error:", error);
+        safeToast("تعذر تحديث قائمة الأمنيات.", "error");
+        return false;
       }
-    );
+    });
 
-    register(
-      "guide-toggle-wishlist",
-      async ({ params }) => {
-        const code = text(
-          params.countryCode
-        ).toUpperCase();
+    register("guide-add-annual-plan", async ({ params }) => {
+      const code = text(
+        params.countryCode || state.selectedCountryCode
+      ).toUpperCase();
 
-        if (!code) return false;
+      if (!code) return false;
 
-        try {
-          const result =
-            await getGuideEngine()
-              ?.toggleWishlist?.(code);
+      try {
+        const payload = {
+          year: new Date().getFullYear(),
+          month: state.selectedMonth,
+          days: state.selectedDays,
+          travelers: state.selectedTravelers,
+          budgetAED: state.selectedBudget,
+          status: "planned",
+          source: "guide"
+        };
 
-          safeToast(
-            result?.wishlisted
-              ? "تمت إضافة الدولة إلى الأمنيات."
-              : "تمت إزالة الدولة من الأمنيات.",
-            "success"
-          );
-
-          invalidateSnapshotCache();
-
-          await refresh({
-            force: true,
-            preserveScroll: true,
-            preserveRail: true,
-            allowDuringScroll: true,
-            allowDuringRail: false
-          });
-
-          return result || true;
-        } catch (error) {
-          console.error(
-            "TIC Guide wishlist error:",
-            error
-          );
-
-          safeToast(
-            "تعذر تحديث قائمة الأمنيات.",
-            "error"
-          );
-
-          return false;
-        }
-      }
-    );
-
-    register(
-      "guide-add-annual-plan",
-      async ({ params }) => {
-        const code = text(
-          params.countryCode ||
-          state.selectedCountryCode
-        ).toUpperCase();
-
-        if (!code) return false;
-
-        try {
-          const plan =
-            await getGuideEngine()
-              ?.addToAnnualPlan?.(
-                code,
-                {
-                  year:
-                    new Date().getFullYear(),
-                  month:
-                    state.selectedMonth,
-                  days:
-                    state.selectedDays,
-                  travelers:
-                    state.selectedTravelers,
-                  budgetAED:
-                    state.selectedBudget,
-                  status: "planned"
-                }
-              );
-
-          safeToast(
-            plan?.duplicate
-              ? "هذه الخطة موجودة مسبقاً."
-              : "تمت إضافة الدولة إلى خطتك السنوية.",
-            "success"
-          );
-
-          invalidateSnapshotCache();
-
-          await refresh({
-            force: true,
-            preserveScroll: true,
-            preserveRail: true,
-            allowDuringScroll: true,
-            allowDuringRail: false
-          });
-
-          return plan || true;
-        } catch (error) {
-          console.error(
-            "TIC Guide annual plan error:",
-            error
-          );
-
-          safeToast(
-            "تعذر حفظ الخطة السنوية.",
-            "error"
-          );
-
-          return false;
-        }
-      }
-    );
-
-    register(
-      "guide-create-trip",
-      async ({ params }) => {
-        const code = text(
-          params.countryCode ||
-          state.selectedCountryCode
-        ).toUpperCase();
-
-        if (!code) return false;
-
-        try {
-          const country =
-            getGuideEngine()?.getCountry?.(
-              code
-            );
-
-          const itinerary =
-            getTravelAI()
-              ?.generateItinerary?.(
-                country,
-                {
-                  days:
-                    state.selectedDays,
-                  travelers:
-                    state.selectedTravelers,
-                  month:
-                    state.selectedMonth,
-                  budget:
-                    state.selectedBudget
-                }
-              );
-
-          const trip =
-            await getGuideEngine()
-              ?.createTripDraft?.(
-                code,
-                {
-                  days:
-                    state.selectedDays,
-                  travelers:
-                    state.selectedTravelers,
-                  budget:
-                    state.selectedBudget,
-                  itinerary,
-                  checklist: {
-                    itineraryReady:
-                      Boolean(itinerary)
-                  }
-                }
-              );
-
-          safeToast(
-            "تم إنشاء الرحلة داخل رحلاتي.",
-            "success"
-          );
-
-          emit("trip-created", {
-            countryCode: code,
-            tripId: trip?.id
-          });
-
-          return trip || true;
-        } catch (error) {
-          console.error(
-            "TIC Guide trip creation error:",
-            error
-          );
-
-          safeToast(
-            "تعذر إنشاء الرحلة.",
-            "error"
-          );
-
-          return false;
-        }
-      }
-    );
-
-    register(
-      "guide-convert-plan-to-trip",
-      async ({ params }) => {
-        const planId = text(
-          params.planId
+        const plan = await getGuideEngine()?.addToAnnualPlan?.(
+          code,
+          payload
         );
 
-        if (!planId) return false;
+        safeToast(
+          plan?.duplicate
+            ? "هذه الخطة موجودة مسبقاً."
+            : "تمت إضافة الدولة إلى خطتك السنوية.",
+          "success"
+        );
 
-        try {
-          const result =
-            await getPlannerEngine()
-              ?.convertPlanToTrip?.(
-                planId
-              );
+        await notifyIntegration("annual-plan-updated", {
+          countryCode: code,
+          plan
+        });
 
-          safeToast(
-            result?.duplicate
-              ? "هذه الخطة مرتبطة برحلة مسبقاً."
-              : "تم تحويل الخطة إلى رحلة.",
-            "success"
+        await callFirst(
+          getTravelSync(),
+          ["syncAnnualPlans", "queueSync", "syncNow"],
+          buildTravelContext({ countryCode: code, plan })
+        );
+
+        invalidateSnapshotCache();
+
+        await refresh({
+          force: true,
+          preserveScroll: true,
+          preserveRail: true,
+          allowDuringScroll: true,
+          allowDuringRail: false
+        });
+
+        return plan || true;
+      } catch (error) {
+        console.error("TIC Guide annual plan error:", error);
+        safeToast("تعذر حفظ الخطة السنوية.", "error");
+        return false;
+      }
+    });
+
+    register("guide-create-trip", async ({ params }) => {
+      const code = text(
+        params.countryCode || state.selectedCountryCode
+      ).toUpperCase();
+
+      if (!code) return false;
+
+      try {
+        const country = getGuideEngine()?.getCountry?.(code);
+        const context = buildTravelContext({ countryCode: code, country });
+
+        const itinerary =
+          (await callFirst(
+            getTravelBrain(),
+            ["generateGuideItinerary", "buildItinerary", "planTrip"],
+            country,
+            context
+          )) ||
+          getTravelAI()?.generateItinerary?.(
+            country,
+            {
+              days: state.selectedDays,
+              travelers: state.selectedTravelers,
+              month: state.selectedMonth,
+              budget: state.selectedBudget
+            }
           );
 
-          invalidateSnapshotCache();
+        const draftPayload = {
+          days: state.selectedDays,
+          travelers: state.selectedTravelers,
+          month: state.selectedMonth,
+          budget: state.selectedBudget,
+          itinerary,
+          source: "guide",
+          checklist: {
+            itineraryReady: Boolean(itinerary)
+          }
+        };
 
-          await refresh({
-            force: true,
-            preserveScroll: true,
-            preserveRail: true,
-            allowDuringScroll: true,
-            allowDuringRail: false
-          });
+        const trip = await getGuideEngine()?.createTripDraft?.(
+          code,
+          draftPayload
+        );
 
-          return result || true;
+        await callFirst(
+          getTravelAssistant(),
+          [
+            "onTripDraftCreated",
+            "prepareTripAssistant",
+            "analyzeTrip"
+          ],
+          trip,
+          context
+        );
+
+        await callFirst(
+          getTravelImport(),
+          [
+            "registerTripDraft",
+            "attachPendingImports",
+            "linkTrip"
+          ],
+          trip,
+          context
+        );
+
+        await callFirst(
+          getTravelSync(),
+          ["syncTrip", "queueSync", "syncNow"],
+          trip,
+          context
+        );
+
+        safeToast("تم إنشاء الرحلة داخل رحلاتي.", "success");
+
+        emit("trip-created", {
+          countryCode: code,
+          tripId: trip?.id
+        });
+
+        await notifyIntegration("trip-created", {
+          countryCode: code,
+          tripId: trip?.id,
+          trip
+        });
+
+        return trip || true;
+      } catch (error) {
+        console.error("TIC Guide trip creation error:", error);
+        safeToast("تعذر إنشاء الرحلة.", "error");
+        return false;
+      }
+    });
+
+    register("guide-convert-plan-to-trip", async ({ params }) => {
+      const planId = text(params.planId);
+      if (!planId) return false;
+
+      try {
+        const result = await getPlannerEngine()?.convertPlanToTrip?.(
+          planId
+        );
+
+        safeToast(
+          result?.duplicate
+            ? "هذه الخطة مرتبطة برحلة مسبقاً."
+            : "تم تحويل الخطة إلى رحلة.",
+          "success"
+        );
+
+        await notifyIntegration("annual-plan-converted", {
+          planId,
+          result
+        });
+
+        await callFirst(
+          getTravelAssistant(),
+          ["onPlanConverted", "analyzeTrip"],
+          result,
+          buildTravelContext({ planId })
+        );
+
+        await callFirst(
+          getTravelSync(),
+          ["syncTrip", "queueSync", "syncNow"],
+          result,
+          buildTravelContext({ planId })
+        );
+
+        invalidateSnapshotCache();
+
+        await refresh({
+          force: true,
+          preserveScroll: true,
+          preserveRail: true,
+          allowDuringScroll: true,
+          allowDuringRail: false
+        });
+
+        return result || true;
+      } catch (error) {
+        console.error("TIC Guide plan conversion error:", error);
+        safeToast("تعذر تحويل الخطة إلى رحلة.", "error");
+        return false;
+      }
+    });
+  };
+
+  /* =========================================================
+     Store and integration subscriptions
+  ========================================================= */
+
+  const subscribeSafely = (service, callback, eventNames = []) => {
+    if (!service) return [];
+
+    const unsubscribers = [];
+
+    if (typeof service.subscribe === "function") {
+      try {
+        const unsubscribe = service.subscribe(callback);
+        if (typeof unsubscribe === "function") {
+          unsubscribers.push(unsubscribe);
+        }
+      } catch (error) {
+        console.error("TIC Guide service subscription error:", error);
+      }
+    }
+
+    if (typeof service.on === "function") {
+      eventNames.forEach((eventName) => {
+        try {
+          const unsubscribe = service.on(eventName, callback);
+
+          if (typeof unsubscribe === "function") {
+            unsubscribers.push(unsubscribe);
+          } else if (typeof service.off === "function") {
+            unsubscribers.push(() => service.off(eventName, callback));
+          }
         } catch (error) {
           console.error(
-            "TIC Guide plan conversion error:",
+            `TIC Guide ${eventName} subscription error:`,
             error
           );
-
-          safeToast(
-            "تعذر تحويل الخطة إلى رحلة.",
-            "error"
-          );
-
-          return false;
         }
-      }
-    );
+      });
+    }
+
+    return unsubscribers;
   };
 
   const subscribeToStore = () => {
@@ -3360,39 +3000,135 @@
       return;
     }
 
-    state.unsubscribeStore =
-      store.subscribe(() => {
-        if (!state.mounted) {
+    state.unsubscribeStore = store.subscribe(() => {
+      if (!state.mounted || state.destroyed) return;
+
+      window.clearTimeout(state.storeRefreshTimer);
+
+      state.storeRefreshTimer = window.setTimeout(() => {
+        invalidateSnapshotCache();
+
+        if (
+          state.rendering ||
+          state.isUserScrolling ||
+          state.isRailInteracting
+        ) {
+          state.refreshQueued = true;
+          state.pendingForceRefresh = true;
           return;
         }
 
-        window.clearTimeout(
-          state.storeRefreshTimer
-        );
+        refresh({
+          force: true,
+          preserveScroll: true,
+          preserveRail: true,
+          allowDuringScroll: false,
+          allowDuringRail: false
+        });
+      }, STORE_REFRESH_DELAY);
+    });
+  };
 
-        state.storeRefreshTimer =
-          window.setTimeout(() => {
-            invalidateSnapshotCache();
+  const unsubscribeIntegrations = () => {
+    state.integrationUnsubscribers.forEach((unsubscribe) => {
+      try {
+        unsubscribe?.();
+      } catch (_) {
+        // Ignore cleanup errors.
+      }
+    });
 
-            if (
-              state.rendering ||
-              state.isUserScrolling ||
-              state.isRailInteracting
-            ) {
-              state.refreshQueued = true;
-              state.pendingForceRefresh = true;
-              return;
-            }
+    state.integrationUnsubscribers = [];
+  };
 
-            refresh({
-              force: true,
-              preserveScroll: true,
-              preserveRail: true,
-              allowDuringScroll: false,
-              allowDuringRail: false
-            });
-          }, STORE_REFRESH_DELAY);
-      });
+  const subscribeToIntegrations = () => {
+    if (state.integrationUnsubscribers.length) return;
+
+    const onIntegrationEvent = (event = {}) => {
+      const detail = event?.detail || event || {};
+      const eventName = text(
+        detail.type || detail.eventName || detail.action || "integration"
+      );
+
+      scheduleIntegrationRefresh(eventName, detail);
+    };
+
+    const definitions = [
+      {
+        service: getTravelBrain(),
+        events: [
+          "updated",
+          "analysis-updated",
+          "recommendations-updated"
+        ]
+      },
+      {
+        service: getTravelAssistant(),
+        events: [
+          "updated",
+          "assistant-updated",
+          "trip-updated"
+        ]
+      },
+      {
+        service: getTravelImport(),
+        events: [
+          "imported",
+          "trip-imported",
+          "document-imported"
+        ]
+      },
+      {
+        service: getTravelSync(),
+        events: [
+          "synced",
+          "sync-complete",
+          "remote-update"
+        ]
+      },
+      {
+        service: getApp(),
+        events: [
+          "state-changed",
+          "page-data-updated"
+        ]
+      }
+    ];
+
+    definitions.forEach(({ service, events }) => {
+      state.integrationUnsubscribers.push(
+        ...subscribeSafely(service, onIntegrationEvent, events)
+      );
+    });
+
+    const windowEvents = [
+      "tic:travel-brain:updated",
+      "tic:travel-assistant:updated",
+      "tic:travel-import:completed",
+      "tic:travel-sync:completed",
+      "tic:store:changed",
+      "tic:app:data-updated"
+    ];
+
+    windowEvents.forEach((eventName) => {
+      window.addEventListener(eventName, onIntegrationEvent);
+      state.integrationUnsubscribers.push(() =>
+        window.removeEventListener(eventName, onIntegrationEvent)
+      );
+    });
+  };
+
+  const initializeIntegrations = async () => {
+    const context = buildTravelContext({ phase: "init" });
+
+    await Promise.allSettled([
+      callFirst(getTravelBrain(), ["init", "initialize"], context),
+      callFirst(getTravelAssistant(), ["init", "initialize"], context),
+      callFirst(getTravelImport(), ["init", "initialize"], context),
+      callFirst(getTravelSync(), ["init", "initialize"], context)
+    ]);
+
+    subscribeToIntegrations();
   };
 
   /* =========================================================
@@ -3404,40 +3140,45 @@
     title: "دليل السفر",
     icon: "⌕",
     version: PAGE_VERSION,
+    baseVersion: BASE_VERSION,
 
     async init() {
-      if (state.initialized) {
-        return this.diagnostics();
-      }
+      if (state.initialized) return this.diagnostics();
+      if (state.initializing) return state.initializing;
 
-      registerActions();
-      subscribeToStore();
+      state.destroyed = false;
 
-      state.escapeHandler = (event) => {
-        if (
-          event.key === "Escape" &&
-          state.countryPickerOpen
-        ) {
-          closeCountrySheet();
+      state.initializing = (async () => {
+        registerActions();
+        subscribeToStore();
+
+        if (!state.escapeHandler) {
+          state.escapeHandler = (event) => {
+            if (event.key === "Escape" && state.countryPickerOpen) {
+              closeCountrySheet();
+            }
+          };
+
+          document.addEventListener("keydown", state.escapeHandler);
         }
-      };
 
-      document.addEventListener(
-        "keydown",
-        state.escapeHandler
-      );
+        await Promise.allSettled([
+          getPlannerEngine()?.init?.(),
+          getTravelAI()?.init?.(),
+          getGuideEngine()?.init?.(),
+          initializeIntegrations()
+        ]);
 
-      await getPlannerEngine()?.init?.();
-      await getTravelAI()?.init?.();
-      await getGuideEngine()?.init?.();
+        state.initialized = true;
+        state.initializing = null;
 
-      state.initialized = true;
+        emit("initialized", { version: PAGE_VERSION });
+        notifyIntegration("page-initialized");
 
-      emit("initialized", {
-        version: PAGE_VERSION
-      });
+        return this.diagnostics();
+      })();
 
-      return this.diagnostics();
+      return state.initializing;
     },
 
     async render(context = {}) {
@@ -3450,27 +3191,20 @@
       ).toUpperCase();
 
       if (routeCode) {
-        state.selectedCountryCode =
-          routeCode;
+        state.selectedCountryCode = routeCode;
         state.activeView = "country";
         invalidateSnapshotCache();
       }
 
-      const snapshot =
-        await buildSnapshot();
-
+      const snapshot = await buildSnapshot();
       state.snapshot = snapshot;
-
       return renderPage(snapshot);
     },
 
     async mount(context = {}) {
       await this.init();
 
-      const container =
-        resolveContainer(
-          context.container
-        );
+      const container = resolveContainer(context.container);
 
       if (!container) {
         throw new Error(
@@ -3478,8 +3212,13 @@
         );
       }
 
+      if (state.mounted && state.container && state.container !== container) {
+        this.unmount();
+      }
+
       state.container = container;
       state.mounted = true;
+      state.destroyed = false;
 
       const routeCode = text(
         context.countryCode ||
@@ -3488,43 +3227,38 @@
       ).toUpperCase();
 
       if (routeCode) {
-        state.selectedCountryCode =
-          routeCode;
+        state.selectedCountryCode = routeCode;
         state.activeView = "country";
         invalidateSnapshotCache();
       }
 
-      const snapshot =
-        await buildSnapshot();
-
+      const snapshot = await buildSnapshot();
       state.snapshot = snapshot;
-      container.innerHTML =
-        renderPage(snapshot);
+      container.innerHTML = renderPage(snapshot);
 
       bindDelegatedPageEvents();
       registerScrollState();
       bindRecommendationRail();
 
       emit("mounted", {
-        totalCountries:
-          snapshot.summary
-            ?.totalCountries || 0,
-        selectedCountryCode:
-          state.selectedCountryCode
+        totalCountries: snapshot.summary?.totalCountries || 0,
+        selectedCountryCode: state.selectedCountryCode
+      });
+
+      notifyIntegration("page-mounted", {
+        selectedCountryCode: state.selectedCountryCode
       });
 
       return container;
     },
 
     async afterEnter(context = {}) {
-      const container =
-        resolveContainer(
-          context.container
-        );
+      const container = resolveContainer(context.container);
 
       if (container) {
         state.container = container;
         state.mounted = true;
+        state.destroyed = false;
       }
 
       removeCountrySheetPortal();
@@ -3535,6 +3269,7 @@
       registerScrollState();
       bindRecommendationRail();
 
+      notifyIntegration("page-entered");
       return true;
     },
 
@@ -3545,28 +3280,19 @@
 
       state.mounted = false;
       state.container = null;
+      state.refreshGeneration += 1;
 
-      window.clearTimeout(
-        state.searchTimer
-      );
-
-      window.clearTimeout(
-        state.storeRefreshTimer
-      );
-
-      window.clearTimeout(
-        state.scrollTimer
-      );
-
-      window.clearTimeout(
-        state.railScrollTimer
-      );
+      window.clearTimeout(state.searchTimer);
+      window.clearTimeout(state.storeRefreshTimer);
+      window.clearTimeout(state.integrationRefreshTimer);
+      window.clearTimeout(state.scrollTimer);
+      window.clearTimeout(state.railScrollTimer);
 
       state.refreshQueued = false;
       state.pendingForceRefresh = false;
       state.isUserScrolling = false;
       state.isRailInteracting = false;
-
+      state.rendering = false;
       state.countryPickerOpen = false;
       state.search = "";
 
@@ -3574,6 +3300,7 @@
       syncCountrySheetBodyLock();
 
       emit("unmounted");
+      notifyIntegration("page-unmounted");
       return true;
     },
 
@@ -3581,18 +3308,14 @@
     openCountry,
 
     subscribe(listener) {
-      if (
-        typeof listener !== "function"
-      ) {
+      if (typeof listener !== "function") {
         throw new TypeError(
           "TIC Guide subscriber must be a function."
         );
       }
 
       state.subscribers.add(listener);
-
-      return () =>
-        state.subscribers.delete(listener);
+      return () => state.subscribers.delete(listener);
     },
 
     getSnapshot() {
@@ -3601,29 +3324,24 @@
 
     destroy() {
       this.unmount();
+      state.destroyed = true;
 
-      if (
-        typeof state.unsubscribeStore ===
-        "function"
-      ) {
+      if (typeof state.unsubscribeStore === "function") {
         state.unsubscribeStore();
       }
 
-      state.actionUnsubscribers.forEach(
-        (unsubscribe) => {
-          try {
-            unsubscribe?.();
-          } catch (_) {
-            // Ignore cleanup errors.
-          }
+      unsubscribeIntegrations();
+
+      state.actionUnsubscribers.forEach((unsubscribe) => {
+        try {
+          unsubscribe?.();
+        } catch (_) {
+          // Ignore cleanup errors.
         }
-      );
+      });
 
       if (state.escapeHandler) {
-        document.removeEventListener(
-          "keydown",
-          state.escapeHandler
-        );
+        document.removeEventListener("keydown", state.escapeHandler);
       }
 
       state.unsubscribeStore = null;
@@ -3634,6 +3352,7 @@
       state.cacheKey = "";
       state.escapeHandler = null;
       state.initialized = false;
+      state.initializing = null;
 
       return true;
     },
@@ -3642,64 +3361,49 @@
       return {
         id: PAGE_ID,
         version: PAGE_VERSION,
+        baseVersion: BASE_VERSION,
         initialized: state.initialized,
         mounted: state.mounted,
+        destroyed: state.destroyed,
         activeView: state.activeView,
-        activeSection:
-          state.activeSection,
-        selectedCountryCode:
-          state.selectedCountryCode,
+        activeSection: state.activeSection,
+        selectedCountryCode: state.selectedCountryCode,
         search: state.search,
-        countryPickerOpen:
-          state.countryPickerOpen,
-        countrySheetPortalMounted:
-          Boolean(
-            getCountrySheetRoot()
-          ),
-        recommendationLimit:
-          RECOMMENDATION_LIMIT,
-        recommendationIndex:
-          state.recommendationIndex,
-        isUserScrolling:
-          state.isUserScrolling,
-        isRailInteracting:
-          state.isRailInteracting,
-        refreshQueued:
-          state.refreshQueued,
-        pendingForceRefresh:
-          state.pendingForceRefresh,
-        storeAvailable:
-          Boolean(getStore()),
-        routerAvailable:
-          Boolean(getRouter()),
-        uiAvailable:
-          Boolean(getUI()),
-        guideEngineAvailable:
-          Boolean(getGuideEngine()),
-        travelAIAvailable:
-          Boolean(getTravelAI()),
-        plannerEngineAvailable:
-          Boolean(getPlannerEngine()),
-        actionCount:
-          state.actionUnsubscribers.length,
-        subscriberCount:
-          state.subscribers.size
+        countryPickerOpen: state.countryPickerOpen,
+        countrySheetPortalMounted: Boolean(getCountrySheetRoot()),
+        recommendationLimit: RECOMMENDATION_LIMIT,
+        recommendationIndex: state.recommendationIndex,
+        isUserScrolling: state.isUserScrolling,
+        isRailInteracting: state.isRailInteracting,
+        refreshQueued: state.refreshQueued,
+        pendingForceRefresh: state.pendingForceRefresh,
+        storeAvailable: Boolean(getStore()),
+        routerAvailable: Boolean(getRouter()),
+        uiAvailable: Boolean(getUI()),
+        appAvailable: Boolean(getApp()),
+        travelBrainAvailable: Boolean(getTravelBrain()),
+        travelAssistantAvailable: Boolean(getTravelAssistant()),
+        travelImportAvailable: Boolean(getTravelImport()),
+        travelSyncAvailable: Boolean(getTravelSync()),
+        guideEngineAvailable: Boolean(getGuideEngine()),
+        travelAIAvailable: Boolean(getTravelAI()),
+        plannerEngineAvailable: Boolean(getPlannerEngine()),
+        actionCount: state.actionUnsubscribers.length,
+        integrationSubscriptionCount:
+          state.integrationUnsubscribers.length,
+        subscriberCount: state.subscribers.size
       };
     }
   };
 
   window.TIC = window.TIC || {};
-  window.TIC.Pages =
-    window.TIC.Pages || {};
+  window.TIC.Pages = window.TIC.Pages || {};
   window.TIC.Pages.guide = GuidePage;
   window.TICGuidePage = GuidePage;
 
   const router = getRouter();
 
-  if (
-    router &&
-    typeof router.register === "function"
-  ) {
+  if (router && typeof router.register === "function") {
     if (!router.has?.("guide")) {
       router.register("guide", {
         id: "guide",
@@ -3711,11 +3415,10 @@
       });
     }
 
-    router.registerPage?.(
-      "guide",
-      GuidePage
-    );
+    router.registerPage?.("guide", GuidePage);
   }
 
-  GuidePage.init();
+  GuidePage.init().catch((error) => {
+    console.error("TIC Guide initialization error:", error);
+  });
 })(window, document);
