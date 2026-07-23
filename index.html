@@ -35,6 +35,7 @@
 
   <!-- =====================================================
        Travel Intelligence Center V4.2.0
+       Country Lifecycle Integration Edition V1.0.0
 
        Premium iPhone-first interface
        TravelBrain intelligence orchestration
@@ -45,7 +46,11 @@
        Fast Single-Page Trip Form V4.1.0
        Ticket and hotel document import
        Unified Guide Intelligence
-       Dedicated Guide UI stylesheet
+       Frozen Legacy Guide fallback
+       Country Lifecycle System
+       Wishlist → Upcoming → Active → Passport
+       One permanent country record
+       Dedicated Country Lifecycle stylesheet
        Simple Travel Budget Advisor
        Dedicated Budget UI stylesheet
        Central Store V2.5.0
@@ -80,6 +85,18 @@
   />
 
   <!-- =====================================================
+       Country Lifecycle UI
+
+       This stylesheet extends the frozen Guide design.
+       It does not replace or modify css/pages/guide.css.
+  ====================================================== -->
+
+  <link
+    rel="stylesheet"
+    href="css/extensions/country-lifecycle.css?v=1.0.0"
+  />
+
+  <!-- =====================================================
        1. Configuration and Base Data
        Config → Base Data
   ====================================================== -->
@@ -106,7 +123,7 @@
 
   <script
     defer
-    <script defer src="js/router.js?v=1.1.0"></script>
+    src="js/router.js?v=1.1.0"
   ></script>
 
   <script
@@ -222,36 +239,155 @@
 
   <!-- =====================================================
        8. Legacy Budget Intelligence Engines
+
+       These files remain enabled because the stable Budget page
+       still depends on the existing budget intelligence layer.
   ====================================================== -->
 
-  <script defer src="js/features/budget-engine.js?v=1.0.0"></script>
-  <script defer src="js/features/expense-engine.js?v=1.0.0"></script>
-  <script defer src="js/features/savings-engine.js?v=1.0.0"></script>
-  <script defer src="js/features/budget-analytics.js?v=1.0.0"></script>
-  <script defer src="js/features/budget-ai.js?v=1.0.0"></script>
-  <script defer src="js/features/payment-tracker.js?v=1.0.0"></script>
-  <script defer src="js/features/expense-alert-engine.js?v=1.0.0"></script>
-  <script defer src="js/features/budget-export-engine.js?v=1.0.0"></script>
-  <script defer src="js/features/budget-notification-engine.js?v=1.0.0"></script>
-  <script defer src="js/features/budget-integration-engine.js?v=1.0.0"></script>
-  <script defer src="js/features/budget-travel-intelligence.js?v=1.0.0"></script>
+  <script
+    defer
+    src="js/features/budget-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/expense-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/savings-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-analytics.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-ai.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/payment-tracker.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/expense-alert-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-export-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-notification-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-integration-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/features/budget-travel-intelligence.js?v=1.0.0"
+  ></script>
 
   <!-- =====================================================
-       9. Application Pages
+       9. Frozen Legacy Application Pages
+
+       These stable files remain loaded and unchanged.
+       guide.js is preserved as a fallback only.
+       The Country Lifecycle Adapter takes control of GuidePage
+       after all new lifecycle modules finish loading.
   ====================================================== -->
 
-  <script defer src="js/pages/home.js?v=2.5.0"></script>
-  <script defer src="js/pages/trips.js?v=3.7.0"></script>
-  <script defer src="js/pages/guide.js?v=4.4.0"></script>
-  <script defer src="js/pages/budget.js?v=4.0.0"></script>
-  <script defer src="js/pages/more.js?v=2.0.0"></script>
+  <script
+    defer
+    src="js/pages/home.js?v=2.5.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/trips.js?v=3.7.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/guide.js?v=4.4.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/budget.js?v=4.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/pages/more.js?v=2.0.0"
+  ></script>
 
   <!-- =====================================================
-       10. Application Bootstrap
+       10. Country Lifecycle System
+       Engine → Model → Parser → Controller
+       → Active Trip → Passport → Page → Adapter
 
-       app.js remains the final JavaScript file.
-       The 16 performance files remain in the project folders
-       but are not loaded until they are tested individually.
+       Loading order is intentional.
+       Do not move the adapter before guide.js.
+  ====================================================== -->
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/country-lifecycle-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/country-lifecycle-model.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/itinerary-parser.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/country-lifecycle-controller.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/active-trip-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/passport-engine.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/country-lifecycle-page.js?v=1.0.0"
+  ></script>
+
+  <script
+    defer
+    src="js/extensions/country-lifecycle/country-lifecycle-adapter.js?v=1.0.0"
+  ></script>
+
+  <!-- =====================================================
+       11. Application Bootstrap
+
+       app.js must remain the final JavaScript file.
+       The 16 performance-integration files remain disabled
+       until they are tested individually.
   ====================================================== -->
 
   <script
