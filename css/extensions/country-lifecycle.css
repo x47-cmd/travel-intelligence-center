@@ -1,0 +1,251 @@
+
+/* =========================================================
+   Travel Intelligence Center
+   Country Lifecycle CSS V1.0.0
+   File:
+   css/extensions/country-lifecycle.css
+   ========================================================= */
+
+:root{
+  --cl-radius:20px;
+  --cl-gap:16px;
+  --cl-border:#e6e8ee;
+  --cl-bg:#f7f8fb;
+  --cl-card:#fff;
+  --cl-text:#18212f;
+  --cl-muted:#6b7280;
+  --cl-primary:#0f766e;
+  --cl-shadow:0 8px 24px rgba(0,0,0,.08);
+}
+
+.country-lifecycle{
+  display:flex;
+  flex-direction:column;
+  gap:var(--cl-gap);
+  direction:rtl;
+  color:var(--cl-text);
+}
+
+.cl-hero,
+.cl-toolbar,
+.cl-tabs,
+.cl-country-card,
+.cl-empty,
+.cl-sheet{
+  background:var(--cl-card);
+  border:1px solid var(--cl-border);
+  border-radius:var(--cl-radius);
+  box-shadow:var(--cl-shadow);
+}
+
+.cl-hero{
+  padding:24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:20px;
+}
+
+.cl-hero__eyebrow{font-size:.8rem;color:var(--cl-primary)}
+.cl-hero__title{margin:.3rem 0;font-size:1.8rem}
+.cl-hero__subtitle{color:var(--cl-muted);margin:0}
+
+.cl-button{
+  border:none;
+  border-radius:14px;
+  padding:12px 18px;
+  cursor:pointer;
+  font:inherit;
+}
+.cl-button--primary{
+  background:var(--cl-primary);
+  color:#fff;
+}
+.cl-button--ghost{
+  background:#eef3f2;
+  color:var(--cl-primary);
+}
+
+.cl-tabs{
+  display:flex;
+  overflow:auto;
+  padding:8px;
+  gap:8px;
+}
+.cl-tab{
+  white-space:nowrap;
+  border:none;
+  background:transparent;
+  border-radius:12px;
+  padding:10px 14px;
+  cursor:pointer;
+}
+.cl-tab.is-active{
+  background:var(--cl-primary);
+  color:#fff;
+}
+
+.cl-toolbar{
+  padding:14px;
+  display:flex;
+  gap:12px;
+  align-items:center;
+}
+.cl-search{
+  flex:1;
+  display:flex;
+  align-items:center;
+  background:var(--cl-bg);
+  border-radius:12px;
+  padding:0 12px;
+}
+.cl-search input{
+  width:100%;
+  border:none;
+  background:transparent;
+  padding:12px;
+  outline:none;
+}
+
+.cl-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+  gap:16px;
+}
+
+.cl-country-card{
+  overflow:hidden;
+}
+
+.cl-country-card__cover{
+  position:relative;
+  aspect-ratio:16/9;
+  background:#dde5ea;
+}
+.cl-country-card__cover img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+.cl-country-card__status{
+  position:absolute;
+  top:12px;
+  inset-inline-start:12px;
+  background:rgba(255,255,255,.9);
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:.8rem;
+}
+.cl-country-card__body{padding:16px}
+.cl-country-card__heading{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+}
+.cl-country-card__meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  color:var(--cl-muted);
+  margin:12px 0;
+  font-size:.9rem;
+}
+.cl-progress__track{
+  height:8px;
+  background:#edf1f5;
+  border-radius:999px;
+  overflow:hidden;
+}
+.cl-progress__track span{
+  display:block;
+  height:100%;
+  background:var(--cl-primary);
+}
+.cl-country-card__actions{
+  display:flex;
+  gap:8px;
+  margin-top:16px;
+}
+.cl-card-action{
+  flex:1;
+  border:none;
+  border-radius:12px;
+  padding:10px;
+  cursor:pointer;
+}
+.cl-card-action--accent{
+  background:var(--cl-primary);
+  color:#fff;
+}
+
+.cl-empty{
+  padding:48px 20px;
+  text-align:center;
+}
+.cl-empty__icon{
+  font-size:48px;
+  margin-bottom:12px;
+}
+
+.cl-modal{
+  position:fixed;
+  inset:0;
+  display:grid;
+  place-items:center;
+  z-index:1000;
+}
+.cl-modal__backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,.45);
+  border:none;
+}
+.cl-sheet{
+  position:relative;
+  width:min(760px,94vw);
+  max-height:92vh;
+  overflow:auto;
+  padding:20px;
+}
+.cl-sheet__header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:18px;
+}
+.cl-form{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+.cl-form label{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.cl-form input,
+.cl-form textarea{
+  border:1px solid var(--cl-border);
+  border-radius:12px;
+  padding:12px;
+  font:inherit;
+}
+.cl-form__wide{grid-column:1/-1}
+.cl-form__actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:12px;
+}
+
+@media (max-width:768px){
+  .cl-hero{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .cl-form{
+    grid-template-columns:1fr;
+  }
+  .cl-grid{
+    grid-template-columns:1fr;
+  }
+}
